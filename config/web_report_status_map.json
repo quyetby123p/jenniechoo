@@ -41,8 +41,8 @@
   ],
   "pending_reconcile_td_to_pancake_status_codes": {
     "SUCCESS": [2, 3],
-    "BEING_RETURNED": [4, 5],
-    "RETURNED": [4, 5]
+    "BEING_RETURNED": [3, 4, 5],
+    "RETURNED": [3, 4, 5]
   },
   "reconcile_received_match_results": [
     "matched_unique",

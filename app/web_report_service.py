@@ -600,7 +600,10 @@ class WebReportService:
             is_success = not pending_td_success_statuses or td_status in pending_td_success_statuses
             if not is_success:
                 return False
-            if self._is_cashflow_updated(record):
+            # Legacy reconcile runs may miss cashflow columns; skip those rows to avoid false pending.
+            if not self._has_cashflow_signal(record):
+                return False
+            if self._is_cashflow_updated(record, td_status=td_status):
                 return False
             if self._is_td_pancake_status_aligned(
                 record,
@@ -611,10 +614,20 @@ class WebReportService:
             return True
         return match_result in pending_states
 
-    def _is_cashflow_updated(self, record: dict[str, Any]) -> bool:
+    def _has_cashflow_signal(self, record: dict[str, Any]) -> bool:
+        if not isinstance(record, dict):
+            return False
+        if "td_sheet_cod_minor" not in record:
+            return False
+        return record.get("td_sheet_cod_minor") is not None
+
+    def _is_cashflow_updated(self, record: dict[str, Any], *, td_status: str = "") -> bool:
         value = record.get("td_sheet_cod_minor")
         if value is None:
             return False
+        normalized_status = td_status or self._normalize_text(str(record.get("td_status", "")).strip())
+        if normalized_status in {self._normalize_text("BEING_RETURNED"), self._normalize_text("RETURNED")}:
+            return True
         return self._to_int(value, fallback=0) > 0
 
     def _is_td_pancake_status_aligned(
@@ -635,8 +648,8 @@ class WebReportService:
     def _normalize_td_to_pancake_status_map(self, value: Any) -> dict[str, set[int]]:
         default_map: dict[str, set[int]] = {
             self._normalize_text("SUCCESS"): {2, 3},
-            self._normalize_text("BEING_RETURNED"): {4, 5},
-            self._normalize_text("RETURNED"): {4, 5},
+            self._normalize_text("BEING_RETURNED"): {3, 4, 5},
+            self._normalize_text("RETURNED"): {3, 4, 5},
         }
         if not isinstance(value, dict):
             return default_map
@@ -1045,8 +1058,8 @@ class WebReportService:
             "pending_reconcile_td_success_statuses": ["success"],
             "pending_reconcile_td_to_pancake_status_codes": {
                 "SUCCESS": [2, 3],
-                "BEING_RETURNED": [4, 5],
-                "RETURNED": [4, 5],
+                "BEING_RETURNED": [3, 4, 5],
+                "RETURNED": [3, 4, 5],
             },
             "status_code_labels": self._default_order_status_code_labels(),
             "pending_reconcile_match_results": ["not_found", "ambiguous", "unmapped_status"],

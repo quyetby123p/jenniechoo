@@ -549,9 +549,56 @@ def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) 
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot["metrics"]["reconcile_received_orders"] == 7
-    assert snapshot["metrics"]["pending_reconcile_orders"] == 1
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 0
     pending_refs = {row["pancake_order_ref"] for row in snapshot["status_lists"]["pending-reconcile"]}
-    assert pending_refs == {"JCT1005"}
+    assert pending_refs == set()
+
+
+def test_pending_reconcile_skips_legacy_rows_without_cashflow_signal(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+    config_root.mkdir(parents=True, exist_ok=True)
+    status_map_path = config_root / "custom_status_map.json"
+    dump_json(
+        status_map_path,
+        {
+            "pending_reconcile_mode": "td_success_not_in_cashflow",
+            "pending_reconcile_td_success_statuses": ["SUCCESS"],
+            "pending_reconcile_td_to_pancake_status_codes": {"SUCCESS": [2, 3]},
+            "reconcile_received_mode": "td_status_only",
+            "reconcile_received_td_statuses": ["SUCCESS"],
+            "brand_rules": [],
+        },
+    )
+    settings = _dummy_settings(
+        tmp_path,
+        web_report_status_map_path=str(status_map_path),
+    )
+    run_path = settings.reconcile_cod_runs_dir / "run_2026-06-01_20260601T030000Z.json"
+    dump_json(
+        run_path,
+        {
+            "settlement_date": "2026-06-01",
+            "generated_at": "2026-06-01T03:00:00+00:00",
+            "records": [
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "SUCCESS",
+                    "pancake_display_id": "JCT2001",
+                    "pancake_status": 5,
+                    # Legacy run: no td_sheet_cod_minor field
+                }
+            ],
+        },
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 0
 
 
 def test_status_value_metrics_include_shipping_returning_and_reconcile(tmp_path: Path) -> None:
@@ -563,7 +610,7 @@ def test_status_value_metrics_include_shipping_returning_and_reconcile(tmp_path:
         {
             "pending_reconcile_mode": "td_success_not_in_cashflow",
             "pending_reconcile_td_success_statuses": ["SUCCESS"],
-            "pending_reconcile_td_to_pancake_status_codes": {"SUCCESS": [3]},
+            "pending_reconcile_td_to_pancake_status_codes": {"SUCCESS": [2, 3]},
             "reconcile_received_mode": "td_status_only",
             "reconcile_received_td_statuses": ["SUCCESS"],
             "brand_rules": [],
@@ -633,5 +680,5 @@ def test_status_value_metrics_include_shipping_returning_and_reconcile(tmp_path:
     assert metrics["returning_value_minor"] == 180_000
     assert metrics["reconcile_received_orders"] == 2
     assert metrics["reconcile_received_value_minor"] == 570_000
-    assert metrics["pending_reconcile_orders"] == 2
-    assert metrics["pending_reconcile_value_minor"] == 570_000
+    assert metrics["pending_reconcile_orders"] == 0
+    assert metrics["pending_reconcile_value_minor"] == 0
