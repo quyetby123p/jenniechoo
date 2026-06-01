@@ -20,6 +20,14 @@
     "returning",
     "returned"
   ],
+  "shipping_status_codes": [
+    2
+  ],
+  "shipping_status_labels": [
+    "Đã gửi hàng",
+    "dang giao",
+    "shipping"
+  ],
   "pending_reconcile_match_results": [
     "not_found",
     "ambiguous",
@@ -32,6 +40,7 @@
   "reconcile_received_td_statuses": [
     "SUCCESS"
   ],
+  "reconcile_received_mode": "td_status_only",
   "status_code_labels": {
     "0": "Mới",
     "17": "Chờ xác nhận",

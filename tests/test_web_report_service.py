@@ -146,6 +146,7 @@ def test_snapshot_aggregates_orders_waiting_and_pending_reconcile(tmp_path: Path
     assert snapshot["metrics"]["total_orders"] == 3
     assert snapshot["metrics"]["closed_orders"] == 1
     assert snapshot["metrics"]["waiting_orders"] == 2
+    assert snapshot["metrics"]["shipping_orders"] == 0
     assert snapshot["metrics"]["returning_orders"] == 0
     assert snapshot["metrics"]["reconcile_received_orders"] == 0
     assert snapshot["metrics"]["pending_reconcile_orders"] == 1
@@ -222,6 +223,7 @@ def test_snapshot_supports_date_range_and_new_metrics(tmp_path: Path) -> None:
     assert snapshot["period"]["is_single_day"] is False
     assert snapshot["metrics"]["total_orders"] == 2
     assert snapshot["metrics"]["returning_orders"] == 1
+    assert snapshot["metrics"]["shipping_orders"] == 0
     assert snapshot["metrics"]["reconcile_received_orders"] == 1
     assert snapshot["metrics"]["pending_reconcile_orders"] == 1
     assert len(snapshot["status_lists"]["returning"]) == 1
@@ -378,3 +380,84 @@ def test_revenue_total_prefers_aggs_snapshot_values(tmp_path: Path) -> None:
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot["metrics"]["revenue_total_minor"] == 800_000
+    assert "THB" in snapshot["metrics"]["revenue_total_text"]
+    assert "VNĐ" in snapshot["metrics"]["revenue_total_text"]
+
+
+def test_shipping_status_metric_and_list(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-SHIP",
+                    "status": 2,
+                    "total_price": 350_000,
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-WAIT",
+                    "status": 11,
+                    "total_price": 120_000,
+                    "items": [],
+                },
+            ]
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["shipping_orders"] == 1
+    assert len(snapshot["status_lists"]["shipping"]) == 1
+    assert snapshot["status_lists"]["shipping"][0]["order_ref"] == "JC-SHIP"
+
+
+def test_reconcile_received_td_status_only_mode_counts_td_rows(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+    config_root.mkdir(parents=True, exist_ok=True)
+    status_map_path = config_root / "custom_status_map.json"
+    dump_json(
+        status_map_path,
+        {
+            "reconcile_received_mode": "td_status_only",
+            "reconcile_received_td_statuses": ["SUCCESS"],
+            "pending_reconcile_match_results": ["not_found", "ambiguous", "unmapped_status"],
+            "brand_rules": [],
+        },
+    )
+    settings = _dummy_settings(
+        tmp_path,
+        web_report_status_map_path=str(status_map_path),
+    )
+    run_path = settings.reconcile_cod_runs_dir / "run_2026-06-01_20260601T030000Z.json"
+    dump_json(
+        run_path,
+        {
+            "settlement_date": "2026-06-01",
+            "generated_at": "2026-06-01T03:00:00+00:00",
+            "records": [
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "SUCCESS",
+                    "pancake_display_id": "JCT901",
+                },
+                {
+                    "match_result": "ambiguous",
+                    "td_status": "SUCCESS",
+                    "pancake_display_id": "JCT902",
+                },
+            ],
+        },
+    )
+
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+    )
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["reconcile_received_orders"] == 2
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 1

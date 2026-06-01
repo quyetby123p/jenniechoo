@@ -63,18 +63,25 @@ def _snapshot_payload() -> dict:
             "label": "01-06-2026",
         },
         "timezone": "Asia/Ho_Chi_Minh",
+        "currency": {
+            "base": "THB",
+            "quote": "VND",
+            "rate": 810.0,
+            "minor_unit_factor": 100,
+        },
         "metrics": {
             "total_orders": 2,
             "closed_orders": 2,
-            "revenue_total_text": "2.200đ",
+            "revenue_total_text": "2,200 THB (~ 1,782,000 VNĐ)",
             "waiting_orders": 1,
+            "shipping_orders": 1,
             "returning_orders": 0,
             "reconcile_received_orders": 1,
             "pending_reconcile_orders": 1,
             "missing_line_count": 1,
             "missing_quantity": 1,
             "missing_product_count": 1,
-            "waiting_value_text": "1.200đ",
+            "waiting_value_text": "1,200 THB (~ 972,000 VNĐ)",
         },
         "size_summary": [{"size": "M", "quantity": 1}],
         "brands": [
@@ -82,12 +89,12 @@ def _snapshot_payload() -> dict:
                 "brand_name": "Jennie Choo",
                 "brand_slug": "jennie-choo",
                 "total_orders": 2,
-                "total_value_text": "2.200đ",
+                "total_value_text": "2,200 THB (~ 1,782,000 VNĐ)",
                 "waiting_orders": 1,
                 "missing_line_count": 1,
                 "missing_quantity": 1,
                 "size_summary": [{"size": "M", "quantity": 1}],
-                "waiting_value_text": "1.200đ",
+                "waiting_value_text": "1,200 THB (~ 972,000 VNĐ)",
             }
         ],
         "brand_detail": {
@@ -104,11 +111,11 @@ def _snapshot_payload() -> dict:
                         "sizes": {"M": 1},
                         "missing_line_count": 1,
                         "missing_quantity": 1,
-                        "value_text": "1.200đ",
+                        "value_text": "1,200 THB (~ 972,000 VNĐ)",
                         "order_refs": ["JC001"],
                     }
                 ],
-                "waiting_value_text": "1.200đ",
+                "waiting_value_text": "1,200 THB (~ 972,000 VNĐ)",
             }
         },
         "status_lists": {
@@ -120,7 +127,16 @@ def _snapshot_payload() -> dict:
                     "status_label": "Chờ hàng",
                     "missing_skus": ["JC-A-100"],
                     "item_count": 1,
-                    "order_total_text": "1.200đ",
+                    "order_total_text": "1,200 THB (~ 972,000 VNĐ)",
+                }
+            ],
+            "shipping": [
+                {
+                    "order_ref": "JC002",
+                    "brand_name": "Jennie Choo",
+                    "created_at": "10:00 01-06-2026",
+                    "status_label": "Đã gửi hàng",
+                    "order_total_text": "1,000 THB (~ 810,000 VNĐ)",
                 }
             ],
             "pending-reconcile": [
@@ -160,6 +176,7 @@ def test_routes_render_success(tmp_path: Path) -> None:
     assert client.get("/?date=2026-06-01").status_code == 200
     assert client.get("/brand/jennie-choo?date=2026-06-01").status_code == 200
     assert client.get("/status/waiting?date=2026-06-01").status_code == 200
+    assert client.get("/status/shipping?date=2026-06-01").status_code == 200
     assert client.get("/status/pending-reconcile?date=2026-06-01").status_code == 200
     assert client.get("/status/reconcile-received?mode=today").status_code == 200
     assert client.get("/status/returning?mode=range&start_date=2026-06-01&end_date=2026-06-01").status_code == 200

@@ -32,6 +32,12 @@
   </div>
   <div class="col-xl-2 col-lg-3 col-md-4">
     <div class="metric-card p-3">
+      <div class="label">Đơn đang gửi</div>
+      <div class="value text-primary">{{ "{:,}".format(snapshot.metrics.shipping_orders) }}</div>
+    </div>
+  </div>
+  <div class="col-xl-2 col-lg-3 col-md-4">
+    <div class="metric-card p-3">
       <div class="label">Đối soát đã nhận</div>
       <div class="value text-success">{{ "{:,}".format(snapshot.metrics.reconcile_received_orders) }}</div>
     </div>
@@ -73,6 +79,9 @@
       <h2 class="h5 mb-3">Trạng thái cần xử lý</h2>
       <p class="mb-2">
         <a href="/status/waiting?{{ query_string }}">Xem danh sách đơn chờ hàng</a>
+      </p>
+      <p class="mb-2">
+        <a href="/status/shipping?{{ query_string }}">Xem danh sách đơn đang gửi</a>
       </p>
       <p class="mb-2">
         <a href="/status/reconcile-received?{{ query_string }}">Xem tình trạng đối soát đã nhận</a>

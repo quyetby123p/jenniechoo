@@ -29,7 +29,7 @@
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
     <div>
       <h1 class="h3 mb-1">Báo cáo vận hành đơn hàng</h1>
-      <p class="text-muted mb-2">Timezone: {{ timezone_name }} · Refresh cache: 10 phút</p>
+      <p class="text-muted mb-2">Timezone: {{ timezone_name }} · Tỷ giá: 1 THB = {{ "{:,.0f}".format(thb_to_vnd_rate) }} VNĐ · Refresh cache: 10 phút</p>
     </div>
   </div>
   <form class="date-toolbar d-flex flex-wrap align-items-center gap-2" method="get" action="{{ request.path }}">
@@ -52,6 +52,7 @@
   <div class="mb-3">
     <a class="btn btn-sm {% if active_path == '/' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/?{{ query_string }}">Dashboard</a>
     <a class="btn btn-sm {% if active_path == '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/waiting?{{ query_string }}">Đơn chờ hàng</a>
+    <a class="btn btn-sm {% if active_path == '/status/shipping' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/shipping?{{ query_string }}">Đơn đang gửi</a>
     <a class="btn btn-sm {% if active_path == '/status/reconcile-received' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/reconcile-received?{{ query_string }}">Đối soát đã nhận</a>
     <a class="btn btn-sm {% if active_path == '/status/returning' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/returning?{{ query_string }}">Đơn hoàn/đang hoàn</a>
     <a class="btn btn-sm {% if active_path == '/status/pending-reconcile' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/pending-reconcile?{{ query_string }}">Đơn chờ đối soát</a>

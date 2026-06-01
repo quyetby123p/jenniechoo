@@ -62,6 +62,8 @@ class WebReportService:
         closed_labels = self._to_text_set(status_cfg.get("closed_status_labels", []))
         returning_codes = self._to_int_set(status_cfg.get("returning_status_codes", []))
         returning_labels = self._to_text_set(status_cfg.get("returning_status_labels", ["đang hoàn", "hoàn"]))
+        shipping_codes = self._to_int_set(status_cfg.get("shipping_status_codes", [2]))
+        shipping_labels = self._to_text_set(status_cfg.get("shipping_status_labels", ["đã gửi hàng", "dang giao"]))
         status_code_labels = self._build_status_code_label_map(status_cfg)
         brand_rules = status_cfg.get("brand_rules", [])
 
@@ -74,6 +76,7 @@ class WebReportService:
         closed_orders = 0
         waiting_orders_count = 0
         returning_orders_count = 0
+        shipping_orders_count = 0
         waiting_value_minor = 0
         order_value_total_minor = 0
         missing_line_count = 0
@@ -83,6 +86,7 @@ class WebReportService:
 
         waiting_orders: list[dict[str, Any]] = []
         returning_orders: list[dict[str, Any]] = []
+        shipping_orders: list[dict[str, Any]] = []
         brands: dict[str, dict[str, Any]] = {}
 
         for order in orders:
@@ -111,6 +115,12 @@ class WebReportService:
                 returning_codes=returning_codes,
                 returning_labels=returning_labels,
             )
+            is_shipping = self._is_shipping_status(
+                code=order_status_code,
+                label=order_status_label,
+                shipping_codes=shipping_codes,
+                shipping_labels=shipping_labels,
+            )
             is_closed = self._is_closed_status(
                 code=order_status_code,
                 label=order_status_label,
@@ -124,6 +134,21 @@ class WebReportService:
             if is_returning:
                 returning_orders_count += 1
                 returning_orders.append(
+                    {
+                        "order_ref": order_ref,
+                        "brand_name": brand_name,
+                        "brand_slug": brand_slug,
+                        "status_code": order_status_code,
+                        "status_label": order_status_label,
+                        "created_at": self._format_dt(order_created_dt, tz=tz),
+                        "created_ts": self._to_ts(order_created_dt),
+                        "order_total_minor": order_total_minor,
+                        "order_total_text": self._fmt_currency(order_total_minor),
+                    }
+                )
+            if is_shipping:
+                shipping_orders_count += 1
+                shipping_orders.append(
                     {
                         "order_ref": order_ref,
                         "brand_name": brand_name,
@@ -245,6 +270,7 @@ class WebReportService:
 
         waiting_orders.sort(key=lambda item: self._to_int(item.get("created_ts")), reverse=True)
         returning_orders.sort(key=lambda item: self._to_int(item.get("created_ts")), reverse=True)
+        shipping_orders.sort(key=lambda item: self._to_int(item.get("created_ts")), reverse=True)
         reconcile_summary = self._load_reconcile_period_summary(
             start_date=start_date,
             end_date=end_date,
@@ -325,13 +351,23 @@ class WebReportService:
                 "is_single_day": is_single_day,
                 "label": period_label,
             },
+            "currency": {
+                "base": "THB",
+                "quote": "VND",
+                "rate": float(self.settings.report_thb_to_vnd_rate),
+                "minor_unit_factor": int(self.settings.report_thb_minor_unit_factor),
+            },
             "metrics": {
                 "total_orders": total_orders,
                 "closed_orders": closed_orders,
                 "revenue_total_minor": revenue_total_minor,
                 "revenue_total_text": self._fmt_currency(revenue_total_minor),
+                "revenue_total_thb": self._minor_to_thb_major(revenue_total_minor),
+                "revenue_total_vnd": self._thb_to_vnd(self._minor_to_thb_major(revenue_total_minor)),
+                "exchange_rate_thb_to_vnd": float(self.settings.report_thb_to_vnd_rate),
                 "waiting_orders": waiting_orders_count,
                 "returning_orders": returning_orders_count,
+                "shipping_orders": shipping_orders_count,
                 "reconcile_received_orders": reconcile_received_orders,
                 "pending_reconcile_orders": pending_reconcile_orders,
                 "missing_line_count": missing_line_count,
@@ -345,6 +381,7 @@ class WebReportService:
             "brand_detail": brand_detail,
             "status_lists": {
                 "waiting": waiting_orders,
+                "shipping": shipping_orders,
                 "pending-reconcile": pending_reconcile,
                 "reconcile-received": reconcile_received,
                 "returning": returning_orders,
@@ -421,6 +458,9 @@ class WebReportService:
             status_cfg.get("reconcile_received_match_results", ["matched_unique", "already_correct"])
         )
         received_td_statuses = self._to_text_set(status_cfg.get("reconcile_received_td_statuses", ["success"]))
+        received_mode = self._normalize_text(str(status_cfg.get("reconcile_received_mode", "matched_and_td_status")))
+        if received_mode not in {"matched_and_td_status", "td_status_only"}:
+            received_mode = "matched_and_td_status"
 
         pending_rows: list[dict[str, Any]] = []
         received_rows: list[dict[str, Any]] = []
@@ -447,11 +487,14 @@ class WebReportService:
                 if match_result in pending_states:
                     pending_rows.append(row)
                     pending_refs.add(dedupe_ref)
-                    continue
 
-                is_received_match = not received_results or match_result in received_results
                 is_received_status = not received_td_statuses or td_status in received_td_statuses
-                if is_received_match and is_received_status:
+                if received_mode == "td_status_only":
+                    is_received = is_received_status
+                else:
+                    is_received_match = not received_results or match_result in received_results
+                    is_received = is_received_match and is_received_status
+                if is_received:
                     received_rows.append(row)
                     received_refs.add(dedupe_ref)
 
@@ -620,6 +663,23 @@ class WebReportService:
         if normalized_label and normalized_label in returning_labels:
             return True
         if "hoan" in normalized_label or "return" in normalized_label:
+            return True
+        return False
+
+    def _is_shipping_status(
+        self,
+        *,
+        code: int | None,
+        label: str,
+        shipping_codes: set[int],
+        shipping_labels: set[str],
+    ) -> bool:
+        if code is not None and code in shipping_codes:
+            return True
+        normalized_label = self._normalize_text(label)
+        if normalized_label and normalized_label in shipping_labels:
+            return True
+        if "gui hang" in normalized_label or "dang giao" in normalized_label or "shipped" in normalized_label:
             return True
         return False
 
@@ -797,10 +857,13 @@ class WebReportService:
             "closed_status_labels": [],
             "returning_status_codes": [],
             "returning_status_labels": ["đang hoàn", "hoàn", "returning", "returned"],
+            "shipping_status_codes": [2],
+            "shipping_status_labels": ["đã gửi hàng", "dang giao", "shipping"],
             "status_code_labels": self._default_order_status_code_labels(),
             "pending_reconcile_match_results": ["not_found", "ambiguous", "unmapped_status"],
             "reconcile_received_match_results": ["matched_unique", "already_correct"],
             "reconcile_received_td_statuses": ["success"],
+            "reconcile_received_mode": "matched_and_td_status",
             "brand_rules": [
                 {"pattern": r"^JC", "brand_name": "Jennie Choo", "brand_slug": "jennie-choo"},
                 {"pattern": r"^(LYS|L-)", "brand_name": "Lysilk", "brand_slug": "lysilk"},
@@ -952,12 +1015,28 @@ class WebReportService:
         return normalized or "khac"
 
     def _fmt_currency(self, minor_value: int) -> str:
+        thb_major = self._minor_to_thb_major(minor_value)
+        vnd_value = self._thb_to_vnd(thb_major)
+        return f"{self._fmt_thb_amount(thb_major)} THB (~ {self._fmt_vnd_amount(vnd_value)} VNĐ)"
+
+    def _minor_to_thb_major(self, minor_value: int) -> float:
         factor = max(1, int(self.settings.report_thb_minor_unit_factor))
-        major = float(minor_value) / float(factor)
-        formatted = f"{major:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
-        if formatted.endswith(",00"):
-            formatted = formatted[:-3]
-        return f"{formatted}đ"
+        return float(minor_value) / float(factor)
+
+    def _thb_to_vnd(self, thb_major: float) -> int:
+        rate = float(self.settings.report_thb_to_vnd_rate)
+        return int(round(thb_major * rate))
+
+    @staticmethod
+    def _fmt_thb_amount(thb_major: float) -> str:
+        rounded = round(float(thb_major), 2)
+        if abs(rounded - round(rounded)) < 1e-9:
+            return f"{int(round(rounded)):,}"
+        return f"{rounded:,.2f}"
+
+    @staticmethod
+    def _fmt_vnd_amount(vnd_value: int) -> str:
+        return f"{int(vnd_value):,}"
 
     @staticmethod
     def _format_dt(value: datetime | None, *, tz: timezone | ZoneInfo) -> str:

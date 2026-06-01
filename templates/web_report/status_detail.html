@@ -62,6 +62,31 @@
         {% endfor %}
         </tbody>
       </table>
+    {% elif status_key == "shipping" %}
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Mã đơn</th>
+            <th>Brand</th>
+            <th>Thời gian tạo</th>
+            <th>Trạng thái</th>
+            <th>Giá trị đơn</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><strong>{{ row.order_ref }}</strong></td>
+            <td>{{ row.brand_name }}</td>
+            <td>{{ row.created_at }}</td>
+            <td>{{ row.status_label or row.status_code }}</td>
+            <td>{{ row.order_total_text }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="text-muted">Không có đơn đang gửi.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
     {% elif status_key == "reconcile-received" %}
       <table class="table table-sm align-middle mb-0">
         <thead>

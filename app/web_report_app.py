@@ -103,6 +103,7 @@ def create_app(
             abort(404)
         title_map = {
             "waiting": "Đơn chờ hàng",
+            "shipping": "Đơn đang gửi",
             "pending-reconcile": "Đơn chờ đối soát",
             "reconcile-received": "Đơn đối soát đã nhận",
             "returning": "Đơn hoàn / đang hoàn",
@@ -125,6 +126,7 @@ def create_app(
     def inject_common() -> dict[str, Any]:
         return {
             "timezone_name": current_settings.app_timezone,
+            "thb_to_vnd_rate": current_settings.report_thb_to_vnd_rate,
         }
 
     return app
