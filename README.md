@@ -167,7 +167,13 @@ File deploy dung cho repo nay: `render.yaml` (ngay tai root `projects/fb-ads-aut
 .\scripts\deploy\bootstrap-github-render.ps1 -GitHubRepoUrl "https://github.com/<org-or-user>/<repo>.git"
 ```
 
-3. Tren Render:
+3. Tao service Render tu dong bang API (khong can bam tay trong dashboard):
+
+```powershell
+.\scripts\deploy\render-create-service.ps1 -RenderApiKey "<RENDER_API_KEY>" -RepoUrl "https://github.com/<org-or-user>/<repo>"
+```
+
+4. Hoac neu muon deploy bang UI (khong dung API):
    1. `New +` -> `Blueprint`.
    2. Chon repo GitHub vua push.
    3. Render doc `render.yaml` va tao service tu dong.
