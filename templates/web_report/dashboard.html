@@ -87,42 +87,36 @@
   </div>
 </div>
 
-<div class="row g-3 mb-3">
-  <div class="col-md-6">
-    <div class="brand-card p-3 h-100">
-      <h2 class="h5 mb-3">Sản phẩm thiếu theo size</h2>
-      <div>
-        {% for row in snapshot.size_summary %}
-          <span class="size-pill">{{ row.size }}: {{ "{:,}".format(row.quantity) }}</span>
-        {% else %}
-          <span class="text-muted">Không có dữ liệu thiếu size.</span>
-        {% endfor %}
-      </div>
-      <div class="mt-3 text-muted small">
-        Dòng thiếu: {{ "{:,}".format(snapshot.metrics.missing_line_count) }} ·
-        Số lượng thiếu: {{ "{:,}".format(snapshot.metrics.missing_quantity) }} ·
-        Mã SP ảnh hưởng: {{ "{:,}".format(snapshot.metrics.missing_product_count) }}
-      </div>
+<div class="brand-card p-3 mb-3">
+  <h2 class="h5 mb-3">Sản phẩm thiếu theo size</h2>
+  {% if snapshot.size_summary %}
+    <div class="kpi-grid kpi-grid-size mb-3">
+      {% for row in snapshot.size_summary %}
+        <div class="metric-card p-3">
+          <div class="label">Size {{ row.size }}</div>
+          <div class="value text-danger">{{ "{:,}".format(row.quantity) }}</div>
+          <small class="text-muted">Số lượng thiếu</small>
+        </div>
+      {% endfor %}
     </div>
-  </div>
-  <div class="col-md-6">
-    <div class="brand-card p-3 h-100">
-      <h2 class="h5 mb-3">Trạng thái cần xử lý</h2>
-      <p class="mb-2">
-        <a href="/status/shipping?{{ query_string }}">Xem danh sách đơn đang gửi</a>
-      </p>
-      <p class="mb-2">
-        <a href="/status/waiting?{{ query_string }}">Xem danh sách đơn chờ hàng</a>
-      </p>
-      <p class="mb-2">
-        <a href="/status/reconcile-received?{{ query_string }}">Xem tình trạng đối soát đã nhận</a>
-      </p>
-      <p class="mb-2">
-        <a href="/status/returning?{{ query_string }}">Xem danh sách đơn hoàn / đang hoàn</a>
-      </p>
-      <p class="mb-0">
-        <a href="/status/pending-reconcile?{{ query_string }}">Xem danh sách đơn chờ đối soát</a>
-      </p>
+  {% else %}
+    <div class="text-muted mb-3">Không có dữ liệu thiếu size.</div>
+  {% endif %}
+  <div class="kpi-grid kpi-grid-size-summary">
+    <div class="metric-card p-3">
+      <div class="label">Dòng thiếu</div>
+      <div class="value">{{ "{:,}".format(snapshot.metrics.missing_line_count) }}</div>
+      <small class="text-muted">Tổng dòng sản phẩm thiếu</small>
+    </div>
+    <div class="metric-card p-3">
+      <div class="label">Số lượng thiếu</div>
+      <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.missing_quantity) }}</div>
+      <small class="text-muted">Tổng số lượng sản phẩm thiếu</small>
+    </div>
+    <div class="metric-card p-3">
+      <div class="label">Mã SP ảnh hưởng</div>
+      <div class="value">{{ "{:,}".format(snapshot.metrics.missing_product_count) }}</div>
+      <small class="text-muted">Số SKU bị ảnh hưởng</small>
     </div>
   </div>
 </div>
