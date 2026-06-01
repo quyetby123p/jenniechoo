@@ -5,38 +5,44 @@
   <div class="text-muted small">Kỳ dữ liệu: <strong>{{ snapshot.period.label }}</strong></div>
 </div>
 <div class="row g-3 mb-3">
-  <div class="col-md-2">
+  <div class="col-xl-2 col-lg-3 col-md-4">
     <div class="metric-card p-3">
       <div class="label">Số lượng đơn hàng</div>
       <div class="value">{{ "{:,}".format(snapshot.metrics.total_orders) }}</div>
     </div>
   </div>
-  <div class="col-md-2">
+  <div class="col-xl-2 col-lg-3 col-md-4">
+    <div class="metric-card p-3">
+      <div class="label">Doanh số</div>
+      <div class="value">{{ snapshot.metrics.revenue_total_text }}</div>
+    </div>
+  </div>
+  <div class="col-xl-2 col-lg-3 col-md-4">
     <div class="metric-card p-3">
       <div class="label">Đơn chốt</div>
       <div class="value">{{ "{:,}".format(snapshot.metrics.closed_orders) }}</div>
     </div>
   </div>
-  <div class="col-md-2">
+  <div class="col-xl-2 col-lg-3 col-md-4">
     <div class="metric-card p-3">
       <div class="label">Đơn chờ hàng</div>
       <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.waiting_orders) }}</div>
       <small class="text-muted">{{ snapshot.metrics.waiting_value_text }}</small>
     </div>
   </div>
-  <div class="col-md-2">
+  <div class="col-xl-2 col-lg-3 col-md-4">
     <div class="metric-card p-3">
       <div class="label">Đối soát đã nhận</div>
       <div class="value text-success">{{ "{:,}".format(snapshot.metrics.reconcile_received_orders) }}</div>
     </div>
   </div>
-  <div class="col-md-2">
+  <div class="col-xl-2 col-lg-3 col-md-4">
     <div class="metric-card p-3">
       <div class="label">Đơn hoàn/đang hoàn</div>
       <div class="value text-warning">{{ "{:,}".format(snapshot.metrics.returning_orders) }}</div>
     </div>
   </div>
-  <div class="col-md-2">
+  <div class="col-xl-2 col-lg-3 col-md-4">
     <div class="metric-card p-3">
       <div class="label">Đơn chờ đối soát</div>
       <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.pending_reconcile_orders) }}</div>

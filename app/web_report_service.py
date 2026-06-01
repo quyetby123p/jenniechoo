@@ -62,9 +62,10 @@ class WebReportService:
         closed_labels = self._to_text_set(status_cfg.get("closed_status_labels", []))
         returning_codes = self._to_int_set(status_cfg.get("returning_status_codes", []))
         returning_labels = self._to_text_set(status_cfg.get("returning_status_labels", ["đang hoàn", "hoàn"]))
+        status_code_labels = self._build_status_code_label_map(status_cfg)
         brand_rules = status_cfg.get("brand_rules", [])
 
-        orders = self.pancake.fetch_all_orders_for_range(start_date, end_date, self.settings.app_timezone)
+        orders, aggs = self._fetch_orders_and_aggs(start_date=start_date, end_date=end_date)
         if not isinstance(orders, list):
             orders = []
         orders = [item for item in orders if isinstance(item, dict)]
@@ -74,6 +75,7 @@ class WebReportService:
         waiting_orders_count = 0
         returning_orders_count = 0
         waiting_value_minor = 0
+        order_value_total_minor = 0
         missing_line_count = 0
         missing_quantity = 0
         size_totals: dict[str, int] = {}
@@ -89,8 +91,13 @@ class WebReportService:
             order_ref = self._extract_order_ref(order)
             order_created_dt = self._extract_order_datetime(order, tz=tz)
             order_status_code = self._extract_status_code(order)
-            order_status_label = self._extract_status_label(order)
+            order_status_label = self._extract_status_label(
+                order,
+                status_code=order_status_code,
+                status_code_labels=status_code_labels,
+            )
             order_total_minor = self._extract_order_total_minor(order)
+            order_value_total_minor += order_total_minor
             brand_name, brand_slug = self._extract_brand(order, brand_rules=brand_rules)
             is_waiting = self._is_waiting_status(
                 code=order_status_code,
@@ -137,6 +144,7 @@ class WebReportService:
                     "brand_slug": brand_slug,
                     "total_orders": 0,
                     "closed_orders": 0,
+                    "total_value_minor": 0,
                     "waiting_orders": 0,
                     "waiting_value_minor": 0,
                     "missing_line_count": 0,
@@ -146,6 +154,7 @@ class WebReportService:
                 },
             )
             brand_bucket["total_orders"] = self._to_int(brand_bucket.get("total_orders")) + 1
+            brand_bucket["total_value_minor"] = self._to_int(brand_bucket.get("total_value_minor")) + order_total_minor
             if is_closed:
                 brand_bucket["closed_orders"] = self._to_int(brand_bucket.get("closed_orders")) + 1
             if not is_waiting:
@@ -245,6 +254,7 @@ class WebReportService:
         reconcile_received = reconcile_summary.get("received_rows", [])
         pending_reconcile_orders = self._to_int(reconcile_summary.get("pending_order_count"))
         reconcile_received_orders = self._to_int(reconcile_summary.get("received_order_count"))
+        revenue_total_minor = self._extract_revenue_minor_from_aggs(aggs, fallback=order_value_total_minor)
 
         brand_overview: list[dict[str, Any]] = []
         brand_detail: dict[str, Any] = {}
@@ -282,6 +292,8 @@ class WebReportService:
                 "brand_slug": str(bucket.get("brand_slug", "")).strip() or "khac",
                 "total_orders": self._to_int(bucket.get("total_orders")),
                 "closed_orders": self._to_int(bucket.get("closed_orders")),
+                "total_value_minor": self._to_int(bucket.get("total_value_minor")),
+                "total_value_text": self._fmt_currency(self._to_int(bucket.get("total_value_minor"))),
                 "waiting_orders": self._to_int(bucket.get("waiting_orders")),
                 "waiting_value_minor": self._to_int(bucket.get("waiting_value_minor")),
                 "waiting_value_text": self._fmt_currency(self._to_int(bucket.get("waiting_value_minor"))),
@@ -316,6 +328,8 @@ class WebReportService:
             "metrics": {
                 "total_orders": total_orders,
                 "closed_orders": closed_orders,
+                "revenue_total_minor": revenue_total_minor,
+                "revenue_total_text": self._fmt_currency(revenue_total_minor),
                 "waiting_orders": waiting_orders_count,
                 "returning_orders": returning_orders_count,
                 "reconcile_received_orders": reconcile_received_orders,
@@ -337,6 +351,30 @@ class WebReportService:
             },
         }
         return payload
+
+    def _fetch_orders_and_aggs(self, *, start_date: date, end_date: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        if hasattr(self.pancake, "fetch_orders_snapshot_for_range"):
+            try:
+                payload = self.pancake.fetch_orders_snapshot_for_range(  # type: ignore[attr-defined]
+                    start_date,
+                    end_date,
+                    self.settings.app_timezone,
+                )
+            except Exception:  # noqa: BLE001
+                payload = None
+            if isinstance(payload, dict):
+                orders = payload.get("orders", [])
+                aggs = payload.get("aggs", {})
+                if not isinstance(orders, list):
+                    orders = []
+                if not isinstance(aggs, dict):
+                    aggs = {}
+                return [item for item in orders if isinstance(item, dict)], aggs
+
+        orders = self.pancake.fetch_all_orders_for_range(start_date, end_date, self.settings.app_timezone)
+        if not isinstance(orders, list):
+            orders = []
+        return [item for item in orders if isinstance(item, dict)], {}
 
     @staticmethod
     def _iter_dates(start_date: date, end_date: date):
@@ -529,11 +567,23 @@ class WebReportService:
         except (TypeError, ValueError):
             return None
 
-    def _extract_status_label(self, order: dict[str, Any]) -> str:
+    def _extract_status_label(
+        self,
+        order: dict[str, Any],
+        *,
+        status_code: int | None = None,
+        status_code_labels: dict[int, str] | None = None,
+    ) -> str:
         for key in ("status_name", "status_text", "status_label", "order_status_name"):
             value = str(order.get(key, "")).strip()
             if value:
                 return value
+        if status_code is None:
+            status_code = self._extract_status_code(order)
+        if status_code is not None and isinstance(status_code_labels, dict):
+            mapped = str(status_code_labels.get(status_code, "")).strip()
+            if mapped:
+                return mapped
         raw = order.get("status")
         if isinstance(raw, str):
             return raw.strip()
@@ -652,19 +702,25 @@ class WebReportService:
         variation_info = item.get("variation_info")
         if not isinstance(variation_info, dict):
             variation_info = {}
-        for key in ("size",):
-            value = str(variation_info.get(key, "")).strip()
+        raw_size = variation_info.get("size")
+        if isinstance(raw_size, str):
+            value = raw_size.strip()
             if value:
                 return value.upper()
+        if isinstance(raw_size, dict):
+            for key in ("value", "name", "keyValue", "code"):
+                value = str(raw_size.get(key, "")).strip()
+                if value:
+                    return value.upper()
         fields = variation_info.get("fields")
         if isinstance(fields, list):
             for field in fields:
                 if not isinstance(field, dict):
                     continue
                 name = self._normalize_text(str(field.get("name", "")).strip())
-                if "size" not in name and "kich co" not in name:
+                if "size" not in name and "kich co" not in name and "kich thuoc" not in name:
                     continue
-                value = str(field.get("value", "")).strip()
+                value = str(field.get("value") or field.get("keyValue") or "").strip()
                 if value:
                     return value.upper()
         candidates = [
@@ -729,6 +785,8 @@ class WebReportService:
         merged = {**defaults, **payload}
         if not isinstance(merged.get("brand_rules"), list):
             merged["brand_rules"] = defaults.get("brand_rules", [])
+        if not isinstance(merged.get("status_code_labels"), dict):
+            merged["status_code_labels"] = defaults.get("status_code_labels", {})
         return merged
 
     def _default_status_map_config(self) -> dict[str, Any]:
@@ -739,6 +797,7 @@ class WebReportService:
             "closed_status_labels": [],
             "returning_status_codes": [],
             "returning_status_labels": ["đang hoàn", "hoàn", "returning", "returned"],
+            "status_code_labels": self._default_order_status_code_labels(),
             "pending_reconcile_match_results": ["not_found", "ambiguous", "unmapped_status"],
             "reconcile_received_match_results": ["matched_unique", "already_correct"],
             "reconcile_received_td_statuses": ["success"],
@@ -955,3 +1014,57 @@ class WebReportService:
             size = str(key or "").strip().upper() or "KHÁC"
             result[size] = WebReportService._to_int(result.get(size)) + WebReportService._to_int(value)
         return result
+
+    def _build_status_code_label_map(self, status_cfg: dict[str, Any]) -> dict[int, str]:
+        result = self._default_order_status_code_labels()
+        custom = status_cfg.get("status_code_labels", {})
+        if not isinstance(custom, dict):
+            return result
+        for raw_code, raw_label in custom.items():
+            label = str(raw_label or "").strip()
+            if not label:
+                continue
+            try:
+                code = int(str(raw_code).strip())
+            except (TypeError, ValueError):
+                continue
+            result[code] = label
+        return result
+
+    @staticmethod
+    def _default_order_status_code_labels() -> dict[int, str]:
+        # Theo schema OpenAPI Pancake: components.schemas.OrderInfo.properties.status.x-enum-descriptions
+        return {
+            0: "Mới",
+            17: "Chờ xác nhận",
+            11: "Chờ hàng",
+            12: "Chờ in",
+            13: "Đã in",
+            20: "Đã đặt hàng",
+            1: "Đã xác nhận",
+            8: "Đang đóng hàng",
+            9: "Chờ chuyển hàng",
+            2: "Đã gửi hàng",
+            3: "Đã nhận",
+            16: "Đã thu tiền",
+            4: "Đang hoàn",
+            15: "Hoàn một phần",
+            5: "Đã hoàn",
+            6: "Đã hủy",
+            7: "Đã xóa",
+        }
+
+    def _extract_revenue_minor_from_aggs(self, aggs: Any, *, fallback: int) -> int:
+        if not isinstance(aggs, dict):
+            return max(0, fallback)
+        cod_minor = self._extract_agg_metric_minor(aggs.get("cod"))
+        prepaid_minor = self._extract_agg_metric_minor(aggs.get("prepaid"))
+        total = cod_minor + prepaid_minor
+        if total > 0:
+            return total
+        return max(0, fallback)
+
+    def _extract_agg_metric_minor(self, raw_metric: Any) -> int:
+        if isinstance(raw_metric, dict):
+            raw_metric = raw_metric.get("value")
+        return max(0, self._to_int(raw_metric))

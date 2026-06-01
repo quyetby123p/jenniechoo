@@ -8,13 +8,21 @@ from app.web_report_service import WebReportService
 
 
 class _FakePancakeClient:
-    def __init__(self, orders: list[dict]):
+    def __init__(self, orders: list[dict], aggs: dict | None = None):
         self._orders = orders
+        self._aggs = aggs or {}
         self.fetch_count = 0
 
     def fetch_all_orders_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
         self.fetch_count += 1
         return self._orders
+
+    def fetch_orders_snapshot_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
+        self.fetch_count += 1
+        return {
+            "orders": self._orders,
+            "aggs": self._aggs,
+        }
 
 
 def _dummy_settings(tmp_path: Path, **overrides) -> Settings:
@@ -275,3 +283,98 @@ def test_waiting_status_code_mapping_from_config(tmp_path: Path) -> None:
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot["metrics"]["waiting_orders"] == 1
+
+
+def test_waiting_status_defaults_to_code_map_when_status_name_missing(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-WAIT",
+                    "status": 11,
+                    "total_price": 220_000,
+                    "items": [],
+                }
+            ]
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["waiting_orders"] == 1
+
+
+def test_size_uses_variation_fields_instead_of_size_object(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-SIZE",
+                    "status": 11,
+                    "total_price": 520_000,
+                    "items": [
+                        {
+                            "quantity": 2,
+                            "variation_info": {
+                                "product_id": "JC-V-239",
+                                "size": {
+                                    "height": 0,
+                                    "id": "abc",
+                                    "length": 0,
+                                    "width": 0,
+                                },
+                                "fields": [
+                                    {"name": "MÀU", "value": "Nude Beige"},
+                                    {"name": "SIZE", "value": "S"},
+                                ],
+                            },
+                        }
+                    ],
+                }
+            ]
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["size_summary"] == [{"size": "S", "quantity": 2}]
+    row = snapshot["brand_detail"]["jennie-choo"]["sku_rows"][0]
+    assert row["sizes"] == {"S": 2}
+
+
+def test_revenue_total_prefers_aggs_snapshot_values(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-1",
+                    "status": 3,
+                    "total_price": 900_000,
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-2",
+                    "status": 11,
+                    "total_price": 100_000,
+                    "items": [],
+                },
+            ],
+            aggs={
+                "cod": {"value": 500_000},
+                "prepaid": {"value": 300_000},
+            },
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["revenue_total_minor"] == 800_000

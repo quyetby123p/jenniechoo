@@ -66,6 +66,7 @@ def _snapshot_payload() -> dict:
         "metrics": {
             "total_orders": 2,
             "closed_orders": 2,
+            "revenue_total_text": "2.200đ",
             "waiting_orders": 1,
             "returning_orders": 0,
             "reconcile_received_orders": 1,
@@ -81,6 +82,7 @@ def _snapshot_payload() -> dict:
                 "brand_name": "Jennie Choo",
                 "brand_slug": "jennie-choo",
                 "total_orders": 2,
+                "total_value_text": "2.200đ",
                 "waiting_orders": 1,
                 "missing_line_count": 1,
                 "missing_quantity": 1,

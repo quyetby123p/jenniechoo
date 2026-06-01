@@ -142,6 +142,24 @@ class PancakePosClient:
         _, end_ts = self._to_unix_day_range(end_date, timezone_name)
         return self._fetch_orders_by_timestamp_range(start_ts, end_ts)
 
+    def fetch_orders_snapshot_for_range(
+        self,
+        start_date: date,
+        end_date: date,
+        timezone_name: str,
+    ) -> dict[str, Any]:
+        if self.settings.pancake_shop_id <= 0:
+            raise ValidationError("Chưa có PANCAKE_SHOP_ID hợp lệ.")
+        if end_date < start_date:
+            raise ValidationError("Khoảng ngày Pancake không hợp lệ.")
+        start_ts, _ = self._to_unix_day_range(start_date, timezone_name)
+        _, end_ts = self._to_unix_day_range(end_date, timezone_name)
+        orders, aggs = self._fetch_orders_by_timestamp_range_with_aggs(start_ts, end_ts)
+        return {
+            "orders": orders,
+            "aggs": aggs if isinstance(aggs, dict) else {},
+        }
+
     def fetch_orders_by_timestamp_range(self, start_ts: int, end_ts: int) -> list[dict[str, Any]]:
         if self.settings.pancake_shop_id <= 0:
             raise ValidationError("Chưa có PANCAKE_SHOP_ID hợp lệ.")
