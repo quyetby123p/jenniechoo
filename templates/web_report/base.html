@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Web Report{% endblock %}</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css">
   <style>
     body { background: #f7f8fa; color: #1e1e1e; }
     .brand-card { border: 1px solid #d8dde5; border-radius: 10px; background: #fff; }
@@ -12,6 +13,15 @@
     .metric-card .label { color: #667085; font-size: 13px; }
     .metric-card .value { font-size: 30px; font-weight: 700; line-height: 1.2; }
     .size-pill { display: inline-block; margin: 3px 6px 3px 0; padding: 3px 8px; border-radius: 999px; background: #eef2f7; font-size: 13px; }
+    .date-toolbar { border: 1px solid #d8dde5; border-radius: 12px; background: #fff; padding: 12px; margin-bottom: 12px; }
+    .date-toolbar .toolbar-label { color: #1f2937; font-weight: 600; margin-right: 8px; white-space: nowrap; }
+    .date-toolbar .preset-chip { background: #eef2f7; border: 1px solid #d6dbe3; color: #111827; border-radius: 8px; padding: 8px 12px; font-size: 14px; white-space: nowrap; }
+    .date-toolbar .range-input { min-width: 270px; max-width: 360px; background: #fff; }
+    .daterangepicker .ranges li.active { background-color: #0d6efd; }
+    .daterangepicker td.active, .daterangepicker td.active:hover { background-color: #0d6efd; }
+    @media (max-width: 768px) {
+      .date-toolbar .range-input { min-width: 220px; width: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -21,34 +31,24 @@
       <h1 class="h3 mb-1">Báo cáo vận hành đơn hàng</h1>
       <p class="text-muted mb-2">Timezone: {{ timezone_name }} · Refresh cache: 10 phút</p>
     </div>
-    <form class="row g-2 align-items-end" method="get" action="{{ request.path }}">
-      <div class="col-auto">
-        <label class="form-label small mb-1">Kiểu xem</label>
-        <select class="form-select" name="mode">
-          <option value="today" {% if selected_mode == "today" %}selected{% endif %}>Hôm nay</option>
-          <option value="yesterday" {% if selected_mode == "yesterday" %}selected{% endif %}>Hôm qua</option>
-          <option value="date" {% if selected_mode == "date" %}selected{% endif %}>Ngày cố định</option>
-          <option value="range" {% if selected_mode == "range" %}selected{% endif %}>Khoảng ngày</option>
-        </select>
-      </div>
-      <div class="col-auto">
-        <label class="form-label small mb-1">Ngày</label>
-        <input type="date" class="form-control" name="date" value="{{ selected_date }}">
-      </div>
-      <div class="col-auto">
-        <label class="form-label small mb-1">Từ ngày</label>
-        <input type="date" class="form-control" name="start_date" value="{{ selected_start_date }}">
-      </div>
-      <div class="col-auto">
-        <label class="form-label small mb-1">Đến ngày</label>
-        <input type="date" class="form-control" name="end_date" value="{{ selected_end_date }}">
-      </div>
-      <div class="col-auto">
-        <button class="btn btn-primary" type="submit">Xem</button>
-      </div>
-    </form>
   </div>
-  <div class="small text-muted mb-3">Gợi ý: chọn "Ngày cố định" để xem 1 ngày, chọn "Khoảng ngày" để xem từ ngày A đến ngày B.</div>
+  <form class="date-toolbar d-flex flex-wrap align-items-center gap-2" method="get" action="{{ request.path }}">
+    <input type="hidden" name="mode" id="modeInput" value="{{ selected_mode }}">
+    <input type="hidden" name="date" id="dateInput" value="{{ selected_date }}">
+    <input type="hidden" name="start_date" id="startDateInput" value="{{ selected_start_date }}">
+    <input type="hidden" name="end_date" id="endDateInput" value="{{ selected_end_date }}">
+    <span class="toolbar-label">Khoảng thời gian</span>
+    <span class="preset-chip" id="presetLabel">Tùy chỉnh</span>
+    <input
+      id="rangePickerInput"
+      type="text"
+      class="form-control range-input"
+      value=""
+      readonly
+      autocomplete="off"
+    >
+    <button class="btn btn-primary" type="submit">Xem</button>
+  </form>
   <div class="mb-3">
     <a class="btn btn-sm {% if active_path == '/' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/?{{ query_string }}">Dashboard</a>
     <a class="btn btn-sm {% if active_path == '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/waiting?{{ query_string }}">Đơn chờ hàng</a>
@@ -59,5 +59,127 @@
   </div>
   {% block content %}{% endblock %}
 </div>
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/moment@2.30.1/min/moment.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
+<script>
+  (function () {
+    if (!window.jQuery || !window.moment) {
+      return;
+    }
+
+    const modeInput = document.getElementById("modeInput");
+    const dateInput = document.getElementById("dateInput");
+    const startDateInput = document.getElementById("startDateInput");
+    const endDateInput = document.getElementById("endDateInput");
+    const presetLabel = document.getElementById("presetLabel");
+    const rangeInput = document.getElementById("rangePickerInput");
+    if (!modeInput || !dateInput || !startDateInput || !endDateInput || !presetLabel || !rangeInput) {
+      return;
+    }
+
+    const modeToLabel = {
+      today: "Hôm nay",
+      yesterday: "Hôm qua",
+      last7: "7 ngày qua",
+      last30: "30 ngày qua",
+      last90: "90 ngày qua",
+      lastmonth: "Tháng trước",
+      week_to_date: "Đầu tuần đến nay",
+      month_to_date: "Đầu tháng đến nay",
+      date: "Ngày cố định",
+      range: "Tùy chỉnh",
+    };
+
+    function resolveMode(start, end, chosenLabel) {
+      const label = String(chosenLabel || "").trim().toLowerCase();
+      if (label === "hôm nay") return "today";
+      if (label === "hôm qua") return "yesterday";
+      if (label === "7 ngày qua") return "last7";
+      if (label === "30 ngày qua") return "last30";
+      if (label === "90 ngày qua") return "last90";
+      if (label === "tháng trước") return "lastmonth";
+      if (label === "đầu tuần đến nay") return "week_to_date";
+      if (label === "đầu tháng đến nay") return "month_to_date";
+      if (start.isSame(end, "day")) return "date";
+      return "range";
+    }
+
+    function syncInputs(start, end, chosenLabel) {
+      const mode = resolveMode(start, end, chosenLabel);
+      modeInput.value = mode;
+      dateInput.value = start.format("YYYY-MM-DD");
+      startDateInput.value = start.format("YYYY-MM-DD");
+      endDateInput.value = end.format("YYYY-MM-DD");
+      presetLabel.textContent = modeToLabel[mode] || "Tùy chỉnh";
+    }
+
+    function readMomentFromIso(value, fallback) {
+      const m = window.moment(value, "YYYY-MM-DD", true);
+      if (!m.isValid()) return fallback.clone();
+      return m;
+    }
+
+    const today = window.moment().startOf("day");
+    const initialStart = readMomentFromIso(startDateInput.value || dateInput.value, today);
+    const initialEnd = readMomentFromIso(endDateInput.value || startDateInput.value || dateInput.value, initialStart);
+
+    const picker = window.jQuery(rangeInput).daterangepicker(
+      {
+        alwaysShowCalendars: true,
+        autoUpdateInput: true,
+        startDate: initialStart,
+        endDate: initialEnd,
+        opens: "left",
+        locale: {
+          format: "DD/MM/YYYY",
+          separator: " → ",
+          applyLabel: "Áp dụng",
+          cancelLabel: "Đóng",
+          customRangeLabel: "Tùy chỉnh",
+          daysOfWeek: ["CN", "T2", "T3", "T4", "T5", "T6", "T7"],
+          monthNames: [
+            "Tháng 1",
+            "Tháng 2",
+            "Tháng 3",
+            "Tháng 4",
+            "Tháng 5",
+            "Tháng 6",
+            "Tháng 7",
+            "Tháng 8",
+            "Tháng 9",
+            "Tháng 10",
+            "Tháng 11",
+            "Tháng 12"
+          ],
+          firstDay: 1
+        },
+        ranges: {
+          "Hôm nay": [window.moment(), window.moment()],
+          "Hôm qua": [window.moment().subtract(1, "days"), window.moment().subtract(1, "days")],
+          "7 ngày qua": [window.moment().subtract(6, "days"), window.moment()],
+          "30 ngày qua": [window.moment().subtract(29, "days"), window.moment()],
+          "90 ngày qua": [window.moment().subtract(89, "days"), window.moment()],
+          "Tháng trước": [
+            window.moment().subtract(1, "month").startOf("month"),
+            window.moment().subtract(1, "month").endOf("month")
+          ],
+          "Đầu tuần đến nay": [window.moment().startOf("isoWeek"), window.moment()],
+          "Đầu tháng đến nay": [window.moment().startOf("month"), window.moment()]
+        }
+      },
+      function (start, end, label) {
+        syncInputs(start.clone().startOf("day"), end.clone().startOf("day"), label);
+      }
+    );
+
+    const drp = picker.data("daterangepicker");
+    syncInputs(drp.startDate.clone().startOf("day"), drp.endDate.clone().startOf("day"), modeToLabel[modeInput.value] || "");
+
+    window.jQuery(rangeInput).on("apply.daterangepicker", function (ev, p) {
+      syncInputs(p.startDate.clone().startOf("day"), p.endDate.clone().startOf("day"), p.chosenLabel || "");
+    });
+  })();
+</script>
 </body>
 </html>

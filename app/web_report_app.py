@@ -146,6 +146,31 @@ def _parse_query_period(args: Any, *, timezone_name: str) -> dict[str, Any]:
         start_date = today - timedelta(days=1)
         end_date = start_date
         mode = "yesterday"
+    elif mode == "last7":
+        start_date = today - timedelta(days=6)
+        end_date = today
+        mode = "last7"
+    elif mode == "last30":
+        start_date = today - timedelta(days=29)
+        end_date = today
+        mode = "last30"
+    elif mode == "last90":
+        start_date = today - timedelta(days=89)
+        end_date = today
+        mode = "last90"
+    elif mode == "lastmonth":
+        month_start = today.replace(day=1)
+        end_date = month_start - timedelta(days=1)
+        start_date = end_date.replace(day=1)
+        mode = "lastmonth"
+    elif mode == "week_to_date":
+        start_date = today - timedelta(days=today.weekday())
+        end_date = today
+        mode = "week_to_date"
+    elif mode == "month_to_date":
+        start_date = today.replace(day=1)
+        end_date = today
+        mode = "month_to_date"
     elif mode == "range" or (not mode and start_raw and end_raw):
         start_date = _parse_iso_date(start_raw, fallback=today)
         end_date = _parse_iso_date(end_raw, fallback=start_date)
