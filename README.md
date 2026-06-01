@@ -155,10 +155,18 @@ File map status/brand: `config/web_report_status_map.json`.
 
 File deploy dung cho repo nay: `render.yaml` (ngay tai root `projects/fb-ads-automation`).
 
-1. Kiem tra nhanh truoc khi push:
+1. Kiem tra nhanh truoc khi push.
+
+Web report only:
 
 ```powershell
 .\scripts\deploy\render-preflight.ps1
+```
+
+Full stack (web report + main bot + media bot + assistant bot):
+
+```powershell
+.\scripts\deploy\render-preflight.ps1 -Scope stack
 ```
 
 2. Push GitHub bang 1 lenh (tu init git -> commit -> set remote -> push):
@@ -167,24 +175,37 @@ File deploy dung cho repo nay: `render.yaml` (ngay tai root `projects/fb-ads-aut
 .\scripts\deploy\bootstrap-github-render.ps1 -GitHubRepoUrl "https://github.com/<org-or-user>/<repo>.git"
 ```
 
-3. Tao service Render tu dong bang API (khong can bam tay trong dashboard):
+3. Tao/cap nhat service Render tu dong bang API (khong can bam tay trong dashboard).
+
+Web report only (legacy):
 
 ```powershell
 .\scripts\deploy\render-create-service.ps1 -RenderApiKey "<RENDER_API_KEY>" -RepoUrl "https://github.com/<org-or-user>/<repo>"
 ```
 
+Full stack (khuyen nghi):
+
+```powershell
+.\scripts\deploy\render-sync-stack.ps1 -RenderApiKey "<RENDER_API_KEY>" -RepoUrl "https://github.com/<org-or-user>/<repo>"
+```
+
 4. Hoac neu muon deploy bang UI (khong dung API):
    1. `New +` -> `Blueprint`.
    2. Chon repo GitHub vua push.
-   3. Render doc `render.yaml` va tao service tu dong.
-   4. Dien env secrets (neu Render chua co): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_ID`, `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID`, `META_PAGE_ID`, `PANCAKE_SHOP_ID`, va `PANCAKE_ACCESS_TOKEN` (hoac `PANCAKE_API_KEY`).
-   5. Deploy, mo `https://<service>.onrender.com/healthz` de check song.
+   3. Render doc `render.yaml` va tao 4 service:
+      - `fb-ops-web-report` (`web`, plan `free`)
+      - `fb-ops-main-bot` (`worker`, plan `starter`)
+      - `fb-ops-media-bot` (`worker`, plan `starter`)
+      - `fb-ops-assistant-bot` (`worker`, plan `starter`)
+   4. Dien env secrets theo tung service (tat ca key `sync: false`).
+   5. Deploy, mo `https://<service>.onrender.com/healthz` de check web report song.
 
 Tuy chon:
 - Muon bo qua test nhanh khi push: them `-SkipTests`.
 - Muon push branch rieng: them `-Branch feature/web-report-v1`.
 - Muon chi init/commit/remote, chua push ngay: them `-NoPush`.
 - Neu may chua config Git user: them `-GitUserName "Ten cua anh" -GitUserEmail "email@domain.com"`.
+- Doi plan workers (neu can): them `-WorkerPlan standard` trong `render-sync-stack.ps1`.
 
 ## Cu phap Telegram
 
