@@ -4,32 +4,32 @@
 <div class="brand-card p-3 mb-3">
   <h2 class="h6 mb-3">Báo cáo ngày</h2>
   <div class="row g-3">
-    <div class="col-xl col-md-6">
+    <div class="col-xl col-sm-6">
       <div class="metric-card p-3">
         <div class="label">Đơn chốt hôm nay</div>
         <div class="value">{{ "{:,}".format(summary_cards.closed_today) }}</div>
       </div>
     </div>
-    <div class="col-xl col-md-6">
+    <div class="col-xl col-sm-6">
       <div class="metric-card p-3">
         <div class="label">Doanh số</div>
         <div class="value" style="font-size: 26px;">{{ snapshot.metrics.revenue_total_thb_text }} THB</div>
         <small class="text-muted">~ {{ snapshot.metrics.revenue_total_vnd_text }} VNĐ</small>
       </div>
     </div>
-    <div class="col-xl col-md-6">
+    <div class="col-xl col-sm-6">
       <div class="metric-card p-3">
         <div class="label">Đơn chờ (Tổng)</div>
         <div class="value text-danger">{{ "{:,}".format(summary_cards.waiting_total) }}</div>
       </div>
     </div>
-    <div class="col-xl col-md-6">
+    <div class="col-xl col-sm-6">
       <div class="metric-card p-3">
         <div class="label">Đơn đang gửi (Tổng)</div>
         <div class="value text-primary">{{ "{:,}".format(summary_cards.shipping_total) }}</div>
       </div>
     </div>
-    <div class="col-xl col-md-6">
+    <div class="col-xl col-sm-6">
       <div class="metric-card p-3">
         <div class="label">Đơn chờ đối soát (Tổng)</div>
         <div class="value text-danger">{{ "{:,}".format(summary_cards.pending_reconcile_total) }}</div>
@@ -46,51 +46,51 @@
   <h2 class="h6 mb-0">Tổng quan Jennie Choo Thái</h2>
 </div>
 <div class="row g-3 mb-3">
-  <div class="col-xl-2 col-lg-3 col-md-4">
+  <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6">
     <div class="metric-card p-3">
       <div class="label">Số lượng đơn hàng</div>
       <div class="value">{{ "{:,}".format(snapshot.metrics.total_orders) }}</div>
     </div>
   </div>
-  <div class="col-xl-2 col-lg-3 col-md-4">
+  <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6">
     <div class="metric-card p-3">
       <div class="label">Doanh số</div>
       <div class="value" style="font-size: 24px;">{{ snapshot.metrics.revenue_total_thb_text }} THB</div>
       <small class="text-muted">~ {{ snapshot.metrics.revenue_total_vnd_text }} VNĐ</small>
     </div>
   </div>
-  <div class="col-xl-2 col-lg-3 col-md-4">
+  <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6">
     <div class="metric-card p-3">
       <div class="label">Đơn chốt</div>
       <div class="value">{{ "{:,}".format(snapshot.metrics.closed_orders) }}</div>
     </div>
   </div>
-  <div class="col-xl-2 col-lg-3 col-md-4">
+  <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6">
     <div class="metric-card p-3">
       <div class="label">Đơn đang gửi</div>
       <div class="value text-primary">{{ "{:,}".format(snapshot.metrics.shipping_orders) }}</div>
     </div>
   </div>
-  <div class="col-xl-2 col-lg-3 col-md-4">
+  <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6">
     <div class="metric-card p-3">
       <div class="label">Đơn chờ hàng</div>
       <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.waiting_orders) }}</div>
       <small class="text-muted">{{ snapshot.metrics.waiting_value_thb_text }} THB (~ {{ snapshot.metrics.waiting_value_vnd_text }} VNĐ)</small>
     </div>
   </div>
-  <div class="col-xl-2 col-lg-3 col-md-4">
+  <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6">
     <div class="metric-card p-3">
       <div class="label">Đối soát đã nhận</div>
       <div class="value text-success">{{ "{:,}".format(snapshot.metrics.reconcile_received_orders) }}</div>
     </div>
   </div>
-  <div class="col-xl-2 col-lg-3 col-md-4">
+  <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6">
     <div class="metric-card p-3">
       <div class="label">Đơn hoàn/đang hoàn</div>
       <div class="value text-warning">{{ "{:,}".format(snapshot.metrics.returning_orders) }}</div>
     </div>
   </div>
-  <div class="col-xl-2 col-lg-3 col-md-4">
+  <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6">
     <div class="metric-card p-3">
       <div class="label">Đơn chờ đối soát</div>
       <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.pending_reconcile_orders) }}</div>
@@ -141,7 +141,7 @@
 <div class="brand-card p-3">
   <h2 class="h5 mb-3">Tổng quan theo brand</h2>
   <div class="table-responsive">
-    <table class="table table-sm align-middle mb-0">
+    <table class="table table-sm align-middle mb-0 mobile-table-cards">
       <thead>
         <tr>
           <th>Brand</th>
@@ -156,20 +156,20 @@
       <tbody>
       {% for brand in snapshot.brands %}
         <tr>
-          <td><strong>{{ brand.brand_name }}</strong></td>
-          <td>{{ "{:,}".format(brand.total_orders) }}</td>
-          <td class="text-danger">{{ "{:,}".format(brand.waiting_orders) }}</td>
-          <td>{{ "{:,}".format(brand.missing_line_count) }}</td>
-          <td>{{ "{:,}".format(brand.missing_quantity) }}</td>
-          <td>
+          <td data-label="Brand"><strong>{{ brand.brand_name }}</strong></td>
+          <td data-label="Tổng đơn">{{ "{:,}".format(brand.total_orders) }}</td>
+          <td data-label="Đơn chờ hàng" class="text-danger">{{ "{:,}".format(brand.waiting_orders) }}</td>
+          <td data-label="Dòng thiếu">{{ "{:,}".format(brand.missing_line_count) }}</td>
+          <td data-label="Số lượng thiếu">{{ "{:,}".format(brand.missing_quantity) }}</td>
+          <td data-label="Size thiếu">
             {% for size in brand.size_summary %}
               <span class="size-pill">{{ size.size }} {{ "{:,}".format(size.quantity) }}</span>
             {% endfor %}
           </td>
-          <td><a href="/brand/{{ brand.brand_slug }}?{{ query_string }}">Chi tiết</a></td>
+          <td data-label=""><a href="/brand/{{ brand.brand_slug }}?{{ query_string }}">Chi tiết</a></td>
         </tr>
       {% else %}
-        <tr><td colspan="7" class="text-muted">Không có dữ liệu brand.</td></tr>
+        <tr><td colspan="7" class="text-muted" data-label="">Không có dữ liệu brand.</td></tr>
       {% endfor %}
       </tbody>
     </table>

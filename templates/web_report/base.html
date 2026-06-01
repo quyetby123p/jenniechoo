@@ -17,10 +17,64 @@
     .date-toolbar .toolbar-label { color: #1f2937; font-weight: 600; margin-right: 8px; white-space: nowrap; }
     .date-toolbar .preset-chip { background: #eef2f7; border: 1px solid #d6dbe3; color: #111827; border-radius: 8px; padding: 8px 12px; font-size: 14px; white-space: nowrap; }
     .date-toolbar .range-input { min-width: 270px; max-width: 360px; background: #fff; }
+    .report-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
     .daterangepicker .ranges li.active { background-color: #0d6efd; }
     .daterangepicker td.active, .daterangepicker td.active:hover { background-color: #0d6efd; }
-    @media (max-width: 768px) {
-      .date-toolbar .range-input { min-width: 220px; width: 100%; }
+    .mobile-table-cards td { vertical-align: top; }
+    @media (max-width: 991.98px) {
+      .metric-card { min-height: 0; }
+      .metric-card .value { font-size: 26px; }
+      .report-tabs { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+      .report-tabs .btn { flex: 0 0 auto; white-space: nowrap; }
+    }
+    @media (max-width: 767.98px) {
+      .container.py-4 { padding-top: 1rem !important; padding-bottom: 1.25rem !important; }
+      h1.h3 { font-size: 1.65rem; }
+      .date-toolbar { padding: 10px; gap: 8px !important; }
+      .date-toolbar .toolbar-label { width: 100%; margin-right: 0; }
+      .date-toolbar .preset-chip { width: auto; font-size: 13px; padding: 6px 10px; }
+      .date-toolbar .range-input { min-width: 0; width: 100%; max-width: 100%; font-size: 14px; }
+      .date-toolbar .btn-primary { width: 100%; }
+      .metric-card .value { font-size: 24px; }
+      .mobile-table-cards thead { display: none; }
+      .mobile-table-cards tbody,
+      .mobile-table-cards tr,
+      .mobile-table-cards td {
+        display: block;
+        width: 100%;
+      }
+      .mobile-table-cards tr {
+        border: 1px solid #d8dde5;
+        border-radius: 10px;
+        background: #fff;
+        margin-bottom: 10px;
+        padding: 10px;
+      }
+      .mobile-table-cards td {
+        border: 0 !important;
+        padding: 4px 0;
+        display: flex;
+        gap: 10px;
+      }
+      .mobile-table-cards td::before {
+        content: attr(data-label);
+        flex: 0 0 120px;
+        color: #667085;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .mobile-table-cards td[data-label=""]::before {
+        content: "";
+        flex-basis: 0;
+      }
+      .mobile-table-cards td.text-muted {
+        display: block;
+        padding: 8px 0 0;
+      }
+      .mobile-table-cards td.text-muted::before {
+        content: none;
+      }
+      .mobile-table-cards tr:last-child { margin-bottom: 0; }
     }
   </style>
 </head>
@@ -50,7 +104,7 @@
     >
     <button class="btn btn-primary" type="submit">Xem</button>
   </form>
-  <div class="mb-3">
+  <div class="mb-3 report-tabs">
     <a class="btn btn-sm {% if active_path == '/' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/?{{ query_string }}">Dashboard</a>
     <a class="btn btn-sm {% if active_path == '/status/shipping' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/shipping?{{ query_string }}">Đơn đang gửi</a>
     <a class="btn btn-sm {% if active_path == '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/waiting?{{ query_string }}">Đơn chờ hàng</a>
@@ -126,13 +180,15 @@
     const initialStart = readMomentFromIso(startDateInput.value || dateInput.value, today);
     const initialEnd = readMomentFromIso(endDateInput.value || startDateInput.value || dateInput.value, initialStart);
 
+    const isMobile = window.matchMedia("(max-width: 767.98px)").matches;
     const picker = window.jQuery(rangeInput).daterangepicker(
       {
         alwaysShowCalendars: true,
         autoUpdateInput: true,
         startDate: initialStart,
         endDate: initialEnd,
-        opens: "left",
+        opens: isMobile ? "center" : "left",
+        drops: "down",
         locale: {
           format: "DD/MM/YYYY",
           separator: " → ",

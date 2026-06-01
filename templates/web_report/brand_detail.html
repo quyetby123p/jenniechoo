@@ -23,7 +23,7 @@
 <div class="brand-card p-3">
   <h2 class="h5 mb-3">Chi tiết SKU / màu / size</h2>
   <div class="table-responsive">
-    <table class="table table-sm align-middle">
+    <table class="table table-sm align-middle mobile-table-cards">
       <thead>
         <tr>
           <th>SKU</th>
@@ -38,20 +38,20 @@
       <tbody>
       {% for row in brand.sku_rows %}
         <tr>
-          <td><strong>{{ row.sku }}</strong></td>
-          <td>{{ row.color }}</td>
-          <td>{{ "{:,}".format(row.missing_quantity) }}</td>
-          <td>{{ "{:,}".format(row.missing_line_count) }}</td>
-          <td>{{ row.value_text }}</td>
-          <td>
+          <td data-label="SKU"><strong>{{ row.sku }}</strong></td>
+          <td data-label="Màu">{{ row.color }}</td>
+          <td data-label="Số lượng thiếu">{{ "{:,}".format(row.missing_quantity) }}</td>
+          <td data-label="Dòng thiếu">{{ "{:,}".format(row.missing_line_count) }}</td>
+          <td data-label="Giá trị thiếu">{{ row.value_text }}</td>
+          <td data-label="Size">
             {% for size, quantity in row.sizes.items() %}
               <span class="size-pill">{{ size }} {{ "{:,}".format(quantity) }}</span>
             {% endfor %}
           </td>
-          <td class="small">{{ ", ".join(row.order_refs[:8]) }}{% if row.order_refs|length > 8 %}...{% endif %}</td>
+          <td data-label="Mã đơn" class="small">{{ ", ".join(row.order_refs[:8]) }}{% if row.order_refs|length > 8 %}...{% endif %}</td>
         </tr>
       {% else %}
-        <tr><td colspan="7" class="text-muted">Không có dữ liệu SKU thiếu.</td></tr>
+        <tr><td colspan="7" class="text-muted" data-label="">Không có dữ liệu SKU thiếu.</td></tr>
       {% endfor %}
       </tbody>
     </table>
