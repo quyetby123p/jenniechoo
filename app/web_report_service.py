@@ -548,6 +548,8 @@ class WebReportService:
         pending_td_success_statuses: set[str],
     ) -> bool:
         if pending_mode == "td_success_not_in_cashflow":
+            if not self._has_pancake_mapping(record, match_result=match_result):
+                return False
             is_success = not pending_td_success_statuses or td_status in pending_td_success_statuses
             if not is_success:
                 return False
@@ -559,6 +561,17 @@ class WebReportService:
         if value is None:
             return False
         return self._to_int(value, fallback=0) > 0
+
+    def _has_pancake_mapping(self, record: dict[str, Any], *, match_result: str) -> bool:
+        if match_result in {"not_found", "ambiguous", "unmapped_status"}:
+            return False
+        pancake_display_id = str(record.get("pancake_display_id", "")).strip()
+        pancake_order_id = str(record.get("pancake_order_id", "")).strip()
+        if pancake_display_id or pancake_order_id:
+            return True
+        if match_result == "already_correct" or match_result.startswith("matched"):
+            return True
+        return False
 
     def _build_reconcile_row(self, record: dict[str, Any], match_result: str) -> dict[str, Any]:
         ref = str(record.get("pancake_display_id", "")).strip() or str(record.get("pancake_order_id", "")).strip()

@@ -471,9 +471,9 @@ def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) 
         status_map_path,
         {
             "pending_reconcile_mode": "td_success_not_in_cashflow",
-            "pending_reconcile_td_success_statuses": ["SUCCESS"],
+            "pending_reconcile_td_success_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
             "reconcile_received_mode": "td_status_only",
-            "reconcile_received_td_statuses": ["SUCCESS"],
+            "reconcile_received_td_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
             "brand_rules": [],
         },
     )
@@ -500,6 +500,12 @@ def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) 
                     "td_sheet_cod_minor": 500_000,
                     "pancake_display_id": "JCT1002",
                 },
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "RETURNED",
+                    "td_sheet_cod_minor": 0,
+                    "pancake_display_id": "JCT1003",
+                },
             ],
         },
     )
@@ -511,5 +517,5 @@ def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) 
 
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
-    assert snapshot["metrics"]["reconcile_received_orders"] == 2
-    assert snapshot["metrics"]["pending_reconcile_orders"] == 1
+    assert snapshot["metrics"]["reconcile_received_orders"] == 3
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 2

@@ -5,7 +5,7 @@
   <div class="text-muted small">Kỳ dữ liệu: <strong>{{ snapshot.period.label }}</strong></div>
 </div>
 <div class="brand-card p-3 mb-3">
-  <h2 class="h6 mb-3">Tổng quan nhanh</h2>
+  <h2 class="h6 mb-3">Báo cáo ngày</h2>
   <div class="row g-3">
     <div class="col-xl col-md-6">
       <div class="metric-card p-3">
@@ -22,23 +22,26 @@
     </div>
     <div class="col-xl col-md-6">
       <div class="metric-card p-3">
-        <div class="label">Đơn chờ (tổng toàn bộ)</div>
+        <div class="label">Đơn chờ (Tổng)</div>
         <div class="value text-danger">{{ "{:,}".format(summary_cards.waiting_total) }}</div>
       </div>
     </div>
     <div class="col-xl col-md-6">
       <div class="metric-card p-3">
-        <div class="label">Đơn đang gửi (tổng toàn bộ)</div>
+        <div class="label">Đơn đang gửi (Tổng)</div>
         <div class="value text-primary">{{ "{:,}".format(summary_cards.shipping_total) }}</div>
       </div>
     </div>
     <div class="col-xl col-md-6">
       <div class="metric-card p-3">
-        <div class="label">Đơn chờ đối soát (tổng toàn bộ)</div>
+        <div class="label">Đơn chờ đối soát (Tổng)</div>
         <div class="value text-danger">{{ "{:,}".format(summary_cards.pending_reconcile_total) }}</div>
       </div>
     </div>
   </div>
+</div>
+<div class="brand-card p-3 mb-3">
+  <h2 class="h6 mb-0">Tổng quan Jennie Choo Thái</h2>
 </div>
 <div class="row g-3 mb-3">
   <div class="col-xl-2 col-lg-3 col-md-4">

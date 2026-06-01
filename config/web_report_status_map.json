@@ -35,7 +35,9 @@
   ],
   "pending_reconcile_mode": "td_success_not_in_cashflow",
   "pending_reconcile_td_success_statuses": [
-    "SUCCESS"
+    "SUCCESS",
+    "BEING_RETURNED",
+    "RETURNED"
   ],
   "reconcile_received_match_results": [
     "matched_unique",
