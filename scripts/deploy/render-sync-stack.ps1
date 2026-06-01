@@ -106,7 +106,7 @@ function Get-EnvValue {
 
 function Add-KeyIfValue {
     param(
-        [System.Collections.Generic.HashSet[string]]$Set,
+        [hashtable]$Selected,
         [string]$Key,
         [hashtable]$EnvMap
     )
@@ -116,7 +116,7 @@ function Add-KeyIfValue {
     }
     $value = Get-EnvValue -EnvMap $EnvMap -Key $Key
     if (-not [string]::IsNullOrWhiteSpace($value)) {
-        $null = $Set.Add($Key)
+        $Selected[$Key.ToUpperInvariant()] = $Key
     }
 }
 
@@ -128,16 +128,16 @@ function Build-EnvVarList {
         [hashtable]$DefaultValues = @{}
     )
 
-    $selected = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $selected = @{}
 
     foreach ($key in $ExactKeys) {
-        Add-KeyIfValue -Set $selected -Key $key -EnvMap $EnvMap
+        Add-KeyIfValue -Selected $selected -Key $key -EnvMap $EnvMap
     }
 
     foreach ($key in $EnvMap.Keys) {
         foreach ($prefix in $Prefixes) {
             if ($key.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-                Add-KeyIfValue -Set $selected -Key $key -EnvMap $EnvMap
+                Add-KeyIfValue -Selected $selected -Key $key -EnvMap $EnvMap
                 break
             }
         }
@@ -146,12 +146,12 @@ function Build-EnvVarList {
     foreach ($key in $DefaultValues.Keys) {
         $value = Get-EnvValue -EnvMap $EnvMap -Key $key -Default ([string]$DefaultValues[$key])
         if (-not [string]::IsNullOrWhiteSpace($value)) {
-            $null = $selected.Add($key)
+            $selected[$key.ToUpperInvariant()] = $key
             $EnvMap[$key] = $value
         }
     }
 
-    $keys = @($selected.ToArray() | Sort-Object)
+    $keys = @($selected.Values | Sort-Object -Unique)
     $envVars = @()
     foreach ($key in $keys) {
         $value = Get-EnvValue -EnvMap $EnvMap -Key $key
@@ -374,7 +374,7 @@ $profiles = @(
             "PANCAKE_SHOP_ID"
         )
         requiredAny = @(
-            @("PANCAKE_ACCESS_TOKEN", "PANCAKE_API_KEY")
+            ,@("PANCAKE_ACCESS_TOKEN", "PANCAKE_API_KEY")
         )
         defaults = @{
             "APP_TIMEZONE" = "Asia/Ho_Chi_Minh"
