@@ -208,7 +208,7 @@ if ($null -eq $existingService) {
             healthCheckPath = "/healthz"
             envSpecificDetails = @{
                 buildCommand = "pip install -r requirements.txt"
-                startCommand = "gunicorn app.web_report_main:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
+                startCommand = 'gunicorn app.web_report_main:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120'
             }
         }
     }
@@ -242,7 +242,7 @@ $updatePayload = @{
         healthCheckPath = "/healthz"
         envSpecificDetails = @{
             buildCommand = "pip install -r requirements.txt"
-            startCommand = "gunicorn app.web_report_main:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
+            startCommand = 'gunicorn app.web_report_main:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120'
         }
     }
 }
