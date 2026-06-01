@@ -90,16 +90,24 @@ def _snapshot_payload() -> dict:
             "revenue_total_thb_text": "2,200",
             "revenue_total_vnd_text": "1,782,000",
             "waiting_orders": 1,
+            "waiting_value_thb_text": "1,200",
+            "waiting_value_vnd_text": "972,000",
             "shipping_orders": 1,
+            "shipping_value_thb_text": "1,000",
+            "shipping_value_vnd_text": "810,000",
             "returning_orders": 0,
+            "returning_value_thb_text": "0",
+            "returning_value_vnd_text": "0",
             "reconcile_received_orders": 1,
+            "reconcile_received_value_thb_text": "2,200",
+            "reconcile_received_value_vnd_text": "1,782,000",
             "pending_reconcile_orders": 1,
+            "pending_reconcile_value_thb_text": "1,200",
+            "pending_reconcile_value_vnd_text": "972,000",
             "missing_line_count": 1,
             "missing_quantity": 1,
             "missing_product_count": 1,
             "waiting_value_text": "1,200 THB (~ 972,000 VNĐ)",
-            "waiting_value_thb_text": "1,200",
-            "waiting_value_vnd_text": "972,000",
         },
         "size_summary": [{"size": "M", "quantity": 1}],
         "brands": [
@@ -230,3 +238,18 @@ def test_dashboard_daily_revenue_uses_today_snapshot_not_selected_range(tmp_path
     assert response.status_code == 200
     assert "7,400 THB" in html
     assert "115,190 THB" in html
+
+
+def test_status_page_shows_total_orders_and_total_revenue_summary(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = _StubReportService(_snapshot_payload())
+    app = create_app(settings=settings, report_service=service)
+    app.testing = True
+    client = app.test_client()
+
+    response = client.get("/status/shipping?mode=today")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Tổng đơn: 1" in html
+    assert "Tổng doanh số: 1,000 THB (~ 810,000 VNĐ)" in html

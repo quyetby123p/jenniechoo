@@ -3,7 +3,12 @@
 {% block content %}
 <div class="brand-card p-3 mb-3">
   <h2 class="h5 mb-1">{{ status_title }}</h2>
-  <div class="text-muted small">Kỳ dữ liệu: {{ snapshot.period.label }} · Số dòng: {{ "{:,}".format(rows|length) }}</div>
+  <div class="text-muted small">
+    Kỳ dữ liệu: {{ snapshot.period.label }}
+    · Tổng đơn: {{ "{:,}".format(status_summary.orders) }}
+    · Tổng doanh số: {{ status_summary.value_thb_text }} THB (~ {{ status_summary.value_vnd_text }} VNĐ)
+    · Số dòng hiển thị: {{ "{:,}".format(rows|length) }}
+  </div>
 </div>
 
 <div class="brand-card p-3">

@@ -7,8 +7,9 @@
     <div class="metric-card p-3">
       <div class="label">Đơn chốt hôm nay</div>
       <div class="value">{{ "{:,}".format(summary_cards.closed_today) }}</div>
+      <small class="text-muted">Tổng đơn: {{ "{:,}".format(summary_cards.closed_today) }}</small>
     </div>
-    <div class="metric-card p-3 kpi-span-2">
+    <div class="metric-card p-3">
       <div class="label">Doanh số</div>
       <div class="value" style="font-size: 26px;">{{ summary_cards.revenue_today_thb_text }} THB</div>
       <small class="text-muted">~ {{ summary_cards.revenue_today_vnd_text }} VNĐ</small>
@@ -16,14 +17,17 @@
     <div class="metric-card p-3">
       <div class="label">Đơn chờ (Tổng)</div>
       <div class="value text-danger">{{ "{:,}".format(summary_cards.waiting_total) }}</div>
+      <small class="text-muted">Tổng đơn: {{ "{:,}".format(summary_cards.waiting_total) }}</small>
     </div>
     <div class="metric-card p-3">
       <div class="label">Đơn đang gửi (Tổng)</div>
       <div class="value text-primary">{{ "{:,}".format(summary_cards.shipping_total) }}</div>
+      <small class="text-muted">Tổng đơn: {{ "{:,}".format(summary_cards.shipping_total) }}</small>
     </div>
     <div class="metric-card p-3">
       <div class="label">Đơn chờ đối soát (Tổng)</div>
       <div class="value text-danger">{{ "{:,}".format(summary_cards.pending_reconcile_total) }}</div>
+      <small class="text-muted">Tổng đơn: {{ "{:,}".format(summary_cards.pending_reconcile_total) }}</small>
     </div>
   </div>
 </div>
@@ -39,8 +43,9 @@
   <div class="metric-card p-3">
     <div class="label">Số lượng đơn hàng</div>
     <div class="value">{{ "{:,}".format(snapshot.metrics.total_orders) }}</div>
+    <small class="text-muted">Tổng đơn: {{ "{:,}".format(snapshot.metrics.total_orders) }}</small>
   </div>
-  <div class="metric-card p-3 kpi-span-2">
+  <div class="metric-card p-3">
     <div class="label">Doanh số</div>
     <div class="value" style="font-size: 24px;">{{ snapshot.metrics.revenue_total_thb_text }} THB</div>
     <small class="text-muted">~ {{ snapshot.metrics.revenue_total_vnd_text }} VNĐ</small>
@@ -48,30 +53,36 @@
   <div class="metric-card p-3">
     <div class="label">Đơn chốt</div>
     <div class="value">{{ "{:,}".format(snapshot.metrics.closed_orders) }}</div>
+    <small class="text-muted">Tổng đơn: {{ "{:,}".format(snapshot.metrics.closed_orders) }}</small>
   </div>
   <div class="metric-card p-3">
     <div class="label">Đơn đang gửi</div>
     <div class="value text-primary">{{ "{:,}".format(snapshot.metrics.shipping_orders) }}</div>
+    <small class="text-muted">Tổng đơn: {{ "{:,}".format(snapshot.metrics.shipping_orders) }}</small>
     <small class="text-muted">{{ snapshot.metrics.shipping_value_thb_text }} THB (~ {{ snapshot.metrics.shipping_value_vnd_text }} VNĐ)</small>
   </div>
-  <div class="metric-card p-3 kpi-span-2">
+  <div class="metric-card p-3">
     <div class="label">Đơn chờ hàng</div>
     <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.waiting_orders) }}</div>
+    <small class="text-muted">Tổng đơn: {{ "{:,}".format(snapshot.metrics.waiting_orders) }}</small>
     <small class="text-muted">{{ snapshot.metrics.waiting_value_thb_text }} THB (~ {{ snapshot.metrics.waiting_value_vnd_text }} VNĐ)</small>
   </div>
   <div class="metric-card p-3">
     <div class="label">Đối soát đã nhận</div>
     <div class="value text-success">{{ "{:,}".format(snapshot.metrics.reconcile_received_orders) }}</div>
+    <small class="text-muted">Tổng đơn: {{ "{:,}".format(snapshot.metrics.reconcile_received_orders) }}</small>
     <small class="text-muted">{{ snapshot.metrics.reconcile_received_value_thb_text }} THB (~ {{ snapshot.metrics.reconcile_received_value_vnd_text }} VNĐ)</small>
   </div>
   <div class="metric-card p-3">
     <div class="label">Đơn hoàn/đang hoàn</div>
     <div class="value text-warning">{{ "{:,}".format(snapshot.metrics.returning_orders) }}</div>
+    <small class="text-muted">Tổng đơn: {{ "{:,}".format(snapshot.metrics.returning_orders) }}</small>
     <small class="text-muted">{{ snapshot.metrics.returning_value_thb_text }} THB (~ {{ snapshot.metrics.returning_value_vnd_text }} VNĐ)</small>
   </div>
   <div class="metric-card p-3">
     <div class="label">Đơn chờ đối soát</div>
     <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.pending_reconcile_orders) }}</div>
+    <small class="text-muted">Tổng đơn: {{ "{:,}".format(snapshot.metrics.pending_reconcile_orders) }}</small>
     <small class="text-muted">{{ snapshot.metrics.pending_reconcile_value_thb_text }} THB (~ {{ snapshot.metrics.pending_reconcile_value_vnd_text }} VNĐ)</small>
   </div>
 </div>

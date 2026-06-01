@@ -113,6 +113,9 @@ def create_app(
         rows = status_map.get(status_key)
         if not isinstance(rows, list):
             abort(404)
+        metrics = snapshot.get("metrics", {})
+        if not isinstance(metrics, dict):
+            metrics = {}
         title_map = {
             "waiting": "Đơn chờ hàng",
             "shipping": "Đơn đang gửi",
@@ -120,11 +123,47 @@ def create_app(
             "reconcile-received": "Đơn đối soát đã nhận",
             "returning": "Đơn hoàn / đang hoàn",
         }
+        summary_map = {
+            "waiting": {
+                "orders": int(metrics.get("waiting_orders") or 0),
+                "value_thb_text": str(metrics.get("waiting_value_thb_text") or "0"),
+                "value_vnd_text": str(metrics.get("waiting_value_vnd_text") or "0"),
+            },
+            "shipping": {
+                "orders": int(metrics.get("shipping_orders") or 0),
+                "value_thb_text": str(metrics.get("shipping_value_thb_text") or "0"),
+                "value_vnd_text": str(metrics.get("shipping_value_vnd_text") or "0"),
+            },
+            "reconcile-received": {
+                "orders": int(metrics.get("reconcile_received_orders") or 0),
+                "value_thb_text": str(metrics.get("reconcile_received_value_thb_text") or "0"),
+                "value_vnd_text": str(metrics.get("reconcile_received_value_vnd_text") or "0"),
+            },
+            "returning": {
+                "orders": int(metrics.get("returning_orders") or 0),
+                "value_thb_text": str(metrics.get("returning_value_thb_text") or "0"),
+                "value_vnd_text": str(metrics.get("returning_value_vnd_text") or "0"),
+            },
+            "pending-reconcile": {
+                "orders": int(metrics.get("pending_reconcile_orders") or 0),
+                "value_thb_text": str(metrics.get("pending_reconcile_value_thb_text") or "0"),
+                "value_vnd_text": str(metrics.get("pending_reconcile_value_vnd_text") or "0"),
+            },
+        }
+        status_summary = summary_map.get(
+            status_key,
+            {
+                "orders": len(rows),
+                "value_thb_text": "0",
+                "value_vnd_text": "0",
+            },
+        )
         return render_template(
             "web_report/status_detail.html",
             snapshot=snapshot,
             status_key=status_key,
             status_title=title_map.get(status_key, status_key),
+            status_summary=status_summary,
             rows=rows,
             active_path=f"/status/{status_key}",
             selected_mode=period["mode"],
