@@ -12,7 +12,7 @@ class _FakePancakeClient:
         self._orders = orders
         self.fetch_count = 0
 
-    def fetch_all_orders_for_date(self, report_date: date, timezone_name: str):  # noqa: ANN001
+    def fetch_all_orders_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
         self.fetch_count += 1
         return self._orders
 
@@ -136,16 +136,88 @@ def test_snapshot_aggregates_orders_waiting_and_pending_reconcile(tmp_path: Path
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot["metrics"]["total_orders"] == 3
-    assert snapshot["metrics"]["closed_orders"] == 3
+    assert snapshot["metrics"]["closed_orders"] == 1
     assert snapshot["metrics"]["waiting_orders"] == 2
+    assert snapshot["metrics"]["returning_orders"] == 0
+    assert snapshot["metrics"]["reconcile_received_orders"] == 0
     assert snapshot["metrics"]["pending_reconcile_orders"] == 1
     assert snapshot["metrics"]["missing_line_count"] == 3
     assert snapshot["metrics"]["missing_quantity"] == 4
     assert snapshot["metrics"]["missing_product_count"] == 3
+    assert snapshot["period"]["is_single_day"] is True
     assert len(snapshot["status_lists"]["waiting"]) == 2
     assert len(snapshot["status_lists"]["pending-reconcile"]) == 1
     assert any(brand["brand_slug"] == "jennie-choo" for brand in snapshot["brands"])
     assert any(brand["brand_slug"] == "say-studios" for brand in snapshot["brands"])
+
+
+def test_snapshot_supports_date_range_and_new_metrics(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    run_path_1 = settings.reconcile_cod_runs_dir / "run_2026-06-01_20260601T030000Z.json"
+    run_path_2 = settings.reconcile_cod_runs_dir / "run_2026-06-02_20260602T030000Z.json"
+    dump_json(
+        run_path_1,
+        {
+            "settlement_date": "2026-06-01",
+            "generated_at": "2026-06-01T03:00:00+00:00",
+            "records": [
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "SUCCESS",
+                    "pancake_display_id": "JCT301",
+                    "td_awb": "AWB1",
+                }
+            ],
+        },
+    )
+    dump_json(
+        run_path_2,
+        {
+            "settlement_date": "2026-06-02",
+            "generated_at": "2026-06-02T03:00:00+00:00",
+            "records": [
+                {
+                    "match_result": "ambiguous",
+                    "td_status": "SUCCESS",
+                    "pancake_display_id": "JCT302",
+                    "td_awb": "AWB2",
+                }
+            ],
+        },
+    )
+    orders = [
+        {
+            "display_id": "JC-R1",
+            "status_name": "Đang hoàn",
+            "total_price": 110_000,
+            "inserted_at": "2026-06-02T09:00:00+07:00",
+            "items": [],
+        },
+        {
+            "display_id": "JC-C1",
+            "status_name": "Đã nhận",
+            "total_price": 120_000,
+            "inserted_at": "2026-06-01T09:00:00+07:00",
+            "items": [],
+        },
+    ]
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(orders),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1), date(2026, 6, 2))
+
+    assert snapshot["period"]["start_date"] == "2026-06-01"
+    assert snapshot["period"]["end_date"] == "2026-06-02"
+    assert snapshot["period"]["is_single_day"] is False
+    assert snapshot["metrics"]["total_orders"] == 2
+    assert snapshot["metrics"]["returning_orders"] == 1
+    assert snapshot["metrics"]["reconcile_received_orders"] == 1
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 1
+    assert len(snapshot["status_lists"]["returning"]) == 1
+    assert len(snapshot["status_lists"]["reconcile-received"]) == 1
 
 
 def test_snapshot_cache_uses_ttl(tmp_path: Path) -> None:

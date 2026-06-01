@@ -3,7 +3,7 @@
 {% block content %}
 <div class="brand-card p-3 mb-3">
   <h2 class="h5 mb-1">{{ status_title }}</h2>
-  <div class="text-muted small">Ngày dữ liệu: {{ snapshot.report_date }} · Số dòng: {{ "{:,}".format(rows|length) }}</div>
+  <div class="text-muted small">Kỳ dữ liệu: {{ snapshot.period.label }} · Số dòng: {{ "{:,}".format(rows|length) }}</div>
 </div>
 
 <div class="brand-card p-3">
@@ -37,6 +37,58 @@
         {% endfor %}
         </tbody>
       </table>
+    {% elif status_key == "returning" %}
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Mã đơn</th>
+            <th>Brand</th>
+            <th>Thời gian tạo</th>
+            <th>Trạng thái</th>
+            <th>Giá trị đơn</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><strong>{{ row.order_ref }}</strong></td>
+            <td>{{ row.brand_name }}</td>
+            <td>{{ row.created_at }}</td>
+            <td>{{ row.status_label or row.status_code }}</td>
+            <td>{{ row.order_total_text }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="text-muted">Không có đơn hoàn/đang hoàn.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% elif status_key == "reconcile-received" %}
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Mã đơn</th>
+            <th>Match result</th>
+            <th>Khách hàng</th>
+            <th>AWB</th>
+            <th>Trạng thái TD</th>
+            <th>Ngày đối soát</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><strong>{{ row.pancake_order_ref }}</strong></td>
+            <td>{{ row.match_result }}</td>
+            <td>{{ row.customer_name }}</td>
+            <td>{{ row.td_awb }}</td>
+            <td>{{ row.td_status }}</td>
+            <td>{{ row.settlement_date }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="text-muted">Không có đơn đối soát đã nhận.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
     {% else %}
       <table class="table table-sm align-middle mb-0">
         <thead>
@@ -47,6 +99,7 @@
             <th>AWB</th>
             <th>Trạng thái TD</th>
             <th>Lý do</th>
+            <th>Ngày đối soát</th>
           </tr>
         </thead>
         <tbody>
@@ -58,9 +111,10 @@
             <td>{{ row.td_awb }}</td>
             <td>{{ row.td_status }}</td>
             <td>{{ row.reason }}</td>
+            <td>{{ row.settlement_date }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="6" class="text-muted">Không có đơn chờ đối soát.</td></tr>
+          <tr><td colspan="7" class="text-muted">Không có đơn chờ đối soát.</td></tr>
         {% endfor %}
         </tbody>
       </table>

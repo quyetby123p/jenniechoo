@@ -21,16 +21,41 @@
       <h1 class="h3 mb-1">Báo cáo vận hành đơn hàng</h1>
       <p class="text-muted mb-2">Timezone: {{ timezone_name }} · Refresh cache: 10 phút</p>
     </div>
-    <form class="d-flex gap-2" method="get" action="{{ request.path }}">
-      <input type="date" class="form-control" name="date" value="{{ selected_date }}">
-      <button class="btn btn-primary" type="submit">Xem</button>
+    <form class="row g-2 align-items-end" method="get" action="{{ request.path }}">
+      <div class="col-auto">
+        <label class="form-label small mb-1">Kiểu xem</label>
+        <select class="form-select" name="mode">
+          <option value="today" {% if selected_mode == "today" %}selected{% endif %}>Hôm nay</option>
+          <option value="yesterday" {% if selected_mode == "yesterday" %}selected{% endif %}>Hôm qua</option>
+          <option value="date" {% if selected_mode == "date" %}selected{% endif %}>Ngày cố định</option>
+          <option value="range" {% if selected_mode == "range" %}selected{% endif %}>Khoảng ngày</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1">Ngày</label>
+        <input type="date" class="form-control" name="date" value="{{ selected_date }}">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1">Từ ngày</label>
+        <input type="date" class="form-control" name="start_date" value="{{ selected_start_date }}">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1">Đến ngày</label>
+        <input type="date" class="form-control" name="end_date" value="{{ selected_end_date }}">
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary" type="submit">Xem</button>
+      </div>
     </form>
   </div>
+  <div class="small text-muted mb-3">Gợi ý: chọn "Ngày cố định" để xem 1 ngày, chọn "Khoảng ngày" để xem từ ngày A đến ngày B.</div>
   <div class="mb-3">
-    <a class="btn btn-sm {% if active_path == '/' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/?date={{ selected_date }}">Dashboard</a>
-    <a class="btn btn-sm {% if active_path == '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/waiting?date={{ selected_date }}">Đơn chờ hàng</a>
-    <a class="btn btn-sm {% if active_path == '/status/pending-reconcile' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/pending-reconcile?date={{ selected_date }}">Đơn chờ đối soát</a>
-    <a class="btn btn-sm btn-outline-secondary" href="/api/v1/snapshot?date={{ selected_date }}" target="_blank">API Snapshot</a>
+    <a class="btn btn-sm {% if active_path == '/' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/?{{ query_string }}">Dashboard</a>
+    <a class="btn btn-sm {% if active_path == '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/waiting?{{ query_string }}">Đơn chờ hàng</a>
+    <a class="btn btn-sm {% if active_path == '/status/reconcile-received' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/reconcile-received?{{ query_string }}">Đối soát đã nhận</a>
+    <a class="btn btn-sm {% if active_path == '/status/returning' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/returning?{{ query_string }}">Đơn hoàn/đang hoàn</a>
+    <a class="btn btn-sm {% if active_path == '/status/pending-reconcile' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/pending-reconcile?{{ query_string }}">Đơn chờ đối soát</a>
+    <a class="btn btn-sm btn-outline-secondary" href="/api/v1/snapshot?{{ query_string }}" target="_blank">API Snapshot</a>
   </div>
   {% block content %}{% endblock %}
 </div>

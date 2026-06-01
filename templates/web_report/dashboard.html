@@ -1,27 +1,42 @@
 {% extends "web_report/base.html" %}
 {% block title %}Dashboard đơn hàng{% endblock %}
 {% block content %}
+<div class="brand-card p-3 mb-3">
+  <div class="text-muted small">Kỳ dữ liệu: <strong>{{ snapshot.period.label }}</strong></div>
+</div>
 <div class="row g-3 mb-3">
-  <div class="col-md-3">
+  <div class="col-md-2">
     <div class="metric-card p-3">
       <div class="label">Số lượng đơn hàng</div>
       <div class="value">{{ "{:,}".format(snapshot.metrics.total_orders) }}</div>
     </div>
   </div>
-  <div class="col-md-3">
+  <div class="col-md-2">
     <div class="metric-card p-3">
-      <div class="label">Chốt được (đơn mới POS)</div>
+      <div class="label">Đơn chốt</div>
       <div class="value">{{ "{:,}".format(snapshot.metrics.closed_orders) }}</div>
     </div>
   </div>
-  <div class="col-md-3">
+  <div class="col-md-2">
     <div class="metric-card p-3">
       <div class="label">Đơn chờ hàng</div>
       <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.waiting_orders) }}</div>
       <small class="text-muted">{{ snapshot.metrics.waiting_value_text }}</small>
     </div>
   </div>
-  <div class="col-md-3">
+  <div class="col-md-2">
+    <div class="metric-card p-3">
+      <div class="label">Đối soát đã nhận</div>
+      <div class="value text-success">{{ "{:,}".format(snapshot.metrics.reconcile_received_orders) }}</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="metric-card p-3">
+      <div class="label">Đơn hoàn/đang hoàn</div>
+      <div class="value text-warning">{{ "{:,}".format(snapshot.metrics.returning_orders) }}</div>
+    </div>
+  </div>
+  <div class="col-md-2">
     <div class="metric-card p-3">
       <div class="label">Đơn chờ đối soát</div>
       <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.pending_reconcile_orders) }}</div>
@@ -51,10 +66,16 @@
     <div class="brand-card p-3 h-100">
       <h2 class="h5 mb-3">Trạng thái cần xử lý</h2>
       <p class="mb-2">
-        <a href="/status/waiting?date={{ selected_date }}">Xem danh sách đơn chờ hàng</a>
+        <a href="/status/waiting?{{ query_string }}">Xem danh sách đơn chờ hàng</a>
+      </p>
+      <p class="mb-2">
+        <a href="/status/reconcile-received?{{ query_string }}">Xem tình trạng đối soát đã nhận</a>
+      </p>
+      <p class="mb-2">
+        <a href="/status/returning?{{ query_string }}">Xem danh sách đơn hoàn / đang hoàn</a>
       </p>
       <p class="mb-0">
-        <a href="/status/pending-reconcile?date={{ selected_date }}">Xem danh sách đơn chờ đối soát</a>
+        <a href="/status/pending-reconcile?{{ query_string }}">Xem danh sách đơn chờ đối soát</a>
       </p>
     </div>
   </div>
@@ -88,7 +109,7 @@
               <span class="size-pill">{{ size.size }} {{ "{:,}".format(size.quantity) }}</span>
             {% endfor %}
           </td>
-          <td><a href="/brand/{{ brand.brand_slug }}?date={{ selected_date }}">Chi tiết</a></td>
+          <td><a href="/brand/{{ brand.brand_slug }}?{{ query_string }}">Chi tiết</a></td>
         </tr>
       {% else %}
         <tr><td colspan="7" class="text-muted">Không có dữ liệu brand.</td></tr>

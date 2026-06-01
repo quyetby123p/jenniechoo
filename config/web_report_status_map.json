@@ -5,6 +5,27 @@
     "cho hang",
     "waiting"
   ],
+  "closed_status_codes": [],
+  "closed_status_labels": [],
+  "returning_status_codes": [],
+  "returning_status_labels": [
+    "Đang hoàn",
+    "Hoàn",
+    "returning",
+    "returned"
+  ],
+  "pending_reconcile_match_results": [
+    "not_found",
+    "ambiguous",
+    "unmapped_status"
+  ],
+  "reconcile_received_match_results": [
+    "matched_unique",
+    "already_correct"
+  ],
+  "reconcile_received_td_statuses": [
+    "SUCCESS"
+  ],
   "brand_rules": [
     {
       "pattern": "^JC",

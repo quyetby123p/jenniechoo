@@ -4,6 +4,7 @@
 <div class="brand-card p-3 mb-3">
   <h2 class="h5 mb-2">{{ brand.brand_name }}</h2>
   <div class="text-muted small">
+    Kỳ dữ liệu: {{ snapshot.period.label }} ·
     Tổng đơn: {{ "{:,}".format(brand.total_orders) }} ·
     Đơn chờ hàng: {{ "{:,}".format(brand.waiting_orders) }} ·
     Giá trị chờ hàng: {{ brand.waiting_value_text }}

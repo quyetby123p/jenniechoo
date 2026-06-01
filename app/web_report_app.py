@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from flask import Flask, abort, jsonify, render_template, request
@@ -52,25 +53,29 @@ def create_app(
 
     @app.get("/api/v1/snapshot")
     def snapshot_api():  # type: ignore[no-untyped-def]
-        target_date = _parse_query_date(request.args.get("date"), timezone_name=current_settings.app_timezone)
-        snapshot = current_report_service.get_snapshot(target_date)
+        period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
+        snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
         return jsonify(snapshot)
 
     @app.get("/")
     def dashboard():  # type: ignore[no-untyped-def]
-        target_date = _parse_query_date(request.args.get("date"), timezone_name=current_settings.app_timezone)
-        snapshot = current_report_service.get_snapshot(target_date)
+        period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
+        snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
         return render_template(
             "web_report/dashboard.html",
             snapshot=snapshot,
             active_path="/",
-            selected_date=target_date.isoformat(),
+            selected_mode=period["mode"],
+            selected_date=period["date_text"],
+            selected_start_date=period["start_text"],
+            selected_end_date=period["end_text"],
+            query_string=period["query_string"],
         )
 
     @app.get("/brand/<brand_slug>")
     def brand_detail(brand_slug: str):  # type: ignore[no-untyped-def]
-        target_date = _parse_query_date(request.args.get("date"), timezone_name=current_settings.app_timezone)
-        snapshot = current_report_service.get_snapshot(target_date)
+        period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
+        snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
         brand = snapshot.get("brand_detail", {}).get(brand_slug)
         if not isinstance(brand, dict):
             abort(404)
@@ -79,13 +84,17 @@ def create_app(
             snapshot=snapshot,
             brand=brand,
             active_path=f"/brand/{brand_slug}",
-            selected_date=target_date.isoformat(),
+            selected_mode=period["mode"],
+            selected_date=period["date_text"],
+            selected_start_date=period["start_text"],
+            selected_end_date=period["end_text"],
+            query_string=period["query_string"],
         )
 
     @app.get("/status/<status_key>")
     def status_detail(status_key: str):  # type: ignore[no-untyped-def]
-        target_date = _parse_query_date(request.args.get("date"), timezone_name=current_settings.app_timezone)
-        snapshot = current_report_service.get_snapshot(target_date)
+        period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
+        snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
         status_map = snapshot.get("status_lists", {})
         if not isinstance(status_map, dict):
             abort(404)
@@ -95,6 +104,8 @@ def create_app(
         title_map = {
             "waiting": "Đơn chờ hàng",
             "pending-reconcile": "Đơn chờ đối soát",
+            "reconcile-received": "Đơn đối soát đã nhận",
+            "returning": "Đơn hoàn / đang hoàn",
         }
         return render_template(
             "web_report/status_detail.html",
@@ -103,7 +114,11 @@ def create_app(
             status_title=title_map.get(status_key, status_key),
             rows=rows,
             active_path=f"/status/{status_key}",
-            selected_date=target_date.isoformat(),
+            selected_mode=period["mode"],
+            selected_date=period["date_text"],
+            selected_start_date=period["start_text"],
+            selected_end_date=period["end_text"],
+            query_string=period["query_string"],
         )
 
     @app.context_processor
@@ -115,14 +130,58 @@ def create_app(
     return app
 
 
-def _parse_query_date(raw_value: str | None, *, timezone_name: str) -> date:
-    if not raw_value:
-        return datetime.now(_resolve_timezone(timezone_name)).date()
-    value = str(raw_value).strip()
+def _parse_query_period(args: Any, *, timezone_name: str) -> dict[str, Any]:
+    tz = _resolve_timezone(timezone_name)
+    today = datetime.now(tz).date()
+    mode = str(args.get("mode", "")).strip().lower()
+    date_raw = str(args.get("date", "")).strip()
+    start_raw = str(args.get("start_date", "")).strip()
+    end_raw = str(args.get("end_date", "")).strip()
+
+    if mode == "today":
+        start_date = today
+        end_date = today
+        mode = "today"
+    elif mode == "yesterday":
+        start_date = today - timedelta(days=1)
+        end_date = start_date
+        mode = "yesterday"
+    elif mode == "range" or (not mode and start_raw and end_raw):
+        start_date = _parse_iso_date(start_raw, fallback=today)
+        end_date = _parse_iso_date(end_raw, fallback=start_date)
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
+        mode = "range"
+    else:
+        start_date = _parse_iso_date(date_raw, fallback=today)
+        end_date = start_date
+        mode = "date"
+
+    query_params = {
+        "mode": mode,
+        "date": start_date.isoformat(),
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+    }
+    return {
+        "mode": mode,
+        "start_date": start_date,
+        "end_date": end_date,
+        "date_text": start_date.isoformat(),
+        "start_text": start_date.isoformat(),
+        "end_text": end_date.isoformat(),
+        "query_string": urlencode(query_params),
+    }
+
+
+def _parse_iso_date(raw_value: str | None, *, fallback: date) -> date:
+    value = str(raw_value or "").strip()
+    if not value:
+        return fallback
     try:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError:
-        return datetime.now(_resolve_timezone(timezone_name)).date()
+        return fallback
 
 
 def _resolve_timezone(timezone_name: str) -> ZoneInfo:

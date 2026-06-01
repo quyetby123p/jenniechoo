@@ -8,10 +8,10 @@ from app.web_report_app import create_app
 class _StubReportService:
     def __init__(self, payload: dict):
         self.payload = payload
-        self.calls: list[date] = []
+        self.calls: list[tuple[date, date]] = []
 
-    def get_snapshot(self, report_date: date):  # noqa: ANN001
-        self.calls.append(report_date)
+    def get_snapshot(self, start_date: date, end_date: date | None = None):  # noqa: ANN001
+        self.calls.append((start_date, end_date or start_date))
         return self.payload
 
 
@@ -56,11 +56,19 @@ def _dummy_settings(tmp_path: Path) -> Settings:
 def _snapshot_payload() -> dict:
     return {
         "report_date": "2026-06-01",
+        "period": {
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-01",
+            "is_single_day": True,
+            "label": "01-06-2026",
+        },
         "timezone": "Asia/Ho_Chi_Minh",
         "metrics": {
             "total_orders": 2,
             "closed_orders": 2,
             "waiting_orders": 1,
+            "returning_orders": 0,
+            "reconcile_received_orders": 1,
             "pending_reconcile_orders": 1,
             "missing_line_count": 1,
             "missing_quantity": 1,
@@ -123,6 +131,18 @@ def _snapshot_payload() -> dict:
                     "reason": "Not found in reconcile",
                 }
             ],
+            "reconcile-received": [
+                {
+                    "pancake_order_ref": "JC001",
+                    "match_result": "matched_unique",
+                    "customer_name": "Test",
+                    "td_awb": "AWB1",
+                    "td_status": "SUCCESS",
+                    "settlement_date": "2026-06-01",
+                    "reason": "",
+                }
+            ],
+            "returning": [],
         },
     }
 
@@ -139,6 +159,8 @@ def test_routes_render_success(tmp_path: Path) -> None:
     assert client.get("/brand/jennie-choo?date=2026-06-01").status_code == 200
     assert client.get("/status/waiting?date=2026-06-01").status_code == 200
     assert client.get("/status/pending-reconcile?date=2026-06-01").status_code == 200
+    assert client.get("/status/reconcile-received?mode=today").status_code == 200
+    assert client.get("/status/returning?mode=range&start_date=2026-06-01&end_date=2026-06-01").status_code == 200
     assert client.get("/api/v1/snapshot?date=2026-06-01").status_code == 200
 
 

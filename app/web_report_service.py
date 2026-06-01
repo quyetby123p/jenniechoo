@@ -29,8 +29,9 @@ class WebReportService:
         self._cache_lock = Lock()
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
-    def get_snapshot(self, report_date: date) -> dict[str, Any]:
-        key = report_date.isoformat()
+    def get_snapshot(self, start_date: date, end_date: date | None = None) -> dict[str, Any]:
+        period_start, period_end = self._normalize_period(start_date, end_date)
+        key = f"{period_start.isoformat()}::{period_end.isoformat()}"
         now_ts = time.time()
         with self._cache_lock:
             cached = self._cache.get(key)
@@ -39,19 +40,31 @@ class WebReportService:
                 if now_ts - cached_ts < float(self.settings.web_report_refresh_seconds):
                     return payload
 
-        payload = self._build_snapshot(report_date)
+        payload = self._build_snapshot(period_start, period_end)
         with self._cache_lock:
             self._cache[key] = (time.time(), payload)
         return payload
 
-    def _build_snapshot(self, report_date: date) -> dict[str, Any]:
-        tz = self._resolve_timezone()
-        waiting_cfg = self._load_status_map_config()
-        waiting_codes = self._to_int_set(waiting_cfg.get("waiting_status_codes", []))
-        waiting_labels = self._to_text_set(waiting_cfg.get("waiting_status_labels", ["chờ hàng", "cho hang"]))
-        brand_rules = waiting_cfg.get("brand_rules", [])
+    @staticmethod
+    def _normalize_period(start_date: date, end_date: date | None) -> tuple[date, date]:
+        if end_date is None:
+            return start_date, start_date
+        if end_date < start_date:
+            return end_date, start_date
+        return start_date, end_date
 
-        orders = self.pancake.fetch_all_orders_for_date(report_date, self.settings.app_timezone)
+    def _build_snapshot(self, start_date: date, end_date: date) -> dict[str, Any]:
+        tz = self._resolve_timezone()
+        status_cfg = self._load_status_map_config()
+        waiting_codes = self._to_int_set(status_cfg.get("waiting_status_codes", []))
+        waiting_labels = self._to_text_set(status_cfg.get("waiting_status_labels", ["chờ hàng", "cho hang"]))
+        closed_codes = self._to_int_set(status_cfg.get("closed_status_codes", []))
+        closed_labels = self._to_text_set(status_cfg.get("closed_status_labels", []))
+        returning_codes = self._to_int_set(status_cfg.get("returning_status_codes", []))
+        returning_labels = self._to_text_set(status_cfg.get("returning_status_labels", ["đang hoàn", "hoàn"]))
+        brand_rules = status_cfg.get("brand_rules", [])
+
+        orders = self.pancake.fetch_all_orders_for_range(start_date, end_date, self.settings.app_timezone)
         if not isinstance(orders, list):
             orders = []
         orders = [item for item in orders if isinstance(item, dict)]
@@ -59,6 +72,7 @@ class WebReportService:
         total_orders = 0
         closed_orders = 0
         waiting_orders_count = 0
+        returning_orders_count = 0
         waiting_value_minor = 0
         missing_line_count = 0
         missing_quantity = 0
@@ -66,11 +80,11 @@ class WebReportService:
         missing_products: set[str] = set()
 
         waiting_orders: list[dict[str, Any]] = []
+        returning_orders: list[dict[str, Any]] = []
         brands: dict[str, dict[str, Any]] = {}
 
         for order in orders:
             total_orders += 1
-            closed_orders += 1
 
             order_ref = self._extract_order_ref(order)
             order_created_dt = self._extract_order_datetime(order, tz=tz)
@@ -78,6 +92,43 @@ class WebReportService:
             order_status_label = self._extract_status_label(order)
             order_total_minor = self._extract_order_total_minor(order)
             brand_name, brand_slug = self._extract_brand(order, brand_rules=brand_rules)
+            is_waiting = self._is_waiting_status(
+                code=order_status_code,
+                label=order_status_label,
+                waiting_codes=waiting_codes,
+                waiting_labels=waiting_labels,
+            )
+            is_returning = self._is_returning_status(
+                code=order_status_code,
+                label=order_status_label,
+                returning_codes=returning_codes,
+                returning_labels=returning_labels,
+            )
+            is_closed = self._is_closed_status(
+                code=order_status_code,
+                label=order_status_label,
+                closed_codes=closed_codes,
+                closed_labels=closed_labels,
+                is_waiting=is_waiting,
+                is_returning=is_returning,
+            )
+            if is_closed:
+                closed_orders += 1
+            if is_returning:
+                returning_orders_count += 1
+                returning_orders.append(
+                    {
+                        "order_ref": order_ref,
+                        "brand_name": brand_name,
+                        "brand_slug": brand_slug,
+                        "status_code": order_status_code,
+                        "status_label": order_status_label,
+                        "created_at": self._format_dt(order_created_dt, tz=tz),
+                        "created_ts": self._to_ts(order_created_dt),
+                        "order_total_minor": order_total_minor,
+                        "order_total_text": self._fmt_currency(order_total_minor),
+                    }
+                )
 
             brand_bucket = brands.setdefault(
                 brand_slug,
@@ -95,14 +146,8 @@ class WebReportService:
                 },
             )
             brand_bucket["total_orders"] = self._to_int(brand_bucket.get("total_orders")) + 1
-            brand_bucket["closed_orders"] = self._to_int(brand_bucket.get("closed_orders")) + 1
-
-            is_waiting = self._is_waiting_status(
-                code=order_status_code,
-                label=order_status_label,
-                waiting_codes=waiting_codes,
-                waiting_labels=waiting_labels,
-            )
+            if is_closed:
+                brand_bucket["closed_orders"] = self._to_int(brand_bucket.get("closed_orders")) + 1
             if not is_waiting:
                 continue
 
@@ -190,18 +235,16 @@ class WebReportService:
             )
 
         waiting_orders.sort(key=lambda item: self._to_int(item.get("created_ts")), reverse=True)
-
-        pending_reconcile = self._load_pending_reconcile_records(report_date)
-        pending_reconcile_orders = len(
-            {
-                self._normalize_text(str(item.get("pancake_order_ref", "")).strip())
-                for item in pending_reconcile
-                if str(item.get("pancake_order_ref", "")).strip()
-            }
+        returning_orders.sort(key=lambda item: self._to_int(item.get("created_ts")), reverse=True)
+        reconcile_summary = self._load_reconcile_period_summary(
+            start_date=start_date,
+            end_date=end_date,
+            status_cfg=status_cfg,
         )
-
-        if pending_reconcile_orders <= 0:
-            pending_reconcile_orders = len(pending_reconcile)
+        pending_reconcile = reconcile_summary.get("pending_rows", [])
+        reconcile_received = reconcile_summary.get("received_rows", [])
+        pending_reconcile_orders = self._to_int(reconcile_summary.get("pending_order_count"))
+        reconcile_received_orders = self._to_int(reconcile_summary.get("received_order_count"))
 
         brand_overview: list[dict[str, Any]] = []
         brand_detail: dict[str, Any] = {}
@@ -253,15 +296,29 @@ class WebReportService:
                 "sku_rows": sku_rows,
             }
 
+        is_single_day = start_date == end_date
+        period_label = (
+            start_date.strftime("%d-%m-%Y")
+            if is_single_day
+            else f"{start_date.strftime('%d-%m-%Y')} → {end_date.strftime('%d-%m-%Y')}"
+        )
         payload = {
             "ok": True,
-            "report_date": report_date.isoformat(),
+            "report_date": start_date.isoformat() if is_single_day else f"{start_date.isoformat()}..{end_date.isoformat()}",
             "timezone": self.settings.app_timezone,
             "generated_at": now_utc_iso(),
+            "period": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "is_single_day": is_single_day,
+                "label": period_label,
+            },
             "metrics": {
                 "total_orders": total_orders,
                 "closed_orders": closed_orders,
                 "waiting_orders": waiting_orders_count,
+                "returning_orders": returning_orders_count,
+                "reconcile_received_orders": reconcile_received_orders,
                 "pending_reconcile_orders": pending_reconcile_orders,
                 "missing_line_count": missing_line_count,
                 "missing_quantity": missing_quantity,
@@ -275,19 +332,28 @@ class WebReportService:
             "status_lists": {
                 "waiting": waiting_orders,
                 "pending-reconcile": pending_reconcile,
+                "reconcile-received": reconcile_received,
+                "returning": returning_orders,
             },
         }
         return payload
 
-    def _load_pending_reconcile_records(self, report_date: date) -> list[dict[str, Any]]:
+    @staticmethod
+    def _iter_dates(start_date: date, end_date: date):
+        cursor = start_date
+        while cursor <= end_date:
+            yield cursor
+            cursor = cursor.fromordinal(cursor.toordinal() + 1)
+
+    def _load_latest_reconcile_run_for_date(self, report_date: date) -> dict[str, Any] | None:
         run_dir = self.settings.reconcile_cod_runs_dir
         if not run_dir.exists():
-            return []
+            return None
 
         pattern = f"run_{report_date.isoformat()}_*.json"
         run_paths = sorted(run_dir.glob(pattern), reverse=True)
         if not run_paths:
-            return []
+            return None
 
         latest_payload = None
         latest_ts = -1.0
@@ -299,35 +365,90 @@ class WebReportService:
             if generated_ts > latest_ts:
                 latest_ts = generated_ts
                 latest_payload = payload
-        if not isinstance(latest_payload, dict):
-            return []
+        if isinstance(latest_payload, dict):
+            return latest_payload
+        return None
 
-        records = latest_payload.get("records", [])
-        if not isinstance(records, list):
-            return []
+    def _load_reconcile_period_summary(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        status_cfg: dict[str, Any],
+    ) -> dict[str, Any]:
+        pending_states = self._to_text_set(
+            status_cfg.get("pending_reconcile_match_results", ["not_found", "ambiguous", "unmapped_status"])
+        )
+        received_results = self._to_text_set(
+            status_cfg.get("reconcile_received_match_results", ["matched_unique", "already_correct"])
+        )
+        received_td_statuses = self._to_text_set(status_cfg.get("reconcile_received_td_statuses", ["success"]))
 
-        pending_states = {"not_found", "ambiguous", "unmapped_status"}
-        output: list[dict[str, Any]] = []
-        for record in records:
-            if not isinstance(record, dict):
+        pending_rows: list[dict[str, Any]] = []
+        received_rows: list[dict[str, Any]] = []
+        pending_refs: set[str] = set()
+        received_refs: set[str] = set()
+
+        for settlement_date in self._iter_dates(start_date, end_date):
+            run_payload = self._load_latest_reconcile_run_for_date(settlement_date)
+            if not isinstance(run_payload, dict):
                 continue
-            result = self._normalize_text(str(record.get("match_result", "")).strip())
-            if result not in pending_states:
+            records = run_payload.get("records", [])
+            if not isinstance(records, list):
                 continue
-            ref = str(record.get("pancake_display_id", "")).strip() or str(record.get("pancake_order_id", "")).strip()
-            output.append(
-                {
-                    "pancake_order_ref": ref,
-                    "match_result": result,
-                    "reason": str(record.get("reason", "")).strip(),
-                    "td_awb": str(record.get("td_awb", "")).strip(),
-                    "td_status": str(record.get("td_status", "")).strip(),
-                    "customer_name": str(record.get("td_customer_name", "")).strip(),
-                    "settlement_date": str(record.get("settlement_date", "")).strip(),
-                }
-            )
-        output.sort(key=lambda item: str(item.get("pancake_order_ref", "")))
-        return output
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                match_result = self._normalize_text(str(record.get("match_result", "")).strip())
+                td_status = self._normalize_text(str(record.get("td_status", "")).strip())
+                row = self._build_reconcile_row(record, match_result)
+                order_ref = self._normalize_text(str(row.get("pancake_order_ref", "")).strip())
+                fingerprint = self._normalize_text(str(record.get("fingerprint", "")).strip())
+                dedupe_ref = order_ref or fingerprint or f"row-{len(pending_rows) + len(received_rows)}"
+
+                if match_result in pending_states:
+                    pending_rows.append(row)
+                    pending_refs.add(dedupe_ref)
+                    continue
+
+                is_received_match = not received_results or match_result in received_results
+                is_received_status = not received_td_statuses or td_status in received_td_statuses
+                if is_received_match and is_received_status:
+                    received_rows.append(row)
+                    received_refs.add(dedupe_ref)
+
+        pending_rows.sort(
+            key=lambda item: (
+                str(item.get("settlement_date", "")),
+                str(item.get("pancake_order_ref", "")),
+            ),
+            reverse=True,
+        )
+        received_rows.sort(
+            key=lambda item: (
+                str(item.get("settlement_date", "")),
+                str(item.get("pancake_order_ref", "")),
+            ),
+            reverse=True,
+        )
+        return {
+            "pending_rows": pending_rows,
+            "received_rows": received_rows,
+            "pending_order_count": len(pending_refs),
+            "received_order_count": len(received_refs),
+        }
+
+    def _build_reconcile_row(self, record: dict[str, Any], match_result: str) -> dict[str, Any]:
+        ref = str(record.get("pancake_display_id", "")).strip() or str(record.get("pancake_order_id", "")).strip()
+        return {
+            "pancake_order_ref": ref,
+            "match_result": match_result,
+            "reason": str(record.get("reason", "")).strip(),
+            "td_awb": str(record.get("td_awb", "")).strip(),
+            "td_status": str(record.get("td_status", "")).strip(),
+            "customer_name": str(record.get("td_customer_name", "")).strip(),
+            "settlement_date": str(record.get("settlement_date", "")).strip(),
+        }
 
     def _extract_brand(self, order: dict[str, Any], *, brand_rules: Any) -> tuple[str, str]:
         candidate_fields = (
@@ -434,6 +555,45 @@ class WebReportService:
         if "cho hang" in normalized_label:
             return True
         return False
+
+    def _is_returning_status(
+        self,
+        *,
+        code: int | None,
+        label: str,
+        returning_codes: set[int],
+        returning_labels: set[str],
+    ) -> bool:
+        if code is not None and code in returning_codes:
+            return True
+        normalized_label = self._normalize_text(label)
+        if normalized_label and normalized_label in returning_labels:
+            return True
+        if "hoan" in normalized_label or "return" in normalized_label:
+            return True
+        return False
+
+    def _is_closed_status(
+        self,
+        *,
+        code: int | None,
+        label: str,
+        closed_codes: set[int],
+        closed_labels: set[str],
+        is_waiting: bool,
+        is_returning: bool,
+    ) -> bool:
+        if code is not None and code in closed_codes:
+            return True
+        normalized_label = self._normalize_text(label)
+        if normalized_label and normalized_label in closed_labels:
+            return True
+
+        has_explicit_closed_map = bool(closed_codes or closed_labels)
+        if has_explicit_closed_map:
+            return False
+
+        return not is_waiting and not is_returning
 
     def _extract_order_total_minor(self, order: dict[str, Any]) -> int:
         for key in ("total_price", "total", "amount_total"):
@@ -575,6 +735,13 @@ class WebReportService:
         return {
             "waiting_status_codes": [],
             "waiting_status_labels": ["chờ hàng", "cho hang", "waiting"],
+            "closed_status_codes": [],
+            "closed_status_labels": [],
+            "returning_status_codes": [],
+            "returning_status_labels": ["đang hoàn", "hoàn", "returning", "returned"],
+            "pending_reconcile_match_results": ["not_found", "ambiguous", "unmapped_status"],
+            "reconcile_received_match_results": ["matched_unique", "already_correct"],
+            "reconcile_received_td_statuses": ["success"],
             "brand_rules": [
                 {"pattern": r"^JC", "brand_name": "Jennie Choo", "brand_slug": "jennie-choo"},
                 {"pattern": r"^(LYS|L-)", "brand_name": "Lysilk", "brand_slug": "lysilk"},
