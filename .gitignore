@@ -10,8 +10,8 @@ __pycache__/
 *.pyc
 
 # Runtime data
-logs/
-state/
-storage/
+logs/**
+state/**
+storage/**
 !storage/
 !storage/README.md
