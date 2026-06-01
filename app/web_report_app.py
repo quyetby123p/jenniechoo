@@ -61,9 +61,20 @@ def create_app(
     def dashboard():  # type: ignore[no-untyped-def]
         period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
         snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
+        today = datetime.now(_resolve_timezone(current_settings.app_timezone)).date()
+        today_snapshot = current_report_service.get_snapshot(today, today)
+        overall_snapshot = current_report_service.get_snapshot(date(2020, 1, 1), today)
+        summary_cards = {
+            "closed_today": int((today_snapshot.get("metrics") or {}).get("closed_orders") or 0),
+            "revenue_text": str((snapshot.get("metrics") or {}).get("revenue_total_text") or ""),
+            "waiting_total": int((overall_snapshot.get("metrics") or {}).get("waiting_orders") or 0),
+            "shipping_total": int((overall_snapshot.get("metrics") or {}).get("shipping_orders") or 0),
+            "pending_reconcile_total": int((overall_snapshot.get("metrics") or {}).get("pending_reconcile_orders") or 0),
+        }
         return render_template(
             "web_report/dashboard.html",
             snapshot=snapshot,
+            summary_cards=summary_cards,
             active_path="/",
             selected_mode=period["mode"],
             selected_date=period["date_text"],

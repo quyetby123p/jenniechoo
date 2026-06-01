@@ -364,6 +364,8 @@ class WebReportService:
                 "revenue_total_text": self._fmt_currency(revenue_total_minor),
                 "revenue_total_thb": self._minor_to_thb_major(revenue_total_minor),
                 "revenue_total_vnd": self._thb_to_vnd(self._minor_to_thb_major(revenue_total_minor)),
+                "revenue_total_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(revenue_total_minor)),
+                "revenue_total_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(revenue_total_minor))),
                 "exchange_rate_thb_to_vnd": float(self.settings.report_thb_to_vnd_rate),
                 "waiting_orders": waiting_orders_count,
                 "returning_orders": returning_orders_count,
@@ -375,6 +377,8 @@ class WebReportService:
                 "missing_product_count": len(missing_products),
                 "waiting_value_minor": waiting_value_minor,
                 "waiting_value_text": self._fmt_currency(waiting_value_minor),
+                "waiting_value_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(waiting_value_minor)),
+                "waiting_value_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(waiting_value_minor))),
             },
             "size_summary": self._serialize_size_totals(size_totals),
             "brands": brand_overview,
@@ -454,6 +458,12 @@ class WebReportService:
         pending_states = self._to_text_set(
             status_cfg.get("pending_reconcile_match_results", ["not_found", "ambiguous", "unmapped_status"])
         )
+        pending_mode = self._normalize_text(str(status_cfg.get("pending_reconcile_mode", "match_result")))
+        if pending_mode not in {"match_result", "td_success_not_in_cashflow"}:
+            pending_mode = "match_result"
+        pending_td_success_statuses = self._to_text_set(
+            status_cfg.get("pending_reconcile_td_success_statuses", ["success"])
+        )
         received_results = self._to_text_set(
             status_cfg.get("reconcile_received_match_results", ["matched_unique", "already_correct"])
         )
@@ -484,7 +494,15 @@ class WebReportService:
                 fingerprint = self._normalize_text(str(record.get("fingerprint", "")).strip())
                 dedupe_ref = order_ref or fingerprint or f"row-{len(pending_rows) + len(received_rows)}"
 
-                if match_result in pending_states:
+                is_pending = self._is_pending_reconcile_row(
+                    record=record,
+                    match_result=match_result,
+                    td_status=td_status,
+                    pending_states=pending_states,
+                    pending_mode=pending_mode,
+                    pending_td_success_statuses=pending_td_success_statuses,
+                )
+                if is_pending:
                     pending_rows.append(row)
                     pending_refs.add(dedupe_ref)
 
@@ -518,6 +536,29 @@ class WebReportService:
             "pending_order_count": len(pending_refs),
             "received_order_count": len(received_refs),
         }
+
+    def _is_pending_reconcile_row(
+        self,
+        *,
+        record: dict[str, Any],
+        match_result: str,
+        td_status: str,
+        pending_states: set[str],
+        pending_mode: str,
+        pending_td_success_statuses: set[str],
+    ) -> bool:
+        if pending_mode == "td_success_not_in_cashflow":
+            is_success = not pending_td_success_statuses or td_status in pending_td_success_statuses
+            if not is_success:
+                return False
+            return not self._is_cashflow_updated(record)
+        return match_result in pending_states
+
+    def _is_cashflow_updated(self, record: dict[str, Any]) -> bool:
+        value = record.get("td_sheet_cod_minor")
+        if value is None:
+            return False
+        return self._to_int(value, fallback=0) > 0
 
     def _build_reconcile_row(self, record: dict[str, Any], match_result: str) -> dict[str, Any]:
         ref = str(record.get("pancake_display_id", "")).strip() or str(record.get("pancake_order_id", "")).strip()
@@ -859,6 +900,8 @@ class WebReportService:
             "returning_status_labels": ["đang hoàn", "hoàn", "returning", "returned"],
             "shipping_status_codes": [2],
             "shipping_status_labels": ["đã gửi hàng", "dang giao", "shipping"],
+            "pending_reconcile_mode": "match_result",
+            "pending_reconcile_td_success_statuses": ["success"],
             "status_code_labels": self._default_order_status_code_labels(),
             "pending_reconcile_match_results": ["not_found", "ambiguous", "unmapped_status"],
             "reconcile_received_match_results": ["matched_unique", "already_correct"],

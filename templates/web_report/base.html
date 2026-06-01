@@ -51,8 +51,8 @@
   </form>
   <div class="mb-3">
     <a class="btn btn-sm {% if active_path == '/' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/?{{ query_string }}">Dashboard</a>
-    <a class="btn btn-sm {% if active_path == '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/waiting?{{ query_string }}">Đơn chờ hàng</a>
     <a class="btn btn-sm {% if active_path == '/status/shipping' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/shipping?{{ query_string }}">Đơn đang gửi</a>
+    <a class="btn btn-sm {% if active_path == '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/waiting?{{ query_string }}">Đơn chờ hàng</a>
     <a class="btn btn-sm {% if active_path == '/status/reconcile-received' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/reconcile-received?{{ query_string }}">Đối soát đã nhận</a>
     <a class="btn btn-sm {% if active_path == '/status/returning' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/returning?{{ query_string }}">Đơn hoàn/đang hoàn</a>
     <a class="btn btn-sm {% if active_path == '/status/pending-reconcile' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/pending-reconcile?{{ query_string }}">Đơn chờ đối soát</a>

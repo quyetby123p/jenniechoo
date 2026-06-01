@@ -73,6 +73,8 @@ def _snapshot_payload() -> dict:
             "total_orders": 2,
             "closed_orders": 2,
             "revenue_total_text": "2,200 THB (~ 1,782,000 VNĐ)",
+            "revenue_total_thb_text": "2,200",
+            "revenue_total_vnd_text": "1,782,000",
             "waiting_orders": 1,
             "shipping_orders": 1,
             "returning_orders": 0,
@@ -82,6 +84,8 @@ def _snapshot_payload() -> dict:
             "missing_quantity": 1,
             "missing_product_count": 1,
             "waiting_value_text": "1,200 THB (~ 972,000 VNĐ)",
+            "waiting_value_thb_text": "1,200",
+            "waiting_value_vnd_text": "972,000",
         },
         "size_summary": [{"size": "M", "quantity": 1}],
         "brands": [

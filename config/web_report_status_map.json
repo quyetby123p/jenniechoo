@@ -33,6 +33,10 @@
     "ambiguous",
     "unmapped_status"
   ],
+  "pending_reconcile_mode": "td_success_not_in_cashflow",
+  "pending_reconcile_td_success_statuses": [
+    "SUCCESS"
+  ],
   "reconcile_received_match_results": [
     "matched_unique",
     "already_correct"
