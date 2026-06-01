@@ -464,6 +464,9 @@ class WebReportService:
         pending_td_success_statuses = self._to_text_set(
             status_cfg.get("pending_reconcile_td_success_statuses", ["success"])
         )
+        pending_td_to_pancake_status_codes = self._normalize_td_to_pancake_status_map(
+            status_cfg.get("pending_reconcile_td_to_pancake_status_codes")
+        )
         received_results = self._to_text_set(
             status_cfg.get("reconcile_received_match_results", ["matched_unique", "already_correct"])
         )
@@ -501,6 +504,7 @@ class WebReportService:
                     pending_states=pending_states,
                     pending_mode=pending_mode,
                     pending_td_success_statuses=pending_td_success_statuses,
+                    pending_td_to_pancake_status_codes=pending_td_to_pancake_status_codes,
                 )
                 if is_pending:
                     pending_rows.append(row)
@@ -546,6 +550,7 @@ class WebReportService:
         pending_states: set[str],
         pending_mode: str,
         pending_td_success_statuses: set[str],
+        pending_td_to_pancake_status_codes: dict[str, set[int]],
     ) -> bool:
         if pending_mode == "td_success_not_in_cashflow":
             if not self._has_pancake_mapping(record, match_result=match_result):
@@ -553,7 +558,15 @@ class WebReportService:
             is_success = not pending_td_success_statuses or td_status in pending_td_success_statuses
             if not is_success:
                 return False
-            return not self._is_cashflow_updated(record)
+            if self._is_cashflow_updated(record):
+                return False
+            if self._is_td_pancake_status_aligned(
+                record,
+                td_status=td_status,
+                td_to_pancake_status_codes=pending_td_to_pancake_status_codes,
+            ):
+                return False
+            return True
         return match_result in pending_states
 
     def _is_cashflow_updated(self, record: dict[str, Any]) -> bool:
@@ -561,6 +574,49 @@ class WebReportService:
         if value is None:
             return False
         return self._to_int(value, fallback=0) > 0
+
+    def _is_td_pancake_status_aligned(
+        self,
+        record: dict[str, Any],
+        *,
+        td_status: str,
+        td_to_pancake_status_codes: dict[str, set[int]],
+    ) -> bool:
+        expected_status_codes = td_to_pancake_status_codes.get(td_status, set())
+        if not expected_status_codes:
+            return False
+        pancake_status_code = self._to_optional_int(record.get("pancake_status"))
+        if pancake_status_code is None:
+            return False
+        return pancake_status_code in expected_status_codes
+
+    def _normalize_td_to_pancake_status_map(self, value: Any) -> dict[str, set[int]]:
+        default_map: dict[str, set[int]] = {
+            self._normalize_text("SUCCESS"): {3},
+            self._normalize_text("BEING_RETURNED"): {4, 5},
+            self._normalize_text("RETURNED"): {4, 5},
+        }
+        if not isinstance(value, dict):
+            return default_map
+
+        normalized: dict[str, set[int]] = dict(default_map)
+        for raw_td_status, raw_codes in value.items():
+            td_status_key = self._normalize_text(str(raw_td_status).strip())
+            if not td_status_key:
+                continue
+            codes: set[int] = set()
+            if isinstance(raw_codes, list):
+                for raw_code in raw_codes:
+                    parsed = self._to_optional_int(raw_code)
+                    if parsed is not None:
+                        codes.add(parsed)
+            else:
+                parsed = self._to_optional_int(raw_codes)
+                if parsed is not None:
+                    codes.add(parsed)
+            if codes:
+                normalized[td_status_key] = codes
+        return normalized
 
     def _has_pancake_mapping(self, record: dict[str, Any], *, match_result: str) -> bool:
         if match_result in {"not_found", "ambiguous", "unmapped_status"}:
@@ -915,6 +971,11 @@ class WebReportService:
             "shipping_status_labels": ["đã gửi hàng", "dang giao", "shipping"],
             "pending_reconcile_mode": "match_result",
             "pending_reconcile_td_success_statuses": ["success"],
+            "pending_reconcile_td_to_pancake_status_codes": {
+                "SUCCESS": [3],
+                "BEING_RETURNED": [4, 5],
+                "RETURNED": [4, 5],
+            },
             "status_code_labels": self._default_order_status_code_labels(),
             "pending_reconcile_match_results": ["not_found", "ambiguous", "unmapped_status"],
             "reconcile_received_match_results": ["matched_unique", "already_correct"],
@@ -942,6 +1003,17 @@ class WebReportService:
             return int(float(str(value).replace(",", "").strip()))
         except (TypeError, ValueError):
             return fallback
+
+    @staticmethod
+    def _to_optional_int(value: Any) -> int | None:
+        try:
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                return None
+            return int(float(str(value).replace(",", "").strip()))
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _to_generated_ts(payload: dict[str, Any]) -> float:

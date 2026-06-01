@@ -493,18 +493,49 @@ def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) 
                     "td_status": "SUCCESS",
                     "td_sheet_cod_minor": 0,
                     "pancake_display_id": "JCT1001",
+                    "pancake_status": 3,
                 },
                 {
-                    "match_result": "not_found",
+                    "match_result": "matched_unique",
                     "td_status": "SUCCESS",
-                    "td_sheet_cod_minor": 500_000,
+                    "td_sheet_cod_minor": 0,
                     "pancake_display_id": "JCT1002",
+                    "pancake_status": 2,
                 },
                 {
                     "match_result": "matched_unique",
                     "td_status": "RETURNED",
                     "td_sheet_cod_minor": 0,
                     "pancake_display_id": "JCT1003",
+                    "pancake_status": 5,
+                },
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "BEING_RETURNED",
+                    "td_sheet_cod_minor": 0,
+                    "pancake_display_id": "JCT1004",
+                    "pancake_status": 4,
+                },
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "RETURNED",
+                    "td_sheet_cod_minor": 0,
+                    "pancake_display_id": "JCT1005",
+                    "pancake_status": 3,
+                },
+                {
+                    "match_result": "not_found",
+                    "td_status": "SUCCESS",
+                    "td_sheet_cod_minor": 0,
+                    "pancake_display_id": "JCT1006",
+                    "pancake_status": 3,
+                },
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "SUCCESS",
+                    "td_sheet_cod_minor": 500_000,
+                    "pancake_display_id": "JCT1007",
+                    "pancake_status": 2,
                 },
             ],
         },
@@ -517,5 +548,7 @@ def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) 
 
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
-    assert snapshot["metrics"]["reconcile_received_orders"] == 3
+    assert snapshot["metrics"]["reconcile_received_orders"] == 7
     assert snapshot["metrics"]["pending_reconcile_orders"] == 2
+    pending_refs = {row["pancake_order_ref"] for row in snapshot["status_lists"]["pending-reconcile"]}
+    assert pending_refs == {"JCT1002", "JCT1005"}
