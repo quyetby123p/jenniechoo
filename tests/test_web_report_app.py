@@ -256,3 +256,5 @@ def test_status_page_shows_total_orders_and_total_revenue_summary(tmp_path: Path
     assert "1,000 THB" in html
     assert "~ 810,000 VNĐ" in html
     assert "Số dòng hiển thị" in html
+    assert 'label text-danger">Tổng đơn' in html
+    assert 'label text-danger">Tổng doanh số' in html

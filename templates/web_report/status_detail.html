@@ -8,13 +8,13 @@
   </div>
   <div class="kpi-grid kpi-grid-status">
     <div class="metric-card p-3">
-      <div class="label">Tổng đơn</div>
-      <div class="value">{{ "{:,}".format(status_summary.orders) }}</div>
+      <div class="label text-danger">Tổng đơn</div>
+      <div class="value text-danger">{{ "{:,}".format(status_summary.orders) }}</div>
     </div>
     <div class="metric-card p-3">
-      <div class="label">Tổng doanh số</div>
-      <div class="value" style="font-size: 24px;">{{ status_summary.value_thb_text }} THB</div>
-      <small class="text-muted">~ {{ status_summary.value_vnd_text }} VNĐ</small>
+      <div class="label text-danger">Tổng doanh số</div>
+      <div class="value text-danger" style="font-size: 24px;">{{ status_summary.value_thb_text }} THB</div>
+      <small class="text-danger">~ {{ status_summary.value_vnd_text }} VNĐ</small>
     </div>
     <div class="metric-card p-3">
       <div class="label">Số dòng hiển thị</div>

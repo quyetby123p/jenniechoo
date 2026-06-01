@@ -549,9 +549,9 @@ def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) 
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot["metrics"]["reconcile_received_orders"] == 7
-    assert snapshot["metrics"]["pending_reconcile_orders"] == 2
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 1
     pending_refs = {row["pancake_order_ref"] for row in snapshot["status_lists"]["pending-reconcile"]}
-    assert pending_refs == {"JCT1002", "JCT1005"}
+    assert pending_refs == {"JCT1005"}
 
 
 def test_status_value_metrics_include_shipping_returning_and_reconcile(tmp_path: Path) -> None:

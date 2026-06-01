@@ -634,7 +634,7 @@ class WebReportService:
 
     def _normalize_td_to_pancake_status_map(self, value: Any) -> dict[str, set[int]]:
         default_map: dict[str, set[int]] = {
-            self._normalize_text("SUCCESS"): {3},
+            self._normalize_text("SUCCESS"): {2, 3},
             self._normalize_text("BEING_RETURNED"): {4, 5},
             self._normalize_text("RETURNED"): {4, 5},
         }
@@ -1044,7 +1044,7 @@ class WebReportService:
             "pending_reconcile_mode": "match_result",
             "pending_reconcile_td_success_statuses": ["success"],
             "pending_reconcile_td_to_pancake_status_codes": {
-                "SUCCESS": [3],
+                "SUCCESS": [2, 3],
                 "BEING_RETURNED": [4, 5],
                 "RETURNED": [4, 5],
             },
