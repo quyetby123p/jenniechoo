@@ -61,6 +61,7 @@ def create_app(
     def dashboard():  # type: ignore[no-untyped-def]
         period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
         snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
+        missing_product_rows = _build_missing_product_rows(snapshot)
         today = datetime.now(_resolve_timezone(current_settings.app_timezone)).date()
         today_snapshot = current_report_service.get_snapshot(today, today)
         overall_snapshot = current_report_service.get_snapshot(date(2020, 1, 1), today)
@@ -75,6 +76,7 @@ def create_app(
         return render_template(
             "web_report/dashboard.html",
             snapshot=snapshot,
+            missing_product_rows=missing_product_rows,
             summary_cards=summary_cards,
             active_path="/",
             selected_mode=period["mode"],
@@ -260,6 +262,63 @@ def _parse_iso_date(raw_value: str | None, *, fallback: date) -> date:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError:
         return fallback
+
+
+def _build_missing_product_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    brand_detail = snapshot.get("brand_detail")
+    if not isinstance(brand_detail, dict):
+        return []
+
+    quantities_by_key: dict[tuple[str, str, str], int] = {}
+    for brand_data in brand_detail.values():
+        if not isinstance(brand_data, dict):
+            continue
+        sku_rows = brand_data.get("sku_rows")
+        if not isinstance(sku_rows, list):
+            continue
+        for sku_row in sku_rows:
+            if not isinstance(sku_row, dict):
+                continue
+            sku = str(sku_row.get("sku", "")).strip() or "UNKNOWN"
+            color = str(sku_row.get("color", "")).strip() or "Khác"
+            sizes = sku_row.get("sizes")
+            if isinstance(sizes, dict) and sizes:
+                for raw_size, raw_quantity in sizes.items():
+                    size = str(raw_size).strip() or "Khác"
+                    quantity = _to_positive_int(raw_quantity)
+                    if quantity <= 0:
+                        continue
+                    key = (sku, color, size)
+                    quantities_by_key[key] = quantities_by_key.get(key, 0) + quantity
+                continue
+            quantity = _to_positive_int(sku_row.get("missing_quantity"))
+            if quantity <= 0:
+                continue
+            key = (sku, color, "Khác")
+            quantities_by_key[key] = quantities_by_key.get(key, 0) + quantity
+
+    rows = [
+        {
+            "sku": sku,
+            "color": color,
+            "size": size,
+            "quantity": quantity,
+        }
+        for (sku, color, size), quantity in quantities_by_key.items()
+        if quantity > 0
+    ]
+    rows.sort(key=lambda item: (-int(item.get("quantity") or 0), str(item.get("sku", "")), str(item.get("size", ""))))
+    return rows
+
+
+def _to_positive_int(value: Any) -> int:
+    try:
+        if value is None:
+            return 0
+        number = int(float(str(value).replace(",", "").strip()))
+        return max(0, number)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _resolve_timezone(timezone_name: str) -> ZoneInfo:

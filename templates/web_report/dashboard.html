@@ -88,21 +88,23 @@
 </div>
 
 <div class="brand-card p-3 mb-3">
-  <h2 class="h5 mb-3">Sản phẩm thiếu theo size</h2>
-  {% if snapshot.size_summary %}
-    <div class="kpi-grid kpi-grid-size mb-3">
-      {% for row in snapshot.size_summary %}
+  <h2 class="h5 mb-3">Sản phẩm thiếu</h2>
+  {% if missing_product_rows %}
+    <div class="kpi-grid kpi-grid-missing-products mb-3">
+      {% for row in missing_product_rows %}
         <div class="metric-card p-3">
-          <div class="label">Size {{ row.size }}</div>
+          <div class="label">Số lượng sản phẩm</div>
           <div class="value text-danger">{{ "{:,}".format(row.quantity) }}</div>
-          <small class="text-muted">Số lượng thiếu</small>
+          <div class="text-muted small mt-2">Mã sản phẩm: <strong>{{ row.sku }}</strong></div>
+          <div class="text-muted small">Màu: <strong>{{ row.color }}</strong></div>
+          <div class="text-muted small">Size: <strong>{{ row.size }}</strong></div>
         </div>
       {% endfor %}
     </div>
   {% else %}
-    <div class="text-muted mb-3">Không có dữ liệu thiếu size.</div>
+    <div class="text-muted mb-3">Không có dữ liệu sản phẩm thiếu.</div>
   {% endif %}
-  <div class="kpi-grid kpi-grid-size-summary">
+  <div class="kpi-grid kpi-grid-missing-summary">
     <div class="metric-card p-3">
       <div class="label">Dòng thiếu</div>
       <div class="value">{{ "{:,}".format(snapshot.metrics.missing_line_count) }}</div>
