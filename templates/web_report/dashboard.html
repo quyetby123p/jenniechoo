@@ -1,9 +1,6 @@
 {% extends "web_report/base.html" %}
 {% block title %}Dashboard đơn hàng{% endblock %}
-{% block content %}
-<div class="brand-card p-3 mb-3">
-  <div class="text-muted small">Kỳ dữ liệu: <strong>{{ snapshot.period.label }}</strong></div>
-</div>
+{% block pre_filter %}
 <div class="brand-card p-3 mb-3">
   <h2 class="h6 mb-3">Báo cáo ngày</h2>
   <div class="row g-3">
@@ -39,6 +36,11 @@
       </div>
     </div>
   </div>
+</div>
+{% endblock %}
+{% block content %}
+<div class="brand-card p-3 mb-3">
+  <div class="text-muted small">Kỳ dữ liệu: <strong>{{ snapshot.period.label }}</strong></div>
 </div>
 <div class="brand-card p-3 mb-3">
   <h2 class="h6 mb-0">Tổng quan Jennie Choo Thái</h2>

@@ -32,6 +32,7 @@
       <p class="text-muted mb-2">Timezone: {{ timezone_name }} · Tỷ giá: 1 THB = {{ "{:,.0f}".format(thb_to_vnd_rate) }} VNĐ · Refresh cache: 10 phút</p>
     </div>
   </div>
+  {% block pre_filter %}{% endblock %}
   <form class="date-toolbar d-flex flex-wrap align-items-center gap-2" method="get" action="{{ request.path }}">
     <input type="hidden" name="mode" id="modeInput" value="{{ selected_mode }}">
     <input type="hidden" name="date" id="dateInput" value="{{ selected_date }}">
