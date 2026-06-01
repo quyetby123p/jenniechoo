@@ -61,7 +61,7 @@ def create_app(
     def dashboard():  # type: ignore[no-untyped-def]
         period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
         snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
-        missing_product_rows = _build_missing_product_rows(snapshot)
+        missing_overview = _build_missing_overview(snapshot)
         today = datetime.now(_resolve_timezone(current_settings.app_timezone)).date()
         today_snapshot = current_report_service.get_snapshot(today, today)
         overall_snapshot = current_report_service.get_snapshot(date(2020, 1, 1), today)
@@ -76,7 +76,7 @@ def create_app(
         return render_template(
             "web_report/dashboard.html",
             snapshot=snapshot,
-            missing_product_rows=missing_product_rows,
+            missing_overview=missing_overview,
             summary_cards=summary_cards,
             active_path="/",
             selected_mode=period["mode"],
@@ -309,6 +309,44 @@ def _build_missing_product_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]
     ]
     rows.sort(key=lambda item: (-int(item.get("quantity") or 0), str(item.get("sku", "")), str(item.get("size", ""))))
     return rows
+
+
+def _build_missing_overview(snapshot: dict[str, Any]) -> dict[str, Any]:
+    metrics = snapshot.get("metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
+    size_summary = snapshot.get("size_summary")
+    if not isinstance(size_summary, list):
+        size_summary = []
+    product_rows = _build_missing_product_rows(snapshot)
+
+    missing_skus = sorted(
+        {
+            str(item.get("sku", "")).strip()
+            for item in product_rows
+            if isinstance(item, dict) and str(item.get("sku", "")).strip()
+        }
+    )
+    normalized_size_rows = [
+        {
+            "size": str(item.get("size", "")).strip() or "Khác",
+            "quantity": _to_positive_int(item.get("quantity")),
+        }
+        for item in size_summary
+        if isinstance(item, dict)
+    ]
+    normalized_size_rows = [item for item in normalized_size_rows if item["quantity"] > 0]
+    normalized_size_rows.sort(key=lambda item: (-item["quantity"], item["size"]))
+    size_total_quantity = sum(item["quantity"] for item in normalized_size_rows)
+
+    return {
+        "missing_order_count": _to_positive_int(metrics.get("waiting_orders")),
+        "missing_skus": missing_skus,
+        "missing_sku_count": len(missing_skus),
+        "size_rows": normalized_size_rows,
+        "size_count": len(normalized_size_rows),
+        "size_total_quantity": size_total_quantity,
+    }
 
 
 def _to_positive_int(value: Any) -> int:
