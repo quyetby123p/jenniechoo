@@ -230,6 +230,38 @@ def test_snapshot_supports_date_range_and_new_metrics(tmp_path: Path) -> None:
     assert len(snapshot["status_lists"]["reconcile-received"]) == 1
 
 
+def test_returning_excludes_partial_return_status_15(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-R-PARTIAL",
+                    "status": 15,
+                    "total_price": 110_000,
+                    "inserted_at": "2026-06-01T09:00:00+07:00",
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-R-FULL",
+                    "status": 5,
+                    "total_price": 120_000,
+                    "inserted_at": "2026-06-01T10:00:00+07:00",
+                    "items": [],
+                },
+            ]
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["returning_orders"] == 1
+    assert len(snapshot["status_lists"]["returning"]) == 1
+    assert snapshot["status_lists"]["returning"][0]["order_ref"] == "JC-R-FULL"
+
+
 def test_snapshot_cache_uses_ttl(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path, web_report_refresh_seconds=600)
     fake = _FakePancakeClient(

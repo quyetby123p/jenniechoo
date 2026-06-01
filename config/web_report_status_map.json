@@ -11,13 +11,12 @@
   "closed_status_labels": [],
   "returning_status_codes": [
     4,
-    15,
     5
   ],
   "returning_status_labels": [
     "Đang hoàn",
-    "Hoàn",
-    "returning",
+    "Đã hoàn",
+    "being_returned",
     "returned"
   ],
   "shipping_status_codes": [

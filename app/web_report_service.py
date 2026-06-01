@@ -852,12 +852,30 @@ class WebReportService:
         returning_codes: set[int],
         returning_labels: set[str],
     ) -> bool:
+        normalized_label = self._normalize_text(label)
+        # Always exclude partial return from "đơn hoàn/đang hoàn".
+        if "hoan mot phan" in normalized_label or "partial return" in normalized_label:
+            return False
+
+        # When explicit status codes are configured, trust code first to avoid label ambiguity.
+        if returning_codes:
+            if code is not None:
+                return code in returning_codes
+            if normalized_label and normalized_label in returning_labels:
+                return True
+            if "dang hoan" in normalized_label or "da hoan" in normalized_label:
+                return True
+            if "being_returned" in normalized_label or normalized_label == "returned":
+                return True
+            return False
+
         if code is not None and code in returning_codes:
             return True
-        normalized_label = self._normalize_text(label)
         if normalized_label and normalized_label in returning_labels:
             return True
-        if "hoan" in normalized_label or "return" in normalized_label:
+        if "dang hoan" in normalized_label or "da hoan" in normalized_label:
+            return True
+        if "being_returned" in normalized_label or normalized_label == "returned":
             return True
         return False
 
@@ -1050,8 +1068,8 @@ class WebReportService:
             "waiting_status_labels": ["chờ hàng", "cho hang", "waiting"],
             "closed_status_codes": [],
             "closed_status_labels": [],
-            "returning_status_codes": [],
-            "returning_status_labels": ["đang hoàn", "hoàn", "returning", "returned"],
+            "returning_status_codes": [4, 5],
+            "returning_status_labels": ["đang hoàn", "đã hoàn", "being_returned", "returned"],
             "shipping_status_codes": [2],
             "shipping_status_labels": ["đã gửi hàng", "dang giao", "shipping"],
             "pending_reconcile_mode": "match_result",
