@@ -10,8 +10,8 @@
     </div>
     <div class="metric-card p-3 kpi-span-2">
       <div class="label">Doanh số</div>
-      <div class="value" style="font-size: 26px;">{{ snapshot.metrics.revenue_total_thb_text }} THB</div>
-      <small class="text-muted">~ {{ snapshot.metrics.revenue_total_vnd_text }} VNĐ</small>
+      <div class="value" style="font-size: 26px;">{{ summary_cards.revenue_today_thb_text }} THB</div>
+      <small class="text-muted">~ {{ summary_cards.revenue_today_vnd_text }} VNĐ</small>
     </div>
     <div class="metric-card p-3">
       <div class="label">Đơn chờ (Tổng)</div>
@@ -52,6 +52,7 @@
   <div class="metric-card p-3">
     <div class="label">Đơn đang gửi</div>
     <div class="value text-primary">{{ "{:,}".format(snapshot.metrics.shipping_orders) }}</div>
+    <small class="text-muted">{{ snapshot.metrics.shipping_value_thb_text }} THB (~ {{ snapshot.metrics.shipping_value_vnd_text }} VNĐ)</small>
   </div>
   <div class="metric-card p-3 kpi-span-2">
     <div class="label">Đơn chờ hàng</div>
@@ -61,14 +62,17 @@
   <div class="metric-card p-3">
     <div class="label">Đối soát đã nhận</div>
     <div class="value text-success">{{ "{:,}".format(snapshot.metrics.reconcile_received_orders) }}</div>
+    <small class="text-muted">{{ snapshot.metrics.reconcile_received_value_thb_text }} THB (~ {{ snapshot.metrics.reconcile_received_value_vnd_text }} VNĐ)</small>
   </div>
   <div class="metric-card p-3">
     <div class="label">Đơn hoàn/đang hoàn</div>
     <div class="value text-warning">{{ "{:,}".format(snapshot.metrics.returning_orders) }}</div>
+    <small class="text-muted">{{ snapshot.metrics.returning_value_thb_text }} THB (~ {{ snapshot.metrics.returning_value_vnd_text }} VNĐ)</small>
   </div>
   <div class="metric-card p-3">
     <div class="label">Đơn chờ đối soát</div>
     <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.pending_reconcile_orders) }}</div>
+    <small class="text-muted">{{ snapshot.metrics.pending_reconcile_value_thb_text }} THB (~ {{ snapshot.metrics.pending_reconcile_value_vnd_text }} VNĐ)</small>
   </div>
 </div>
 

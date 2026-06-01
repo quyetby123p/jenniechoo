@@ -66,7 +66,8 @@ def create_app(
         overall_snapshot = current_report_service.get_snapshot(date(2020, 1, 1), today)
         summary_cards = {
             "closed_today": int((today_snapshot.get("metrics") or {}).get("closed_orders") or 0),
-            "revenue_text": str((snapshot.get("metrics") or {}).get("revenue_total_text") or ""),
+            "revenue_today_thb_text": str((today_snapshot.get("metrics") or {}).get("revenue_total_thb_text") or "0"),
+            "revenue_today_vnd_text": str((today_snapshot.get("metrics") or {}).get("revenue_total_vnd_text") or "0"),
             "waiting_total": int((overall_snapshot.get("metrics") or {}).get("waiting_orders") or 0),
             "shipping_total": int((overall_snapshot.get("metrics") or {}).get("shipping_orders") or 0),
             "pending_reconcile_total": int((overall_snapshot.get("metrics") or {}).get("pending_reconcile_orders") or 0),

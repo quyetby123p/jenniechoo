@@ -552,3 +552,86 @@ def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) 
     assert snapshot["metrics"]["pending_reconcile_orders"] == 2
     pending_refs = {row["pancake_order_ref"] for row in snapshot["status_lists"]["pending-reconcile"]}
     assert pending_refs == {"JCT1002", "JCT1005"}
+
+
+def test_status_value_metrics_include_shipping_returning_and_reconcile(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+    config_root.mkdir(parents=True, exist_ok=True)
+    status_map_path = config_root / "custom_status_map.json"
+    dump_json(
+        status_map_path,
+        {
+            "pending_reconcile_mode": "td_success_not_in_cashflow",
+            "pending_reconcile_td_success_statuses": ["SUCCESS"],
+            "pending_reconcile_td_to_pancake_status_codes": {"SUCCESS": [3]},
+            "reconcile_received_mode": "td_status_only",
+            "reconcile_received_td_statuses": ["SUCCESS"],
+            "brand_rules": [],
+        },
+    )
+    settings = _dummy_settings(
+        tmp_path,
+        web_report_status_map_path=str(status_map_path),
+    )
+    run_path = settings.reconcile_cod_runs_dir / "run_2026-06-01_20260601T030000Z.json"
+    dump_json(
+        run_path,
+        {
+            "settlement_date": "2026-06-01",
+            "generated_at": "2026-06-01T03:00:00+00:00",
+            "records": [
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "SUCCESS",
+                    "td_sheet_cod_minor": 0,
+                    "pancake_display_id": "JC-SHIP",
+                    "pancake_status": 2,
+                },
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "SUCCESS",
+                    "td_sheet_cod_minor": 0,
+                    "pancake_display_id": "JC-WAIT",
+                    "pancake_status": 2,
+                },
+            ],
+        },
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-SHIP",
+                    "status": 2,
+                    "total_price": 350_000,
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-WAIT",
+                    "status": 11,
+                    "total_price": 220_000,
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-RET",
+                    "status": 4,
+                    "total_price": 180_000,
+                    "items": [],
+                },
+            ]
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+    metrics = snapshot["metrics"]
+
+    assert metrics["shipping_orders"] == 1
+    assert metrics["shipping_value_minor"] == 350_000
+    assert metrics["returning_orders"] == 1
+    assert metrics["returning_value_minor"] == 180_000
+    assert metrics["reconcile_received_orders"] == 2
+    assert metrics["reconcile_received_value_minor"] == 570_000
+    assert metrics["pending_reconcile_orders"] == 2
+    assert metrics["pending_reconcile_value_minor"] == 570_000

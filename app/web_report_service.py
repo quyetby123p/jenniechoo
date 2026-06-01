@@ -78,11 +78,14 @@ class WebReportService:
         returning_orders_count = 0
         shipping_orders_count = 0
         waiting_value_minor = 0
+        returning_value_minor = 0
+        shipping_value_minor = 0
         order_value_total_minor = 0
         missing_line_count = 0
         missing_quantity = 0
         size_totals: dict[str, int] = {}
         missing_products: set[str] = set()
+        order_value_minor_by_ref: dict[str, int] = {}
 
         waiting_orders: list[dict[str, Any]] = []
         returning_orders: list[dict[str, Any]] = []
@@ -102,6 +105,11 @@ class WebReportService:
             )
             order_total_minor = self._extract_order_total_minor(order)
             order_value_total_minor += order_total_minor
+            normalized_order_ref = self._normalize_text(order_ref)
+            if normalized_order_ref:
+                existing_value = self._to_int(order_value_minor_by_ref.get(normalized_order_ref))
+                if order_total_minor > existing_value:
+                    order_value_minor_by_ref[normalized_order_ref] = order_total_minor
             brand_name, brand_slug = self._extract_brand(order, brand_rules=brand_rules)
             is_waiting = self._is_waiting_status(
                 code=order_status_code,
@@ -133,6 +141,7 @@ class WebReportService:
                 closed_orders += 1
             if is_returning:
                 returning_orders_count += 1
+                returning_value_minor += order_total_minor
                 returning_orders.append(
                     {
                         "order_ref": order_ref,
@@ -148,6 +157,7 @@ class WebReportService:
                 )
             if is_shipping:
                 shipping_orders_count += 1
+                shipping_value_minor += order_total_minor
                 shipping_orders.append(
                     {
                         "order_ref": order_ref,
@@ -278,8 +288,16 @@ class WebReportService:
         )
         pending_reconcile = reconcile_summary.get("pending_rows", [])
         reconcile_received = reconcile_summary.get("received_rows", [])
-        pending_reconcile_orders = self._to_int(reconcile_summary.get("pending_order_count"))
-        reconcile_received_orders = self._to_int(reconcile_summary.get("received_order_count"))
+        pending_reconcile_orders = self._count_unique_reconcile_order_refs(pending_reconcile)
+        reconcile_received_orders = self._count_unique_reconcile_order_refs(reconcile_received)
+        pending_reconcile_value_minor = self._sum_reconcile_rows_value_minor(
+            pending_reconcile,
+            order_value_minor_by_ref=order_value_minor_by_ref,
+        )
+        reconcile_received_value_minor = self._sum_reconcile_rows_value_minor(
+            reconcile_received,
+            order_value_minor_by_ref=order_value_minor_by_ref,
+        )
         revenue_total_minor = self._extract_revenue_minor_from_aggs(aggs, fallback=order_value_total_minor)
 
         brand_overview: list[dict[str, Any]] = []
@@ -372,6 +390,30 @@ class WebReportService:
                 "shipping_orders": shipping_orders_count,
                 "reconcile_received_orders": reconcile_received_orders,
                 "pending_reconcile_orders": pending_reconcile_orders,
+                "shipping_value_minor": shipping_value_minor,
+                "shipping_value_text": self._fmt_currency(shipping_value_minor),
+                "shipping_value_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(shipping_value_minor)),
+                "shipping_value_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(shipping_value_minor))),
+                "returning_value_minor": returning_value_minor,
+                "returning_value_text": self._fmt_currency(returning_value_minor),
+                "returning_value_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(returning_value_minor)),
+                "returning_value_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(returning_value_minor))),
+                "reconcile_received_value_minor": reconcile_received_value_minor,
+                "reconcile_received_value_text": self._fmt_currency(reconcile_received_value_minor),
+                "reconcile_received_value_thb_text": self._fmt_thb_amount(
+                    self._minor_to_thb_major(reconcile_received_value_minor)
+                ),
+                "reconcile_received_value_vnd_text": self._fmt_vnd_amount(
+                    self._thb_to_vnd(self._minor_to_thb_major(reconcile_received_value_minor))
+                ),
+                "pending_reconcile_value_minor": pending_reconcile_value_minor,
+                "pending_reconcile_value_text": self._fmt_currency(pending_reconcile_value_minor),
+                "pending_reconcile_value_thb_text": self._fmt_thb_amount(
+                    self._minor_to_thb_major(pending_reconcile_value_minor)
+                ),
+                "pending_reconcile_value_vnd_text": self._fmt_vnd_amount(
+                    self._thb_to_vnd(self._minor_to_thb_major(pending_reconcile_value_minor))
+                ),
                 "missing_line_count": missing_line_count,
                 "missing_quantity": missing_quantity,
                 "missing_product_count": len(missing_products),
@@ -623,14 +665,13 @@ class WebReportService:
             return False
         pancake_display_id = str(record.get("pancake_display_id", "")).strip()
         pancake_order_id = str(record.get("pancake_order_id", "")).strip()
-        if pancake_display_id or pancake_order_id:
-            return True
-        if match_result == "already_correct" or match_result.startswith("matched"):
-            return True
-        return False
+        return bool(pancake_display_id or pancake_order_id)
 
     def _build_reconcile_row(self, record: dict[str, Any], match_result: str) -> dict[str, Any]:
         ref = str(record.get("pancake_display_id", "")).strip() or str(record.get("pancake_order_id", "")).strip()
+        td_cod_minor = max(0, self._to_int(record.get("td_cod_minor"), fallback=0))
+        if td_cod_minor <= 0:
+            td_cod_minor = max(0, self._to_int(record.get("td_amount_minor"), fallback=0))
         return {
             "pancake_order_ref": ref,
             "match_result": match_result,
@@ -639,7 +680,38 @@ class WebReportService:
             "td_status": str(record.get("td_status", "")).strip(),
             "customer_name": str(record.get("td_customer_name", "")).strip(),
             "settlement_date": str(record.get("settlement_date", "")).strip(),
+            "td_cod_minor": td_cod_minor,
         }
+
+    def _count_unique_reconcile_order_refs(self, rows: Any) -> int:
+        refs: set[str] = set()
+        if not isinstance(rows, list):
+            return 0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            normalized_ref = self._normalize_text(str(row.get("pancake_order_ref", "")).strip())
+            if normalized_ref:
+                refs.add(normalized_ref)
+        return len(refs)
+
+    def _sum_reconcile_rows_value_minor(self, rows: Any, *, order_value_minor_by_ref: dict[str, int]) -> int:
+        if not isinstance(rows, list):
+            return 0
+        unique_refs: set[str] = set()
+        total_minor = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            normalized_ref = self._normalize_text(str(row.get("pancake_order_ref", "")).strip())
+            if not normalized_ref or normalized_ref in unique_refs:
+                continue
+            unique_refs.add(normalized_ref)
+            row_minor = max(0, self._to_int(row.get("td_cod_minor"), fallback=0))
+            if row_minor <= 0:
+                row_minor = max(0, self._to_int(order_value_minor_by_ref.get(normalized_ref)))
+            total_minor += row_minor
+        return total_minor
 
     def _extract_brand(self, order: dict[str, Any], *, brand_rules: Any) -> tuple[str, str]:
         candidate_fields = (

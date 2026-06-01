@@ -15,6 +15,20 @@ class _StubReportService:
         return self.payload
 
 
+class _RangeAwareStubReportService:
+    def __init__(self, *, today_payload: dict, range_payload: dict):
+        self.today_payload = today_payload
+        self.range_payload = range_payload
+        self.calls: list[tuple[date, date]] = []
+
+    def get_snapshot(self, start_date: date, end_date: date | None = None):  # noqa: ANN001
+        effective_end = end_date or start_date
+        self.calls.append((start_date, effective_end))
+        if start_date == effective_end:
+            return self.today_payload
+        return self.range_payload
+
+
 def _dummy_settings(tmp_path: Path) -> Settings:
     project_root = Path(__file__).resolve().parents[1]
     return Settings(
@@ -195,3 +209,24 @@ def test_unknown_brand_and_status_return_404(tmp_path: Path) -> None:
 
     assert client.get("/brand/unknown?date=2026-06-01").status_code == 404
     assert client.get("/status/unknown?date=2026-06-01").status_code == 404
+
+
+def test_dashboard_daily_revenue_uses_today_snapshot_not_selected_range(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    today_payload = _snapshot_payload()
+    today_payload["metrics"]["revenue_total_thb_text"] = "7,400"
+    today_payload["metrics"]["revenue_total_vnd_text"] = "5,994,000"
+    range_payload = _snapshot_payload()
+    range_payload["metrics"]["revenue_total_thb_text"] = "115,190"
+    range_payload["metrics"]["revenue_total_vnd_text"] = "93,303,900"
+    service = _RangeAwareStubReportService(today_payload=today_payload, range_payload=range_payload)
+    app = create_app(settings=settings, report_service=service)
+    app.testing = True
+    client = app.test_client()
+
+    response = client.get("/?mode=range&start_date=2026-05-26&end_date=2026-06-01")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "7,400 THB" in html
+    assert "115,190 THB" in html
