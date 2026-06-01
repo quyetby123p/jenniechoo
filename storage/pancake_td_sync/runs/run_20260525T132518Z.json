@@ -1,0 +1,26 @@
+{
+  "ok": false,
+  "started_at": "2026-05-25T13:25:09.845787+00:00",
+  "finished_at": "2026-05-25T13:25:18.408212+00:00",
+  "cursor_from": 1779602776,
+  "cursor_to": 1779602776,
+  "fetch_start_ts": 1779642000,
+  "fetch_end_ts": 1779715509,
+  "fetched": 0,
+  "considered": 0,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 0,
+  "skipped_repeated_error": 0,
+  "failed": 1,
+  "errors": [
+    "Lấy đơn Pancake thất bại: Pancake API lỗi (502): <html> <head><title>502 Bad Gateway</title></head> <body> <center><h1>502 Bad Gateway</h1></center> <hr><center>nginx</center> </body> </html>"
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10,
+  "pancake_fetch_pause_until_ts": 1779715809
+}

@@ -1,0 +1,17 @@
+{
+  "job_id": "job_d4ca7635e6b3",
+  "status": "failed",
+  "version": 1,
+  "campaign_mode": "existing",
+  "publish_scope": "ads_only",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid02yrwQEzWvQYoz1tF7CRAbvd3X278E4QJf4fnw1fYu72C3ac16ChhiN9ozovSyYPySl",
+  "post_fingerprint": "ef24e35bc9a3a1c13ea9bf0c7895f46b2218d05046568aff6dba29e2d4f0a85b",
+  "budget_daily_vnd": 0,
+  "campaign_id": null,
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Không tìm thấy campaign ACTIVE chứa đủ SKU yêu cầu.\nAnh kiểm tra lại mã SKU, hoặc nhập SKU cụ thể hơn rồi gửi lại.",
+  "failed_at": "2026-06-01T03:17:14.658484+00:00",
+  "updated_at": "2026-06-01T03:17:14.658549+00:00"
+}

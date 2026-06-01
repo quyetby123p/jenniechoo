@@ -1,0 +1,25 @@
+{
+  "job_id": "job_3be31e4a9f57",
+  "status": "failed",
+  "version": 1,
+  "campaign_mode": "existing",
+  "publish_scope": "ads_only",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid02Qd3tR7yvhXq54wCSYxecMeshe6e2Rt89uUaoum8yzYFwofH1AvracZhtWS13uE98l",
+  "post_fingerprint": "a27cab3f5a6b9d58e760ceb9fcb39ffe52577a24107661f1583ddb9ce54c8c9f",
+  "budget_daily_vnd": 0,
+  "campaign_id": "120250204300410728",
+  "selected_campaign_id": "120250204300410728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|JCA146_JCCV146|Codex",
+  "selected_adset_ids": [
+    "120250204396640728",
+    "120250204360210728",
+    "120250204315600728"
+  ],
+  "selected_adset_count": 3,
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Bạn đang quảng cáo bài viết không hợp lệ nên không tạo được quảng cáo.",
+  "failed_at": "2026-05-28T04:17:23.891880+00:00",
+  "updated_at": "2026-05-28T04:17:23.892198+00:00"
+}

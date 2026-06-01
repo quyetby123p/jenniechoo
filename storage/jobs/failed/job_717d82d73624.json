@@ -1,0 +1,25 @@
+{
+  "job_id": "job_717d82d73624",
+  "status": "failed",
+  "version": 1,
+  "campaign_mode": "existing",
+  "publish_scope": "ads_only",
+  "post_url": "https://www.facebook.com/reel/2992172994319258",
+  "post_fingerprint": "05a6c0ef2c4bfb5ed753f948d92a086c10d6424f2a8595499383650373eee1f2",
+  "budget_daily_vnd": 0,
+  "campaign_id": "120250085317520728",
+  "selected_campaign_id": "120250085317520728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|JCA240_JCCV241|Codex",
+  "selected_adset_ids": [
+    "120250085339070728",
+    "120250085334860728",
+    "120250085325620728"
+  ],
+  "selected_adset_count": 3,
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Nội dung quảng cáo không tương thích với mục tiêu của chiến dịch chứa quảng cáo đó.",
+  "failed_at": "2026-05-26T07:27:31.876098+00:00",
+  "updated_at": "2026-05-26T07:27:31.876173+00:00"
+}

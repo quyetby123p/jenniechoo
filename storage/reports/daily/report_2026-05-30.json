@@ -1,0 +1,58 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-30",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-31T01:00:01.689118+00:00",
+  "pos": {
+    "revenue_total_thb": 16300.0,
+    "revenue_total_vnd": 13284500,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 2,
+    "quantity_total": 3
+  },
+  "ads": {
+    "report_date": "2026-05-30",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-30",
+    "date_stop": "2026-05-30",
+    "spend_vnd": 3672983,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "dd778bc7-7190-45ce-9bd3-08fdbc584f15",
+      "variation_id": "dd778bc7-7190-45ce-9bd3-08fdbc584f15",
+      "product_id": "JC-V-234",
+      "display_id": "",
+      "name": "JCV234",
+      "quantity": 1,
+      "revenue_thb": 7600.0,
+      "revenue_vnd": 6194000
+    },
+    {
+      "key": "fa3a8c6d-d8c3-4145-90e1-a68ab3a4aeb2",
+      "variation_id": "fa3a8c6d-d8c3-4145-90e1-a68ab3a4aeb2",
+      "product_id": "JCV218",
+      "display_id": "",
+      "name": "JCV218",
+      "quantity": 1,
+      "revenue_thb": 5300.0,
+      "revenue_vnd": 4319500
+    },
+    {
+      "key": "d758374a-36e9-4d1b-b5b1-89e26715a604",
+      "variation_id": "d758374a-36e9-4d1b-b5b1-89e26715a604",
+      "product_id": "JC-V-154",
+      "display_id": "",
+      "name": "\"Somewhere Between\" Dress JCV154",
+      "quantity": 1,
+      "revenue_thb": 3400.0,
+      "revenue_vnd": 2771000
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 3.62
+}

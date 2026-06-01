@@ -1,0 +1,19 @@
+{
+  "orderUID": "",
+  "pancakeOrderId": "",
+  "customerCode": "",
+  "paymentType": "COD",
+  "orderStatus": "SALE_CONFIRM",
+  "cod": 0,
+  "codTransferred": 0,
+  "isNeedSale": false,
+  "note": "",
+  "buyerName": "",
+  "buyerPhone": "",
+  "buyerAddress": "",
+  "province": "",
+  "district": "",
+  "ward": "",
+  "postalCode": "",
+  "products": []
+}

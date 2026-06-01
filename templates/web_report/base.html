@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Web Report{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f7f8fa; color: #1e1e1e; }
+    .brand-card { border: 1px solid #d8dde5; border-radius: 10px; background: #fff; }
+    .metric-card { border: 1px solid #d8dde5; border-radius: 10px; background: #fff; min-height: 130px; }
+    .metric-card .label { color: #667085; font-size: 13px; }
+    .metric-card .value { font-size: 30px; font-weight: 700; line-height: 1.2; }
+    .size-pill { display: inline-block; margin: 3px 6px 3px 0; padding: 3px 8px; border-radius: 999px; background: #eef2f7; font-size: 13px; }
+  </style>
+</head>
+<body>
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <h1 class="h3 mb-1">Báo cáo vận hành đơn hàng</h1>
+      <p class="text-muted mb-2">Timezone: {{ timezone_name }} · Refresh cache: 10 phút</p>
+    </div>
+    <form class="d-flex gap-2" method="get" action="{{ request.path }}">
+      <input type="date" class="form-control" name="date" value="{{ selected_date }}">
+      <button class="btn btn-primary" type="submit">Xem</button>
+    </form>
+  </div>
+  <div class="mb-3">
+    <a class="btn btn-sm {% if active_path == '/' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/?date={{ selected_date }}">Dashboard</a>
+    <a class="btn btn-sm {% if active_path == '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/waiting?date={{ selected_date }}">Đơn chờ hàng</a>
+    <a class="btn btn-sm {% if active_path == '/status/pending-reconcile' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/pending-reconcile?date={{ selected_date }}">Đơn chờ đối soát</a>
+    <a class="btn btn-sm btn-outline-secondary" href="/api/v1/snapshot?date={{ selected_date }}" target="_blank">API Snapshot</a>
+  </div>
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>

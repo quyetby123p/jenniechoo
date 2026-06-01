@@ -1,0 +1,25 @@
+{
+  "waiting_status_codes": [],
+  "waiting_status_labels": [
+    "Chờ hàng",
+    "cho hang",
+    "waiting"
+  ],
+  "brand_rules": [
+    {
+      "pattern": "^JC",
+      "brand_name": "Jennie Choo",
+      "brand_slug": "jennie-choo"
+    },
+    {
+      "pattern": "^(LYS|L-)",
+      "brand_name": "Lysilk",
+      "brand_slug": "lysilk"
+    },
+    {
+      "pattern": "^(SA|S-)",
+      "brand_name": "Say Studios",
+      "brand_slug": "say-studios"
+    }
+  ]
+}

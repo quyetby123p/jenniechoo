@@ -1,0 +1,15 @@
+{
+  "job_id": "job_727c8e1544a1",
+  "status": "failed",
+  "version": 3,
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid0jT9SQVdrEbhkGGUTrNiSyETYNQrHBPzdabjLYxvFCjnUquB6waZp5MauoiU7Eb6Gl",
+  "post_fingerprint": "3733f1b47e55b2da713eac39c6e4157e8d314f8aa1e1943e0ff3bda76a864b1c",
+  "budget_daily_vnd": 300000,
+  "campaign_id": "120249435650010728",
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Yêu cầu giá thầu: bạn phải điền giới hạn giá thầu hoặc chi phí mục tiêu vào trường bid_amount. Đối với LOWEST_COST_WITH_BID_CAP, bạn phải cung cấp trường bid_amount để đặt giới hạn giá thầu. Đối với TARGET_COST, bạn phải cung cấp trường bid_amount để điền chi phí mục tiêu trung bình.",
+  "failed_at": "2026-05-16T08:51:18.592397+00:00",
+  "updated_at": "2026-05-16T08:51:18.592453+00:00"
+}

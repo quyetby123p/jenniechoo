@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: fb-ops-web-report
+    runtime: python
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /healthz
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.web_report_main:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: APP_TIMEZONE
+        value: Asia/Ho_Chi_Minh
+      - key: WEB_REPORT_REFRESH_SECONDS
+        value: "600"
+      - key: WEB_REPORT_HOST
+        value: 0.0.0.0
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ALLOWED_USER_ID
+        sync: false
+      - key: META_ACCESS_TOKEN
+        sync: false
+      - key: META_AD_ACCOUNT_ID
+        sync: false
+      - key: META_PAGE_ID
+        sync: false
+      - key: PANCAKE_SHOP_ID
+        sync: false
+      - key: PANCAKE_ACCESS_TOKEN
+        sync: false
+      - key: PANCAKE_API_KEY
+        sync: false

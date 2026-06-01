@@ -1,0 +1,52 @@
+{
+  "job_id": "job_eab00c9b62e7",
+  "status": "published",
+  "version": 2,
+  "campaign_name": "ADS:QUYET|MK:ThaiLan|JCV234|Codex",
+  "sku_code_text": "JCV234",
+  "media_label": "Anh",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid0xgtnxV4aWeQim6pHCv1qPcAS7BRy7eArs3tg68PbGKigzib7sH4VqaYqiSDeg9C4l",
+  "post_fingerprint": "eee2f2838bb2af2fbdc7dfb82633620df98c7140aab99acd7de98713490399b0",
+  "budget_daily_vnd": 0,
+  "objective": "OUTCOME_ENGAGEMENT",
+  "conversion_location": "MESSAGING_DESTINATION",
+  "result_goal": "MAXIMIZE_PURCHASES_VIA_MESSAGE",
+  "message_template_name": "Chào JC",
+  "requested_destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "active_destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "destination_fallback_reason": "",
+  "campaign_mode": "existing",
+  "campaign_match_keywords": [
+    "JCV234"
+  ],
+  "selected_campaign_id": "120249515013210728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|JCV234|Codex",
+  "selected_adset_ids": [
+    "120249515020810728",
+    "120249515019530728",
+    "120249515017480728"
+  ],
+  "selected_adset_count": 3,
+  "publish_scope": "ads_only",
+  "campaign_id": "120249515013210728",
+  "adset_ids": [],
+  "ad_ids": [
+    "120249521186310728",
+    "120249521190080728",
+    "120249521191200728"
+  ],
+  "creative_ids": [
+    "777433675334021",
+    "2361993690992718",
+    "2361993690992718"
+  ],
+  "resolved_post_id": "122132540373048007",
+  "resolved_page_id": "853907927797012",
+  "object_story_id": "853907927797012_122132540373048007",
+  "resolved_permalink_url": "https://www.facebook.com/122133633243048007/posts/122132540373048007",
+  "resolved_strategy": "direct_pageid_pfbid",
+  "ads_manager_url": "https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=2123778324821105&selected_campaign_ids=120249515013210728",
+  "created_at": "2026-05-18T06:15:30.862578+00:00",
+  "updated_at": "2026-05-18T06:15:58.200067+00:00",
+  "published_at": "2026-05-18T06:15:58.199702+00:00"
+}

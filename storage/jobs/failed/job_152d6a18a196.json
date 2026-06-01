@@ -1,0 +1,17 @@
+{
+  "job_id": "job_152d6a18a196",
+  "status": "failed",
+  "version": 1,
+  "campaign_mode": "new",
+  "publish_scope": "tree",
+  "post_url": "https://www.facebook.com/reel/2179456516232466",
+  "post_fingerprint": "78dc75f13c4d765ecc27fef796b5ff33b938177ec4609a2b78ed636879ab43a1",
+  "budget_daily_vnd": 23159,
+  "campaign_id": null,
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Ngân sách của chiến dịch này quá nhỏ.",
+  "failed_at": "2026-05-23T02:07:20.756557+00:00",
+  "updated_at": "2026-05-23T02:07:20.756622+00:00"
+}

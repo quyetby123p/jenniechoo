@@ -1,0 +1,48 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-15",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-16T16:59:29.264255+00:00",
+  "pos": {
+    "revenue_total_thb": 12000.0,
+    "revenue_total_vnd": 9780000,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 1,
+    "quantity_total": 2
+  },
+  "ads": {
+    "report_date": "2026-05-15",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-15",
+    "date_stop": "2026-05-15",
+    "spend_vnd": 4751423,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "be0d565a-bd28-46aa-aea9-670e34009bc2",
+      "variation_id": "be0d565a-bd28-46aa-aea9-670e34009bc2",
+      "product_id": "JC-V-238",
+      "display_id": "",
+      "name": "Lily of the Valley Dress JCV238",
+      "quantity": 1,
+      "revenue_thb": 6400.0,
+      "revenue_vnd": 5216000
+    },
+    {
+      "key": "7cd0e118-7ec2-43ce-b2aa-d1db2a5f6ffe",
+      "variation_id": "7cd0e118-7ec2-43ce-b2aa-d1db2a5f6ffe",
+      "product_id": "JC-V-223",
+      "display_id": "",
+      "name": "JCV223",
+      "quantity": 1,
+      "revenue_thb": 5600.0,
+      "revenue_vnd": 4564000
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 2.06
+}

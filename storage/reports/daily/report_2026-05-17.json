@@ -1,0 +1,48 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-17",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-18T16:53:04.927640+00:00",
+  "pos": {
+    "revenue_total_thb": 8700.0,
+    "revenue_total_vnd": 7090500,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 2,
+    "quantity_total": 2
+  },
+  "ads": {
+    "report_date": "2026-05-17",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-17",
+    "date_stop": "2026-05-17",
+    "spend_vnd": 5094558,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "de789927-dcf0-4463-a246-e0d1626cf087",
+      "variation_id": "de789927-dcf0-4463-a246-e0d1626cf087",
+      "product_id": "JC-V- 252",
+      "display_id": "",
+      "name": "First Light Dress JCV252",
+      "quantity": 1,
+      "revenue_thb": 5300.0,
+      "revenue_vnd": 4319500
+    },
+    {
+      "key": "b207ba7a-f1b8-4957-bacc-22b7ad834d72",
+      "variation_id": "b207ba7a-f1b8-4957-bacc-22b7ad834d72",
+      "product_id": "JCV143",
+      "display_id": "",
+      "name": "Aube Dress JCV143",
+      "quantity": 1,
+      "revenue_thb": 3400.0,
+      "revenue_vnd": 2771000
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 1.39
+}

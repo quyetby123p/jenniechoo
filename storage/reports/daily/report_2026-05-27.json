@@ -1,0 +1,78 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-27",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-28T01:14:01.569886+00:00",
+  "pos": {
+    "revenue_total_thb": 16250.0,
+    "revenue_total_vnd": 13243750,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 3,
+    "quantity_total": 5
+  },
+  "ads": {
+    "report_date": "2026-05-27",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-27",
+    "date_stop": "2026-05-27",
+    "spend_vnd": 4427862,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "89d0549d-ef56-440b-9d0e-79a22c049c2a",
+      "variation_id": "89d0549d-ef56-440b-9d0e-79a22c049c2a",
+      "product_id": "JC-V-239",
+      "display_id": "",
+      "name": "Artemis Cape Dress JCV239",
+      "quantity": 1,
+      "revenue_thb": 5200.0,
+      "revenue_vnd": 4238000
+    },
+    {
+      "key": "214e9dcd-724e-4785-b17a-ebdae8e71b7c",
+      "variation_id": "214e9dcd-724e-4785-b17a-ebdae8e71b7c",
+      "product_id": "JC-Q-221",
+      "display_id": "",
+      "name": "Luminous Ease Trousers-JCQ221",
+      "quantity": 1,
+      "revenue_thb": 3850.0,
+      "revenue_vnd": 3137750
+    },
+    {
+      "key": "7d96ebc1-587b-4548-b1bd-009778c47139",
+      "variation_id": "7d96ebc1-587b-4548-b1bd-009778c47139",
+      "product_id": "JC-A-250",
+      "display_id": "",
+      "name": "Falling Cloud JCA250",
+      "quantity": 1,
+      "revenue_thb": 2500.0,
+      "revenue_vnd": 2037500
+    },
+    {
+      "key": "7c50e3fb-fd62-4883-b09d-c0b678be4467",
+      "variation_id": "7c50e3fb-fd62-4883-b09d-c0b678be4467",
+      "product_id": "JC-A-250",
+      "display_id": "",
+      "name": "Falling Cloud JCA250",
+      "quantity": 1,
+      "revenue_thb": 2500.0,
+      "revenue_vnd": 2037500
+    },
+    {
+      "key": "ce4d025e-af57-49d3-b39f-3178b50062b2",
+      "variation_id": "ce4d025e-af57-49d3-b39f-3178b50062b2",
+      "product_id": "JC-A-248",
+      "display_id": "",
+      "name": "Falling Cloud Set JCA248",
+      "quantity": 1,
+      "revenue_thb": 2200.0,
+      "revenue_vnd": 1793000
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 2.99
+}

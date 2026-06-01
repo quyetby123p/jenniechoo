@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-20",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-20T14:00:01.303788+00:00",
+  "pos": {
+    "revenue_total_thb": 10600.0,
+    "revenue_total_vnd": 8639000,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 2,
+    "quantity_total": 2
+  },
+  "ads": {
+    "report_date": "2026-05-20",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-20",
+    "date_stop": "2026-05-20",
+    "spend_vnd": 2884794,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "750b6b82-e771-4799-b32e-666434a83e75",
+      "variation_id": "750b6b82-e771-4799-b32e-666434a83e75",
+      "product_id": "JC-V- 252",
+      "display_id": "",
+      "name": "First Light Dress JCV252",
+      "quantity": 2,
+      "revenue_thb": 10600.0,
+      "revenue_vnd": 8639000
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 2.99
+}

@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "started_at": "2026-05-31T02:22:46.375877+00:00",
+  "finished_at": "2026-05-31T02:22:48.739448+00:00",
+  "cursor_from": 1780192963,
+  "cursor_to": 1780194144,
+  "fetch_start_ts": 1780192843,
+  "fetch_end_ts": 1780194166,
+  "fetched": 3,
+  "considered": 3,
+  "created": 0,
+  "skipped_local_duplicate": 2,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 1,
+  "skipped_repeated_error": 0,
+  "failed": 1,
+  "errors": [
+    "Map sản phẩm lỗi cho đơn JCT361: Không tìm thấy SKU 'JCV236-KEM-L' màu 'Váy Kem' trên Thái Dương."
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "print_note_synced": 0,
+  "print_note_failed": 0,
+  "sale_status_synced": 0,
+  "sale_status_failed": 0,
+  "manual_order_code": "",
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10
+}

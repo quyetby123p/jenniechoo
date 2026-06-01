@@ -1,0 +1,43 @@
+{
+  "job_id": "job_0cda1ee92305",
+  "status": "cancelled",
+  "version": 5,
+  "campaign_name": "ADS:QUYET|MK:ThaiLan|JCV234",
+  "sku_code_text": "JCV234",
+  "media_label": "Video",
+  "post_url": "https://www.facebook.com/reel/1645620993327681",
+  "post_fingerprint": "3c4dd28c359cb3b32d852c4aabc1826f9cdbe8537b5c5efe17e1a00306209d47",
+  "budget_daily_vnd": 231123,
+  "objective": "OUTCOME_ENGAGEMENT",
+  "conversion_location": "MESSAGING_DESTINATION",
+  "result_goal": "MAXIMIZE_PURCHASES_VIA_MESSAGE",
+  "message_template_name": "Chào JC",
+  "requested_destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "active_destination_type": "MESSENGER",
+  "destination_fallback_reason": "Meta API loi (400): Nội dung phải có thông số degrees_of_freedom cho quảng cáo nhiều đích đến.",
+  "campaign_id": "120249514944930728",
+  "adset_ids": [
+    "120249514948870728",
+    "120249514951330728",
+    "120249514958710728"
+  ],
+  "ad_ids": [
+    "120249514950360728",
+    "120249514957650728",
+    "120249514960020728"
+  ],
+  "creative_ids": [
+    "991417763439432",
+    "991417763439432",
+    "983571024252859"
+  ],
+  "resolved_post_id": "122133636483048007",
+  "resolved_page_id": "853907927797012",
+  "object_story_id": "853907927797012_122133636483048007",
+  "resolved_permalink_url": "https://www.facebook.com/reel/1645620993327681/",
+  "resolved_strategy": "matched_page_permalink",
+  "ads_manager_url": "https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=2123778324821105&selected_campaign_ids=120249514944930728",
+  "created_at": "2026-05-18T04:26:15.321940+00:00",
+  "updated_at": "2026-05-18T04:27:22.865339+00:00",
+  "cancelled_at": "2026-05-18T04:27:22.864978+00:00"
+}

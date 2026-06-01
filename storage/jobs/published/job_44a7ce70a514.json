@@ -1,0 +1,43 @@
+{
+  "job_id": "job_44a7ce70a514",
+  "status": "published",
+  "version": 2,
+  "campaign_name": "ADS:QUYET|MK:ThaiLan|JCTAKEAWAY_JCA146_JCQ221",
+  "sku_code_text": "JCTAKEAWAY_JCA146_JCQ221",
+  "media_label": "Anh",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid0BBipfaVqhCTF8oEaajfbAZQjyxdithHQJRLViKocmG6A1GKJgn4SFa9oZSvumswRl",
+  "post_fingerprint": "66cd116c215148c8333b3f9622cfad488d4a798c9e8395e790949d5db11985e2",
+  "budget_daily_vnd": 123345,
+  "objective": "OUTCOME_ENGAGEMENT",
+  "conversion_location": "MESSAGING_DESTINATION",
+  "result_goal": "MAXIMIZE_PURCHASES_VIA_MESSAGE",
+  "message_template_name": "Chào JC",
+  "requested_destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "active_destination_type": "MESSENGER",
+  "destination_fallback_reason": "Meta API loi (400): Nội dung phải có thông số degrees_of_freedom cho quảng cáo nhiều đích đến.",
+  "campaign_id": "120249453502310728",
+  "adset_ids": [
+    "120249453506930728",
+    "120249453510720728",
+    "120249453513950728"
+  ],
+  "ad_ids": [
+    "120249453508830728",
+    "120249453512550728",
+    "120249453516870728"
+  ],
+  "creative_ids": [
+    "1017280654016972",
+    "1017280654016972",
+    "983295634395972"
+  ],
+  "resolved_post_id": "122133200631048007",
+  "resolved_page_id": "853907927797012",
+  "object_story_id": "853907927797012_122133200631048007",
+  "resolved_permalink_url": "https://www.facebook.com/122133633243048007/posts/122133200631048007",
+  "resolved_strategy": "direct_pageid_pfbid",
+  "ads_manager_url": "https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=2123778324821105&selected_campaign_ids=120249453502310728",
+  "created_at": "2026-05-16T14:00:17.215589+00:00",
+  "updated_at": "2026-05-16T14:00:49.272686+00:00",
+  "published_at": "2026-05-16T14:00:49.272299+00:00"
+}

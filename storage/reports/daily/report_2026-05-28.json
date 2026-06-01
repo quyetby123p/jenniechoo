@@ -1,0 +1,58 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-28",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-29T01:09:25.426820+00:00",
+  "pos": {
+    "revenue_total_thb": 11100.0,
+    "revenue_total_vnd": 9046500,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 1,
+    "quantity_total": 3
+  },
+  "ads": {
+    "report_date": "2026-05-28",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-28",
+    "date_stop": "2026-05-28",
+    "spend_vnd": 4525859,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "36154dfb-e95e-47ba-b593-5f07ef309834",
+      "variation_id": "36154dfb-e95e-47ba-b593-5f07ef309834",
+      "product_id": "JC-A-246",
+      "display_id": "",
+      "name": "Venus Sway JCA246",
+      "quantity": 1,
+      "revenue_thb": 3700.0,
+      "revenue_vnd": 3015500
+    },
+    {
+      "key": "438dddb5-71bd-45ab-85fa-59bd4f2c3168",
+      "variation_id": "438dddb5-71bd-45ab-85fa-59bd4f2c3168",
+      "product_id": "JC-A-246",
+      "display_id": "",
+      "name": "Venus Sway JCA246",
+      "quantity": 1,
+      "revenue_thb": 3700.0,
+      "revenue_vnd": 3015500
+    },
+    {
+      "key": "24b8804b-92b2-4c81-bc43-501f71b52589",
+      "variation_id": "24b8804b-92b2-4c81-bc43-501f71b52589",
+      "product_id": "JC-A-224",
+      "display_id": "",
+      "name": "Open Grace Blouse - JCA224",
+      "quantity": 1,
+      "revenue_thb": 3700.0,
+      "revenue_vnd": 3015500
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 2.0
+}

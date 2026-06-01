@@ -1,0 +1,15 @@
+{
+  "job_id": "job_b2cb294e88c5",
+  "status": "failed",
+  "version": 1,
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid0jT9SQVdrEbhkGGUTrNiSyETYNQrHBPzdabjLYxvFCjnUquB6waZp5MauoiU7Eb6Gl",
+  "post_fingerprint": "3733f1b47e55b2da713eac39c6e4157e8d314f8aa1e1943e0ff3bda76a864b1c",
+  "budget_daily_vnd": 300000,
+  "campaign_id": null,
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): (#100) Tried accessing nonexisting field (from)",
+  "failed_at": "2026-05-16T08:06:16.641266+00:00",
+  "updated_at": "2026-05-16T08:06:16.641336+00:00"
+}

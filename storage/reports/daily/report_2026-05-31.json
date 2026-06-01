@@ -1,0 +1,98 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-31",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-06-01T01:00:01.767590+00:00",
+  "pos": {
+    "revenue_total_thb": 32300.0,
+    "revenue_total_vnd": 26324500,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 5,
+    "quantity_total": 8
+  },
+  "ads": {
+    "report_date": "2026-05-31",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-31",
+    "date_stop": "2026-05-31",
+    "spend_vnd": 6619984,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "7f11c272-35db-4707-9b3d-e1916bdc208c",
+      "variation_id": "7f11c272-35db-4707-9b3d-e1916bdc208c",
+      "product_id": "JCV237",
+      "display_id": "",
+      "name": "Selene's Light Dress JCV237",
+      "quantity": 1,
+      "revenue_thb": 7800.0,
+      "revenue_vnd": 6357000
+    },
+    {
+      "key": "e1d8e022-a6f5-4853-9170-a7ea902a1eaf",
+      "variation_id": "e1d8e022-a6f5-4853-9170-a7ea902a1eaf",
+      "product_id": "JCV237",
+      "display_id": "",
+      "name": "Selene's Light Dress JCV237",
+      "quantity": 1,
+      "revenue_thb": 7800.0,
+      "revenue_vnd": 6357000
+    },
+    {
+      "key": "fb2c3a03-e254-4ef4-8809-f853abfb14c2",
+      "variation_id": "fb2c3a03-e254-4ef4-8809-f853abfb14c2",
+      "product_id": "JC-V-236",
+      "display_id": "",
+      "name": "JCV236",
+      "quantity": 1,
+      "revenue_thb": 5500.0,
+      "revenue_vnd": 4482500
+    },
+    {
+      "key": "11e20475-07da-481b-a776-68d5658deab3",
+      "variation_id": "11e20475-07da-481b-a776-68d5658deab3",
+      "product_id": "JC-A-253",
+      "display_id": "",
+      "name": "𝑶𝒓𝒆𝒐 𝑳𝒂𝒕𝒕𝒆 𝑻𝒂𝒏𝒌𝒕𝒐𝒑 JCA253",
+      "quantity": 2,
+      "revenue_thb": 3800.0,
+      "revenue_vnd": 3097000
+    },
+    {
+      "key": "24b8804b-92b2-4c81-bc43-501f71b52589",
+      "variation_id": "24b8804b-92b2-4c81-bc43-501f71b52589",
+      "product_id": "JC-A-224",
+      "display_id": "",
+      "name": "Open Grace Blouse - JCA224",
+      "quantity": 1,
+      "revenue_thb": 3700.0,
+      "revenue_vnd": 3015500
+    },
+    {
+      "key": "2568ca65-883c-4d09-918f-ac31aa374c45",
+      "variation_id": "2568ca65-883c-4d09-918f-ac31aa374c45",
+      "product_id": "JC-CV-232",
+      "display_id": "",
+      "name": "Ivory Poise Skirt-JCCV232",
+      "quantity": 1,
+      "revenue_thb": 2100.0,
+      "revenue_vnd": 1711500
+    },
+    {
+      "key": "846aae60-ecf5-4058-aa59-5edae3d39dc3",
+      "variation_id": "846aae60-ecf5-4058-aa59-5edae3d39dc3",
+      "product_id": "JCA146",
+      "display_id": "",
+      "name": "Vanilla Tank Top JCA146",
+      "quantity": 1,
+      "revenue_thb": 1600.0,
+      "revenue_vnd": 1304000
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 3.98
+}

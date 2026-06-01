@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "started_at": "2026-05-23T07:17:56.041898+00:00",
+  "finished_at": "2026-05-23T07:18:26.859421+00:00",
+  "cursor_from": 1779519587,
+  "cursor_to": 1779519587,
+  "fetch_start_ts": 1779519467,
+  "fetch_end_ts": 1779520676,
+  "fetched": 1,
+  "considered": 1,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 0,
+  "failed": 1,
+  "errors": [
+    "Kiểm tra trùng từ Thái Dương thất bại cho đơn 360300989151557: HTTPSConnectionPool(host='tdffm.com', port=443): Read timed out. (read timeout=30)"
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10
+}

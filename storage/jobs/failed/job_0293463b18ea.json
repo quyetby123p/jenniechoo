@@ -1,0 +1,15 @@
+{
+  "job_id": "job_0293463b18ea",
+  "status": "failed",
+  "version": 2,
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid0jT9SQVdrEbhkGGUTrNiSyETYNQrHBPzdabjLYxvFCjnUquB6waZp5MauoiU7Eb6Gl",
+  "post_fingerprint": "3733f1b47e55b2da713eac39c6e4157e8d314f8aa1e1943e0ff3bda76a864b1c",
+  "budget_daily_vnd": 300000,
+  "campaign_id": null,
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): (#100) Objective is invalid. Use one of: APP_INSTALLS, BRAND_AWARENESS, EVENT_RESPONSES, LEAD_GENERATION, LINK_CLICKS, LOCAL_AWARENESS, MESSAGES, OFFER_CLAIMS, PAGE_LIKES, POST_ENGAGEMENT, PRODUCT_CATALOG_SALES, REACH, STORE_VISITS, VIDEO_VIEWS, OUTCOME_AWARENESS, OUTCOME_ENGAGEMENT, OUTCOME_LEADS, OUTCOME_SALES, OUTCOME_TRAFFIC, OUTCOME_APP_PROMOTION, CONVERSIONS.",
+  "failed_at": "2026-05-16T08:39:25.173956+00:00",
+  "updated_at": "2026-05-16T08:39:25.174026+00:00"
+}

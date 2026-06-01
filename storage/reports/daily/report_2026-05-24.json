@@ -1,0 +1,78 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-24",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-25T05:36:16.466540+00:00",
+  "pos": {
+    "revenue_total_thb": 14340.0,
+    "revenue_total_vnd": 11687100,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 3,
+    "quantity_total": 5
+  },
+  "ads": {
+    "report_date": "2026-05-24",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-24",
+    "date_stop": "2026-05-24",
+    "spend_vnd": 4673981,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "819ac8d3-b8ad-44d2-8744-e8ce7bce7059",
+      "variation_id": "819ac8d3-b8ad-44d2-8744-e8ce7bce7059",
+      "product_id": "JCV143",
+      "display_id": "",
+      "name": "Aube Dress JCV143",
+      "quantity": 1,
+      "revenue_thb": 3400.0,
+      "revenue_vnd": 2771000
+    },
+    {
+      "key": "b2514183-1f2a-4032-93db-7db938404c34",
+      "variation_id": "b2514183-1f2a-4032-93db-7db938404c34",
+      "product_id": "JCV140",
+      "display_id": "",
+      "name": "9AM TO 9PM Dress JCV140",
+      "quantity": 1,
+      "revenue_thb": 3400.0,
+      "revenue_vnd": 2771000
+    },
+    {
+      "key": "92d80ec6-3cff-400b-9370-d887306358d4",
+      "variation_id": "92d80ec6-3cff-400b-9370-d887306358d4",
+      "product_id": "JCCV148",
+      "display_id": "",
+      "name": "JCCV148",
+      "quantity": 1,
+      "revenue_thb": 3300.0,
+      "revenue_vnd": 2689500
+    },
+    {
+      "key": "4026fbdd-c9ae-4722-bd4f-6753f4c15fbb",
+      "variation_id": "4026fbdd-c9ae-4722-bd4f-6753f4c15fbb",
+      "product_id": "JCA158",
+      "display_id": "",
+      "name": "Ivy Chemise JCA158",
+      "quantity": 1,
+      "revenue_thb": 2300.0,
+      "revenue_vnd": 1874500
+    },
+    {
+      "key": "ee0b545d-8299-4e0c-b206-0f8564f77f37",
+      "variation_id": "ee0b545d-8299-4e0c-b206-0f8564f77f37",
+      "product_id": "JCQ158",
+      "display_id": "",
+      "name": "Ivy Skorts JCQ158",
+      "quantity": 1,
+      "revenue_thb": 1940.0,
+      "revenue_vnd": 1581100
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 2.5
+}

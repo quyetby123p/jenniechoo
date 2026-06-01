@@ -1,0 +1,15 @@
+{
+  "job_id": "job_a3b1e6a4ad32",
+  "status": "failed",
+  "version": 1,
+  "post_url": "https://www.facebook.com/reel/1645620993327681",
+  "post_fingerprint": "3c4dd28c359cb3b32d852c4aabc1826f9cdbe8537b5c5efe17e1a00306209d47",
+  "budget_daily_vnd": 125869,
+  "campaign_id": "120249437828120728",
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): (#1815161) Missing field billing_event in the spec",
+  "failed_at": "2026-05-16T09:15:24.254248+00:00",
+  "updated_at": "2026-05-16T09:15:24.254319+00:00"
+}

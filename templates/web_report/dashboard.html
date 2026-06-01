@@ -1,0 +1,100 @@
+{% extends "web_report/base.html" %}
+{% block title %}Dashboard đơn hàng{% endblock %}
+{% block content %}
+<div class="row g-3 mb-3">
+  <div class="col-md-3">
+    <div class="metric-card p-3">
+      <div class="label">Số lượng đơn hàng</div>
+      <div class="value">{{ "{:,}".format(snapshot.metrics.total_orders) }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="metric-card p-3">
+      <div class="label">Chốt được (đơn mới POS)</div>
+      <div class="value">{{ "{:,}".format(snapshot.metrics.closed_orders) }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="metric-card p-3">
+      <div class="label">Đơn chờ hàng</div>
+      <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.waiting_orders) }}</div>
+      <small class="text-muted">{{ snapshot.metrics.waiting_value_text }}</small>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="metric-card p-3">
+      <div class="label">Đơn chờ đối soát</div>
+      <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.pending_reconcile_orders) }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-6">
+    <div class="brand-card p-3 h-100">
+      <h2 class="h5 mb-3">Sản phẩm thiếu theo size</h2>
+      <div>
+        {% for row in snapshot.size_summary %}
+          <span class="size-pill">{{ row.size }}: {{ "{:,}".format(row.quantity) }}</span>
+        {% else %}
+          <span class="text-muted">Không có dữ liệu thiếu size.</span>
+        {% endfor %}
+      </div>
+      <div class="mt-3 text-muted small">
+        Dòng thiếu: {{ "{:,}".format(snapshot.metrics.missing_line_count) }} ·
+        Số lượng thiếu: {{ "{:,}".format(snapshot.metrics.missing_quantity) }} ·
+        Mã SP ảnh hưởng: {{ "{:,}".format(snapshot.metrics.missing_product_count) }}
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="brand-card p-3 h-100">
+      <h2 class="h5 mb-3">Trạng thái cần xử lý</h2>
+      <p class="mb-2">
+        <a href="/status/waiting?date={{ selected_date }}">Xem danh sách đơn chờ hàng</a>
+      </p>
+      <p class="mb-0">
+        <a href="/status/pending-reconcile?date={{ selected_date }}">Xem danh sách đơn chờ đối soát</a>
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="brand-card p-3">
+  <h2 class="h5 mb-3">Tổng quan theo brand</h2>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Brand</th>
+          <th>Tổng đơn</th>
+          <th>Đơn chờ hàng</th>
+          <th>Dòng thiếu</th>
+          <th>Số lượng thiếu</th>
+          <th>Size thiếu</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for brand in snapshot.brands %}
+        <tr>
+          <td><strong>{{ brand.brand_name }}</strong></td>
+          <td>{{ "{:,}".format(brand.total_orders) }}</td>
+          <td class="text-danger">{{ "{:,}".format(brand.waiting_orders) }}</td>
+          <td>{{ "{:,}".format(brand.missing_line_count) }}</td>
+          <td>{{ "{:,}".format(brand.missing_quantity) }}</td>
+          <td>
+            {% for size in brand.size_summary %}
+              <span class="size-pill">{{ size.size }} {{ "{:,}".format(size.quantity) }}</span>
+            {% endfor %}
+          </td>
+          <td><a href="/brand/{{ brand.brand_slug }}?date={{ selected_date }}">Chi tiết</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="text-muted">Không có dữ liệu brand.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

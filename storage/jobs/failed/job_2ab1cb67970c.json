@@ -1,0 +1,25 @@
+{
+  "job_id": "job_2ab1cb67970c",
+  "status": "failed",
+  "version": 2,
+  "campaign_mode": "existing",
+  "publish_scope": "ads_only",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid0d68Gn9faxCzYfMqJJtUUR6op5hrSXWeo6QYbg4fiyWue66aUezVDhQDKUPqWnwMtl",
+  "post_fingerprint": "8eca71a0b577a658dcbcc28658f9f6328d831ddafdc76bebf4f35822598c5eaf",
+  "budget_daily_vnd": 0,
+  "campaign_id": "120247013498670728",
+  "selected_campaign_id": "120247013498670728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|JCA224_JCCV232",
+  "selected_adset_ids": [
+    "120247014042320728",
+    "120247014028660728",
+    "120247013498630728"
+  ],
+  "selected_adset_count": 3,
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Mode lên cũ chỉ tạo ads, không đổi cấu hình campaign/adset.\nAdset hiện tại đang đa đích (Messenger + Instagram) và Meta từ chối creative mới cho post này.\nAnh giữ đúng nguyên tắc lên cũ thì vui lòng chọn campaign khác có adset MESSENGER, hoặc lên mới để bot tự tạo cấu hình phù hợp.",
+  "failed_at": "2026-05-19T06:41:52.876063+00:00",
+  "updated_at": "2026-05-19T06:41:52.876131+00:00"
+}

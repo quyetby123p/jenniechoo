@@ -1,0 +1,199 @@
+{
+  "poll": {
+    "cursor_overlap_seconds": 120,
+    "state_retention_days": 60,
+    "max_lookback_hours": 24,
+    "manual_order_lookup_hours": 720,
+    "today_only_local": true,
+    "auth_error_pause_minutes": 20,
+    "failed_order_retry_minutes": 5,
+    "pancake_fetch_error_pause_seconds": 300,
+    "post_create_lookup_retry_attempts": 4,
+    "post_create_lookup_retry_delay_seconds": [0.5, 1.0, 2.0]
+  },
+  "retry": {
+    "max_attempts": 3,
+    "backoff_seconds": [2, 5, 10]
+  },
+  "notify": {
+    "notify_on_created": true,
+    "notify_on_error": true,
+    "notify_on_empty_poll": false,
+    "max_error_lines": 10,
+    "pancake_fetch_error_notify_cooldown_minutes": 15
+  },
+  "pancake": {
+    "order_id_paths": ["id"],
+    "order_code_paths": ["custom_id", "display_id", "code"],
+    "order_created_ts_paths": ["inserted_at_timestamp", "created_at_timestamp"],
+    "order_created_at_paths": ["inserted_at", "created_at", "createdAt", "updated_at"],
+    "items_paths": ["items[]"],
+    "item_code_paths": [
+      "variation_info.custom_id",
+      "variation_info.id",
+      "variation_info.product_id",
+      "variation_info.sku",
+      "variation_info.code",
+      "sku",
+      "code"
+    ],
+    "item_color_paths": ["variation_info.color", "color", "variant.color"],
+    "item_quantity_paths": ["quantity", "qty"],
+    "item_price_paths": ["variation_info.retail_price", "price", "sale_price"],
+    "item_name_paths": ["variation_info.name", "name", "product_name"],
+    "payment_method_paths": ["payment_method", "paymentType", "payment.type"],
+    "transferred_amount_paths": ["transferred_amount", "transfer_money", "paid_amount", "codTransferred", "payment.transferred_amount"],
+    "deposit_amount_paths": ["deposit_amount", "deposit", "codTransferred", "payment.deposit_amount"],
+    "total_amount_paths": ["total_price", "total", "cod"],
+    "money_minor_unit_factor": 100,
+    "payment_method_transfer_keywords": [
+      "transfer",
+      "chuyen khoan",
+      "thanh toan truoc",
+      "prepaid"
+    ],
+    "payment_method_deposit_keywords": ["coc", "deposit"],
+    "payment_method_cod_keywords": ["cod", "thu ho", "cash on delivery"],
+    "print_note_sync": {
+      "enabled": true,
+      "template": "{thai_duong_order_uid}",
+      "order_uid_paths": [
+        "orderUID",
+        "data.orderUID",
+        "data.data.orderUID",
+        "data.order.orderUID",
+        "result.orderUID"
+      ],
+      "update_endpoint": {
+        "method": "PUT",
+        "path": "/shops/{shop_id}/orders/{order_id}",
+        "note_print_field": "note_print",
+        "mirror_note_field": "",
+        "safe_full_order_update": true,
+        "strict_note_only": true,
+        "verify_after_update": true,
+        "verify_unchanged_fields": [
+          "__items_signature__",
+          "total_price",
+          "total_quantity",
+          "status",
+          "is_empty_cart"
+        ],
+        "extra_payload": {}
+      }
+    }
+  },
+  "thai_duong": {
+    "product_endpoint": {
+      "base_url_env": "THAI_DUONG_API_BASE_URL",
+      "token_env": "THAI_DUONG_API_TOKEN",
+      "token_header": "Authorization",
+      "token_prefix": "Bearer ",
+      "method": "GET",
+      "path": "/api/v1/products/sku",
+      "request_mode": "query",
+      "page_field": "page",
+      "page_size_field": "limit",
+      "page_size": 200,
+      "result_path": "data.data",
+      "total_pages_path": "data.total",
+      "has_next_page_path": "data.hasNextPage",
+      "search_field": "searchText",
+      "filters_field": "filters",
+      "body_template": {
+        "searchText": "",
+        "filters": {},
+        "orderBy": {}
+      }
+    },
+    "order_lookup_endpoint": {
+      "base_url_env": "THAI_DUONG_API_BASE_URL",
+      "token_env": "THAI_DUONG_API_TOKEN",
+      "token_header": "Authorization",
+      "token_prefix": "Bearer ",
+      "method": "POST",
+      "path": "/api/v1/orders/list",
+      "request_mode": "json_body",
+      "page_field": "page",
+      "page_size_field": "limit",
+      "page_size": 50,
+      "result_path": "data.data",
+      "total_pages_path": "data.total",
+      "has_next_page_path": "data.hasNextPage",
+      "search_field": "searchText",
+      "filters_field": "filters",
+      "body_template": {
+        "searchText": "",
+        "filters": {},
+        "orderBy": {}
+      }
+    },
+    "create_order_endpoint": {
+      "base_url_env": "THAI_DUONG_API_BASE_URL",
+      "token_env": "THAI_DUONG_API_TOKEN",
+      "token_header": "Authorization",
+      "token_prefix": "Bearer ",
+      "method": "POST",
+      "path": "/api/v1/orders"
+    },
+    "sale_status_sync": {
+      "enabled": true,
+      "order_id_paths": ["id", "data.id", "data.data.id", "data.order.id", "result.id"],
+      "order_uid_paths": ["orderUID", "data.orderUID", "data.data.orderUID", "data.order.orderUID", "result.orderUID"],
+      "order_status_field": "orderStatus",
+      "order_status_value": "SALE_CONFIRM",
+      "order_confirm_status_field": "",
+      "order_confirm_status_value": "",
+      "need_sale_field": "isNeedSale",
+      "need_sale_value": false,
+      "update_endpoint": {
+        "base_url_env": "THAI_DUONG_API_BASE_URL",
+        "method": "PUT",
+        "path": "/api/v1/orders/update-status-order/{order_id}",
+        "use_session_login": true,
+        "login_path": "/api/v1/auth/login"
+      }
+    },
+    "reference_filter_field": "",
+    "order_reference_paths": ["orderUID", "pancakeOrderId", "referenceCode", "reference", "note"],
+    "order_lookup_filters": {},
+    "product_mapping": {
+      "product_code_paths": ["sku", "code", "name", "productName", "product.productName"],
+      "product_color_paths": ["color", "colorName"],
+      "product_name_paths": ["name", "productName"],
+      "product_id_paths": ["product.id", "productId", "id"],
+      "variant_list_paths": ["variants[]", "productVariants[]", "children[]"],
+      "variant_code_paths": ["sku", "code", "variantCode", "variantSKU", "variantSku"],
+      "variant_color_paths": ["color", "colorName"],
+      "variant_id_paths": ["id", "variantId"],
+      "variant_name_paths": ["name", "variantName"]
+    },
+    "payload_fields": {
+      "reference_order_id_path": "orderUID",
+      "pancake_order_id_path": "pancakeOrderId",
+      "customer_code_path": "customerCode",
+      "payment_type_path": "paymentType",
+      "deposit_amount_path": "codTransferred",
+      "cod_amount_path": "cod",
+      "need_sale_confirm_path": "isNeedSale",
+      "need_sale_confirm_value": false,
+      "order_status_path": "orderStatus",
+      "order_status_value": "SALE_CONFIRM",
+      "items_path": "products",
+      "note_path": "note",
+      "copy_from_order": {
+        "buyerName": "bill_full_name",
+        "buyerPhone": "bill_phone_number",
+        "buyerAddress": "shipping_address.address",
+        "province": "shipping_address.province_name",
+        "district": "shipping_address.district_name",
+        "ward": "shipping_address.commnue_name",
+        "postalCode": "shipping_address.post_code"
+      }
+    },
+    "item_payload_keys": {
+      "quantity": "quantity",
+      "sku": "sku"
+    }
+  }
+}

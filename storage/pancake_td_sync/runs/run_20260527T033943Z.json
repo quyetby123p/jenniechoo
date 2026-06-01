@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "started_at": "2026-05-27T03:39:41.163096+00:00",
+  "finished_at": "2026-05-27T03:39:43.785903+00:00",
+  "cursor_from": 1779775375,
+  "cursor_to": 1779853171,
+  "fetch_start_ts": 1779814800,
+  "fetch_end_ts": 1779853181,
+  "fetched": 1,
+  "considered": 1,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 1,
+  "skipped_repeated_error": 0,
+  "failed": 1,
+  "errors": [
+    "Map sản phẩm lỗi cho đơn JCT350: Không tìm thấy SKU 'JCV250-BE: AO REN MAU BE-MJC-A-250-BE: AO REN MAU BE-M' màu 'Be: Áo ren màu be' trên Thái Dương."
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "print_note_synced": 0,
+  "print_note_failed": 0,
+  "manual_order_code": "",
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10
+}

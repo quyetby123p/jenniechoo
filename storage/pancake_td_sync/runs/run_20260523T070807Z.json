@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "started_at": "2026-05-23T07:07:57.287645+00:00",
+  "finished_at": "2026-05-23T07:08:07.907879+00:00",
+  "cursor_from": 1779519587,
+  "cursor_to": 1779519587,
+  "fetch_start_ts": 1779519467,
+  "fetch_end_ts": 1779520077,
+  "fetched": 1,
+  "considered": 1,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 0,
+  "failed": 1,
+  "errors": [
+    "Tạo đơn Thái Dương lỗi cho đơn JCT340: API Thai Duong loi (400): {\"status\":400,\"errors\":\"Not found products with sku in order or not active\",\"stack\":\"HttpException: Http Exception\\n at throwCustomException (/app/dist/src/utils/throw-exception-helper.js:6:11)\\n at OrdersService.createOrder (/app/dist/src/orders/orders.service.js:210:63)\\n at async OrdersController.create (/app/dist/src/orders/orders.controller.js:45:9)\"}"
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10
+}

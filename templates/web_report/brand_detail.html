@@ -1,0 +1,59 @@
+{% extends "web_report/base.html" %}
+{% block title %}Chi tiết {{ brand.brand_name }}{% endblock %}
+{% block content %}
+<div class="brand-card p-3 mb-3">
+  <h2 class="h5 mb-2">{{ brand.brand_name }}</h2>
+  <div class="text-muted small">
+    Tổng đơn: {{ "{:,}".format(brand.total_orders) }} ·
+    Đơn chờ hàng: {{ "{:,}".format(brand.waiting_orders) }} ·
+    Giá trị chờ hàng: {{ brand.waiting_value_text }}
+  </div>
+</div>
+
+<div class="brand-card p-3 mb-3">
+  <h2 class="h5 mb-3">Tổng size thiếu</h2>
+  {% for size in brand.size_summary %}
+    <span class="size-pill">{{ size.size }}: {{ "{:,}".format(size.quantity) }}</span>
+  {% else %}
+    <span class="text-muted">Không có dữ liệu size.</span>
+  {% endfor %}
+</div>
+
+<div class="brand-card p-3">
+  <h2 class="h5 mb-3">Chi tiết SKU / màu / size</h2>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>SKU</th>
+          <th>Màu</th>
+          <th>Số lượng thiếu</th>
+          <th>Dòng thiếu</th>
+          <th>Giá trị thiếu</th>
+          <th>Size</th>
+          <th>Mã đơn</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in brand.sku_rows %}
+        <tr>
+          <td><strong>{{ row.sku }}</strong></td>
+          <td>{{ row.color }}</td>
+          <td>{{ "{:,}".format(row.missing_quantity) }}</td>
+          <td>{{ "{:,}".format(row.missing_line_count) }}</td>
+          <td>{{ row.value_text }}</td>
+          <td>
+            {% for size, quantity in row.sizes.items() %}
+              <span class="size-pill">{{ size }} {{ "{:,}".format(quantity) }}</span>
+            {% endfor %}
+          </td>
+          <td class="small">{{ ", ".join(row.order_refs[:8]) }}{% if row.order_refs|length > 8 %}...{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="text-muted">Không có dữ liệu SKU thiếu.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

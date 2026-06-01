@@ -1,0 +1,2 @@
+﻿fingerprint,settlement_date,td_awb,td_status,td_phone,td_customer_name,td_detail_settlement_date,td_send_date,td_cod_minor,td_amount_minor,td_fee_minor,match_result,match_tier,reason,pancake_order_id,pancake_display_id,pancake_status,target_status
+c2094dc2d5116d2725571f07398bbf89099177ad5013c43822dee433b88f3ee1,2026-04-20,TH20048HZZ276D,SUCCESS,809141721,mint warunee,2026-04-20T00:00:00.000Z,2026-04-08T00:00:00.000Z,230000,230000,3400,unmapped_status,identity,Trạng thái Thái Dương chưa map sang status Pancake.,270229005680848,232,3,

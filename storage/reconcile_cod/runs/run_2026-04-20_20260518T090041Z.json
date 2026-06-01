@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "partial": false,
+  "settlement_date": "2026-04-20",
+  "generated_at": "2026-05-18T09:00:41.889024+00:00",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "source_mode": "api",
+  "history_count": 15,
+  "detail_count": 1,
+  "pancake_order_count": 324,
+  "summary": {
+    "matched_unique": 0,
+    "already_correct": 0,
+    "ambiguous": 0,
+    "not_found": 0,
+    "unmapped_status": 1,
+    "update_candidates": 0,
+    "total": 1
+  },
+  "records": [
+    {
+      "fingerprint": "c2094dc2d5116d2725571f07398bbf89099177ad5013c43822dee433b88f3ee1",
+      "settlement_date": "2026-04-20",
+      "td_awb": "TH20048HZZ276D",
+      "td_status": "SUCCESS",
+      "td_phone": "809141721",
+      "td_customer_name": "mint warunee",
+      "td_detail_settlement_date": "2026-04-20T00:00:00.000Z",
+      "td_send_date": "2026-04-08T00:00:00.000Z",
+      "td_cod_minor": 230000,
+      "td_amount_minor": 230000,
+      "td_fee_minor": 3400,
+      "target_status": null,
+      "match_result": "unmapped_status",
+      "match_tier": "identity",
+      "reason": "Trạng thái Thái Dương chưa map sang status Pancake.",
+      "pancake_order_id": "270229005680848",
+      "pancake_display_id": "232",
+      "pancake_status": 3
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "csv_path": "D:\\clawagent-main\\clawagent-main\\codex\\projects\\fb-ads-automation\\storage\\reconcile_cod\\reports\\reconcile_cod_2026-04-20_20260518T090041Z.csv"
+}

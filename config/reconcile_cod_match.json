@@ -1,0 +1,149 @@
+{
+  "thai_duong": {
+    "settlement_date_paths": [
+      "codPaymentDate",
+      "Ngay tra tien COD",
+      "settlement_date"
+    ],
+    "detail_settlement_date_paths": [
+      "codPaymentDate",
+      "Ngay doi soat",
+      "settlement_date"
+    ],
+    "send_date_paths": [
+      "sendOrderDate",
+      "Ngay gui don",
+      "send_date",
+      "created_at"
+    ],
+    "awb_paths": [
+      "shippingOrderCode",
+      "orderUID",
+      "Ma van don",
+      "awb",
+      "tracking_code",
+      "tracking_number"
+    ],
+    "status_paths": [
+      "shippingOrderStatus",
+      "orderStatus",
+      "Trang thai",
+      "status",
+      "delivery_status"
+    ],
+    "phone_paths": [
+      "buyerPhone",
+      "So dien thoai",
+      "phone",
+      "bill_phone_number",
+      "customer_phone"
+    ],
+    "customer_name_paths": [
+      "buyerName",
+      "Ten khach hang",
+      "customer_name",
+      "receiver_name"
+    ],
+    "amount_paths": [
+      "cod",
+      "COD",
+      "Tien COD",
+      "cod_amount",
+      "amount"
+    ],
+    "sheet_cod_paths": [
+      "codFromCustomer",
+      "cod_transfered",
+      "codTransferred",
+      "collectedCod",
+      "collected_cod"
+    ],
+    "fee_paths": [
+      "deliveryFee",
+      "Phi",
+      "fee",
+      "shipping_fee",
+      "delivery_fee"
+    ],
+    "conclusion_thb_paths": [
+      "codRemain",
+      "cod",
+      "COD con lai",
+      "ket_luan_doi_soat_thb"
+    ],
+    "conclusion_vnd_paths": [
+      "codVnd",
+      "Kết luận đối soát (VNĐ)",
+      "ket_luan_doi_soat_vnd"
+    ],
+    "exchange_rate_paths": [
+      "exchangeRate",
+      "ty_gia",
+      "rate"
+    ],
+    "summary_conclusion_thb_paths": [
+      "conclusion",
+      "ket_luan_doi_soat_thb"
+    ],
+    "summary_conclusion_vnd_paths": [
+      "conclusionVND",
+      "conclusionVnd",
+      "ket_luan_doi_soat_vnd"
+    ],
+    "summary_exchange_rate_paths": [
+      "currencyRate",
+      "exchangeRate",
+      "rate"
+    ],
+    "amount_minor_unit_factor": 100,
+    "fee_minor_unit_factor": 100
+  },
+  "pancake": {
+    "awb_paths": [
+      "shippingOrderCode",
+      "shipping_order_code",
+      "shipments[].tracking_number",
+      "shipments[].bill_no",
+      "shipments[].tracking_code",
+      "third_party_id",
+      "third_party_infomation.tracking_number",
+      "additional_info.awb",
+      "additional_info.tracking_number",
+      "custom_id"
+    ],
+    "phone_paths": [
+      "bill_phone_number",
+      "shipping_address.phone_number",
+      "customer.shop_customer.phone_numbers[]",
+      "customer.shop_customer.shop_customer_addresses[].phone_number"
+    ],
+    "customer_name_paths": [
+      "bill_full_name",
+      "shipping_address.full_name",
+      "customer.name",
+      "customer.shop_customer.shop_customer_addresses[].full_name"
+    ],
+    "amount_paths": [
+      "cod",
+      "total_price"
+    ],
+    "original_amount_paths": [
+      "items[].variation_info.retail_price_currency_original",
+      "items[].variation_info.retail_price_wholesale_original",
+      "items[].variation_info.retail_price",
+      "items[].variation_info.retail_price_by_weight",
+      "items[].variation_info.retail_price_original"
+    ],
+    "status_paths": [
+      "status"
+    ],
+    "display_id_paths": [
+      "custom_id",
+      "display_id"
+    ],
+    "order_id_paths": [
+      "id"
+    ],
+    "amount_minor_unit_factor": 1
+  }
+}

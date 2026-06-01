@@ -1,0 +1,19 @@
+{
+  "ok": false,
+  "partial": false,
+  "report_date": "2026-05-22",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-23T01:00:13.745293+00:00",
+  "pos": null,
+  "ads": null,
+  "top_products": [],
+  "warnings": [
+    "Không lấy được dữ liệu POS: Lỗi kết nối Pancake API: HTTPSConnectionPool(host='pos.pancake.vn', port=443): Max retries exceeded with url: /api/v1/shops/407330767/orders?page_size=200&page_number=1&startDateTime=1779382800&endDateTime=1779469199&access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiUGjhuqFtIFbEg24gUXV54bq_dCIsImV4cCI6MTc3OTc1OTE5NywiYXBwbGljYXRpb24iOjEsInVpZCI6Ijc4MGUzZmEyLTk2Y2MtNGJhYS04ZmM2LTljNWYyMjExNmRkOCIsInNlc3Npb25faWQiOiJmZmEyZWYyZC1lYjU0LTQ2OGEtYTgzNS01MDFjYWNlMmNlMjgiLCJpYXQiOjE3NzE5ODMxOTcsImZiX2lkIjoiNzA1NjYzNTk1MzkxMjY5IiwibG9naW5fc2Vzc2lvbiI6bnVsbCwiZmJfbmFtZSI6IlBo4bqhbSBWxINuIFF1eeG6v3QifQ.Suh58aGk1UahRSCZifgKeCCs1ja8z8maz6ro-yorQo4 (Caused by NameResolutionError(\"HTTPSConnection(host='pos.pancake.vn', port=443): Failed to resolve 'pos.pancake.vn' ([Errno 11001] getaddrinfo failed)\"))",
+    "Không lấy được dữ liệu Ads: Loi ket noi Meta API: HTTPSConnectionPool(host='graph.facebook.com', port=443): Max retries exceeded with url: /v21.0/act_2123778324821105/insights?fields=spend%2Caccount_id%2Cdate_start%2Cdate_stop&level=account&time_increment=1&time_range=%7B%22since%22%3A+%222026-05-22%22%2C+%22until%22%3A+%222026-05-22%22%7D&access_token=EAAlZBW1EBjPoBRdqP2dzfIiExq82BCdn7Lw4ehbxegNbucJGAlxxGt1uwck4AGjYzWuJX41zN1Q0LJE81waQMRIQSbs0qNEWWLZCPYGqfYjZCCbM1ULZAqC0HPpHku1Vt1ZAcwZAzg8GuinlcdvlQK22mmMnZArjESO1aLlidFE6LgCyEmcWX0h0tlx3aZBXUJCZACJ86AwwC5fP2Tr165ZBZAlOhW1aickZAzJyHkzTHRnr (Caused by NameResolutionError(\"HTTPSConnection(host='graph.facebook.com', port=443): Failed to resolve 'graph.facebook.com' ([Errno 11001] getaddrinfo failed)\"))"
+  ],
+  "errors": {
+    "pos": "Lỗi kết nối Pancake API: HTTPSConnectionPool(host='pos.pancake.vn', port=443): Max retries exceeded with url: /api/v1/shops/407330767/orders?page_size=200&page_number=1&startDateTime=1779382800&endDateTime=1779469199&access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiUGjhuqFtIFbEg24gUXV54bq_dCIsImV4cCI6MTc3OTc1OTE5NywiYXBwbGljYXRpb24iOjEsInVpZCI6Ijc4MGUzZmEyLTk2Y2MtNGJhYS04ZmM2LTljNWYyMjExNmRkOCIsInNlc3Npb25faWQiOiJmZmEyZWYyZC1lYjU0LTQ2OGEtYTgzNS01MDFjYWNlMmNlMjgiLCJpYXQiOjE3NzE5ODMxOTcsImZiX2lkIjoiNzA1NjYzNTk1MzkxMjY5IiwibG9naW5fc2Vzc2lvbiI6bnVsbCwiZmJfbmFtZSI6IlBo4bqhbSBWxINuIFF1eeG6v3QifQ.Suh58aGk1UahRSCZifgKeCCs1ja8z8maz6ro-yorQo4 (Caused by NameResolutionError(\"HTTPSConnection(host='pos.pancake.vn', port=443): Failed to resolve 'pos.pancake.vn' ([Errno 11001] getaddrinfo failed)\"))",
+    "ads": "Loi ket noi Meta API: HTTPSConnectionPool(host='graph.facebook.com', port=443): Max retries exceeded with url: /v21.0/act_2123778324821105/insights?fields=spend%2Caccount_id%2Cdate_start%2Cdate_stop&level=account&time_increment=1&time_range=%7B%22since%22%3A+%222026-05-22%22%2C+%22until%22%3A+%222026-05-22%22%7D&access_token=EAAlZBW1EBjPoBRdqP2dzfIiExq82BCdn7Lw4ehbxegNbucJGAlxxGt1uwck4AGjYzWuJX41zN1Q0LJE81waQMRIQSbs0qNEWWLZCPYGqfYjZCCbM1ULZAqC0HPpHku1Vt1ZAcwZAzg8GuinlcdvlQK22mmMnZArjESO1aLlidFE6LgCyEmcWX0h0tlx3aZBXUJCZACJ86AwwC5fP2Tr165ZBZAlOhW1aickZAzJyHkzTHRnr (Caused by NameResolutionError(\"HTTPSConnection(host='graph.facebook.com', port=443): Failed to resolve 'graph.facebook.com' ([Errno 11001] getaddrinfo failed)\"))"
+  },
+  "roas": 0.0
+}

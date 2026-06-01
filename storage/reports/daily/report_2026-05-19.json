@@ -1,0 +1,88 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-19",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-20T09:06:11.133415+00:00",
+  "pos": {
+    "revenue_total_thb": 31600.0,
+    "revenue_total_vnd": 25754000,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 4,
+    "quantity_total": 7
+  },
+  "ads": {
+    "report_date": "2026-05-19",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-19",
+    "date_stop": "2026-05-19",
+    "spend_vnd": 5728393,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "7f11c272-35db-4707-9b3d-e1916bdc208c",
+      "variation_id": "7f11c272-35db-4707-9b3d-e1916bdc208c",
+      "product_id": "JCV237",
+      "display_id": "",
+      "name": "Selene's Light Dress JCV237",
+      "quantity": 1,
+      "revenue_thb": 7800.0,
+      "revenue_vnd": 6357000
+    },
+    {
+      "key": "36154dfb-e95e-47ba-b593-5f07ef309834",
+      "variation_id": "36154dfb-e95e-47ba-b593-5f07ef309834",
+      "product_id": "JC-A-246",
+      "display_id": "",
+      "name": "Venus Sway JCA246",
+      "quantity": 2,
+      "revenue_thb": 7400.0,
+      "revenue_vnd": 6031000
+    },
+    {
+      "key": "d87fe62a-b0f3-4d93-91a6-cdc79ab0d59a",
+      "variation_id": "d87fe62a-b0f3-4d93-91a6-cdc79ab0d59a",
+      "product_id": "JC-V-238",
+      "display_id": "",
+      "name": "Lily of the Valley Dress JCV238",
+      "quantity": 1,
+      "revenue_thb": 6400.0,
+      "revenue_vnd": 5216000
+    },
+    {
+      "key": "b6bfb628-2046-4b8f-91ad-56d931f735c8",
+      "variation_id": "b6bfb628-2046-4b8f-91ad-56d931f735c8",
+      "product_id": "JC-Q-247",
+      "display_id": "",
+      "name": "JCQ247",
+      "quantity": 1,
+      "revenue_thb": 3800.0,
+      "revenue_vnd": 3097000
+    },
+    {
+      "key": "fe973114-382c-4360-b09c-fac660088f07",
+      "variation_id": "fe973114-382c-4360-b09c-fac660088f07",
+      "product_id": "JC-V-145",
+      "display_id": "",
+      "name": "Dune Dress JCV145",
+      "quantity": 1,
+      "revenue_thb": 3500.0,
+      "revenue_vnd": 2852500
+    },
+    {
+      "key": "8ed9f2f6-ce5e-4e94-be4f-34c01f5802a6",
+      "variation_id": "8ed9f2f6-ce5e-4e94-be4f-34c01f5802a6",
+      "product_id": "JCV140",
+      "display_id": "",
+      "name": "9AM TO 9PM Dress JCV140",
+      "quantity": 1,
+      "revenue_thb": 3400.0,
+      "revenue_vnd": 2771000
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 4.5
+}

@@ -1,0 +1,35 @@
+{
+  "ok": false,
+  "partial": false,
+  "settlement_date": "2026-05-18",
+  "generated_at": "2026-05-19T06:56:01.622260+00:00",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "source_mode": "unknown",
+  "history_count": 0,
+  "detail_count": 0,
+  "pancake_order_count": 328,
+  "summary": {
+    "matched_unique": 0,
+    "already_correct": 0,
+    "ambiguous": 0,
+    "not_found": 0,
+    "unmapped_status": 0,
+    "update_candidates": 0,
+    "total": 0
+  },
+  "conclusion_totals": {
+    "thb_total": 0.0,
+    "vnd_total": 0.0,
+    "vnd_converted_count": 0,
+    "source": "detail_rows"
+  },
+  "records": [],
+  "warnings": [
+    "Không lấy được lịch sử đối soát COD để chọn kỳ mặc định: Khong tim thay file CSV doi soat theo pattern: storage/reconcile_cod/imports/history/*.csv"
+  ],
+  "errors": {
+    "history": "Khong tim thay file CSV doi soat theo pattern: storage/reconcile_cod/imports/history/*.csv",
+    "detail": "Khong tim thay file CSV doi soat theo pattern: storage/reconcile_cod/imports/detail/*.csv"
+  },
+  "csv_path": "D:\\clawagent-main\\clawagent-main\\codex\\projects\\fb-ads-automation\\storage\\reconcile_cod\\reports\\reconcile_cod_2026-05-18_20260519T065601Z.csv"
+}

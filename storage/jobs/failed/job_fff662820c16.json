@@ -1,0 +1,15 @@
+{
+  "job_id": "job_fff662820c16",
+  "status": "failed",
+  "version": 3,
+  "post_url": "https://www.facebook.com/reel/1645620993327681",
+  "post_fingerprint": "3c4dd28c359cb3b32d852c4aabc1826f9cdbe8537b5c5efe17e1a00306209d47",
+  "budget_daily_vnd": 132123,
+  "campaign_id": "120249510884330728",
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Bạn cần có quyền truy cập để quảng cáo cho Trang này. Hãy gửi cho người có toàn quyền kiểm soát Trang yêu cầu cấp quyền truy cập hoặc chọn Trang khác (nếu có). Tìm hiểu thêm tại https://www.facebook.com/business/help/183277585892925?id=420299598837059",
+  "failed_at": "2026-05-18T03:01:37.724270+00:00",
+  "updated_at": "2026-05-18T03:01:37.724337+00:00"
+}

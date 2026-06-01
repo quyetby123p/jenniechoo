@@ -1,0 +1,17 @@
+{
+  "job_id": "job_f4fcf54dcf3c",
+  "status": "failed",
+  "version": 1,
+  "campaign_mode": "new",
+  "publish_scope": "tree",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid02Sd2Yc17aEQQtKujv3xVDhKr3JYrXSj5axooRoSQxwSh2h5XmHq5KBMxyNXbxh5dgl",
+  "post_fingerprint": "f25d378884834f3ade04ad49b1327d873863961e0d71a939b1e5174346a8bf05",
+  "budget_daily_vnd": 123321,
+  "campaign_id": "120249662325660728",
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Nội dung quảng cáo không tương thích với mục tiêu của chiến dịch chứa quảng cáo đó.",
+  "failed_at": "2026-05-20T09:21:04.846363+00:00",
+  "updated_at": "2026-05-20T09:21:04.846456+00:00"
+}

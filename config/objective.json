@@ -1,0 +1,18 @@
+{
+  "campaign_objective": "OUTCOME_ENGAGEMENT",
+  "conversion_location": "MESSAGING_DESTINATION",
+  "result_goal": "MAXIMIZE_PURCHASES_VIA_MESSAGE",
+  "message_template_name": "Ch\u00e0o JC",
+  "campaign_payload_overrides": {},
+  "adset_payload_overrides": {
+    "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+    "billing_event": "IMPRESSIONS",
+    "optimization_goal": "MESSAGING_PURCHASE_CONVERSION",
+    "promoted_object": {
+      "page_id": "${META_PAGE_ID}",
+      "smart_pse_enabled": false
+    }
+  },
+  "creative_payload_overrides": {},
+  "ad_payload_overrides": {}
+}

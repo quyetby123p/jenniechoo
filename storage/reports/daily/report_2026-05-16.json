@@ -1,0 +1,78 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-16",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-17T15:13:51.121782+00:00",
+  "pos": {
+    "revenue_total_thb": 18050.0,
+    "revenue_total_vnd": 14710750,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 2,
+    "quantity_total": 5
+  },
+  "ads": {
+    "report_date": "2026-05-16",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-16",
+    "date_stop": "2026-05-16",
+    "spend_vnd": 3825099,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "a1e05084-9399-411b-b716-592b0d43e292",
+      "variation_id": "a1e05084-9399-411b-b716-592b0d43e292",
+      "product_id": "JC-A-231",
+      "display_id": "",
+      "name": "Lily Blazer_JCA231",
+      "quantity": 1,
+      "revenue_thb": 5800.0,
+      "revenue_vnd": 4727000
+    },
+    {
+      "key": "09323fb3-7c95-4c5c-9336-052ab3d0048d",
+      "variation_id": "09323fb3-7c95-4c5c-9336-052ab3d0048d",
+      "product_id": "JC-Q-221",
+      "display_id": "",
+      "name": "Luminous Ease Trousers-JCQ221",
+      "quantity": 1,
+      "revenue_thb": 3850.0,
+      "revenue_vnd": 3137750
+    },
+    {
+      "key": "819ac8d3-b8ad-44d2-8744-e8ce7bce7059",
+      "variation_id": "819ac8d3-b8ad-44d2-8744-e8ce7bce7059",
+      "product_id": "JCV143",
+      "display_id": "",
+      "name": "Aube Dress JCV143",
+      "quantity": 1,
+      "revenue_thb": 3400.0,
+      "revenue_vnd": 2771000
+    },
+    {
+      "key": "1a8dcc68-52b6-4ebb-86ce-9303310e045f",
+      "variation_id": "1a8dcc68-52b6-4ebb-86ce-9303310e045f",
+      "product_id": "JCV143",
+      "display_id": "",
+      "name": "Aube Dress JCV143",
+      "quantity": 1,
+      "revenue_thb": 3400.0,
+      "revenue_vnd": 2771000
+    },
+    {
+      "key": "846aae60-ecf5-4058-aa59-5edae3d39dc3",
+      "variation_id": "846aae60-ecf5-4058-aa59-5edae3d39dc3",
+      "product_id": "JCA146",
+      "display_id": "",
+      "name": "Vanilla Tank Top JCA146",
+      "quantity": 1,
+      "revenue_thb": 1600.0,
+      "revenue_vnd": 1304000
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 3.85
+}

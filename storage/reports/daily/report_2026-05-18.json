@@ -1,0 +1,108 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-18",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-19T06:55:58.820112+00:00",
+  "pos": {
+    "revenue_total_thb": 20780.0,
+    "revenue_total_vnd": 16935700,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 7,
+    "quantity_total": 8
+  },
+  "ads": {
+    "report_date": "2026-05-18",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-18",
+    "date_stop": "2026-05-18",
+    "spend_vnd": 5227512,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "25b7fe52-9bbd-479c-b1f4-1d798d61ffc5",
+      "variation_id": "25b7fe52-9bbd-479c-b1f4-1d798d61ffc5",
+      "product_id": "JC-V-239",
+      "display_id": "",
+      "name": "Artemis Cape Dress JCV239",
+      "quantity": 1,
+      "revenue_thb": 5200.0,
+      "revenue_vnd": 4238000
+    },
+    {
+      "key": "24b8804b-92b2-4c81-bc43-501f71b52589",
+      "variation_id": "24b8804b-92b2-4c81-bc43-501f71b52589",
+      "product_id": "JC-A-224",
+      "display_id": "",
+      "name": "Open Grace Blouse - JCA224",
+      "quantity": 1,
+      "revenue_thb": 3700.0,
+      "revenue_vnd": 3015500
+    },
+    {
+      "key": "819ac8d3-b8ad-44d2-8744-e8ce7bce7059",
+      "variation_id": "819ac8d3-b8ad-44d2-8744-e8ce7bce7059",
+      "product_id": "JCV143",
+      "display_id": "",
+      "name": "Aube Dress JCV143",
+      "quantity": 1,
+      "revenue_thb": 3400.0,
+      "revenue_vnd": 2771000
+    },
+    {
+      "key": "b95b80ba-52ad-43cd-b898-edbd42b801e5",
+      "variation_id": "b95b80ba-52ad-43cd-b898-edbd42b801e5",
+      "product_id": "JCA158",
+      "display_id": "",
+      "name": "Ivy Chemise JCA158",
+      "quantity": 1,
+      "revenue_thb": 2300.0,
+      "revenue_vnd": 1874500
+    },
+    {
+      "key": "14811b02-69f5-4430-a249-145495b18f64",
+      "variation_id": "14811b02-69f5-4430-a249-145495b18f64",
+      "product_id": "JCA158",
+      "display_id": "",
+      "name": "Ivy Chemise JCA158",
+      "quantity": 1,
+      "revenue_thb": 2300.0,
+      "revenue_vnd": 1874500
+    },
+    {
+      "key": "ee0b545d-8299-4e0c-b206-0f8564f77f37",
+      "variation_id": "ee0b545d-8299-4e0c-b206-0f8564f77f37",
+      "product_id": "JCQ158",
+      "display_id": "",
+      "name": "Ivy Skorts JCQ158",
+      "quantity": 1,
+      "revenue_thb": 1940.0,
+      "revenue_vnd": 1581100
+    },
+    {
+      "key": "db727e3d-018c-42d4-b671-3c648db80e11",
+      "variation_id": "db727e3d-018c-42d4-b671-3c648db80e11",
+      "product_id": "JCQ158",
+      "display_id": "",
+      "name": "Ivy Skorts JCQ158",
+      "quantity": 1,
+      "revenue_thb": 1940.0,
+      "revenue_vnd": 1581100
+    },
+    {
+      "key": "791d0205-758f-46f3-a373-963b2329c236",
+      "variation_id": "791d0205-758f-46f3-a373-963b2329c236",
+      "product_id": "JC-PHỤ KIỆN",
+      "display_id": "",
+      "name": "phụ kiện",
+      "quantity": 1,
+      "revenue_thb": 0.0,
+      "revenue_vnd": 0
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 3.24
+}

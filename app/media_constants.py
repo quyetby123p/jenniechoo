@@ -1,0 +1,21 @@
+from __future__ import annotations
+
+MEDIA_SHEET_HEADERS = [
+    "created_at",
+    "run_id",
+    "product_code",
+    "query_text",
+    "market_scope",
+    "media_type",
+    "platform",
+    "title",
+    "source_url",
+    "direct_media_url",
+    "thumbnail_url",
+    "snippet",
+    "engine",
+    "engine_query",
+    "score",
+    "status",
+    "dedupe_key",
+]

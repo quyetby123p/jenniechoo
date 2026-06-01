@@ -1,0 +1,54 @@
+{
+  "job_id": "job_a9da9f45d0d0",
+  "status": "published",
+  "version": 1,
+  "campaign_name": "ADS:QUYET|MK:ThaiLan|JCA146_JCCV146|Codex",
+  "sku_code_text": "JCA146_JCCV146",
+  "media_label": "Anh",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid02N97Rt1Ey7QkKv9usvFFgFF8tkVVR5eaYvbECkCwBhC1Sf39tMsnK98AJKQZycV9Dl",
+  "post_fingerprint": "39f1449ce4840be7e1ba57aa98c1db5c7cb458ed9630f15d3fb643ed7647d8a3",
+  "budget_daily_vnd": 225659,
+  "objective": "OUTCOME_ENGAGEMENT",
+  "conversion_location": "MESSAGING_DESTINATION",
+  "result_goal": "MAXIMIZE_PURCHASES_VIA_MESSAGE",
+  "message_template_name": "Chào JC",
+  "requested_destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "active_destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "destination_fallback_reason": "",
+  "campaign_mode": "new",
+  "campaign_match_keywords": [],
+  "selected_campaign_id": "120250204300410728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|JCA146_JCCV146|Codex",
+  "selected_adset_ids": [
+    "120250204315600728",
+    "120250204360210728",
+    "120250204396640728"
+  ],
+  "selected_adset_count": 3,
+  "publish_scope": "tree",
+  "campaign_id": "120250204300410728",
+  "adset_ids": [
+    "120250204315600728",
+    "120250204360210728",
+    "120250204396640728"
+  ],
+  "ad_ids": [
+    "120250204344450728",
+    "120250204382590728",
+    "120250204419640728"
+  ],
+  "creative_ids": [
+    "1503325027869456",
+    "1503325027869456",
+    "986978937034803"
+  ],
+  "resolved_post_id": "122133951105048007",
+  "resolved_page_id": "853907927797012",
+  "object_story_id": "853907927797012_122133951105048007",
+  "resolved_permalink_url": "https://www.facebook.com/122133633243048007/posts/122133951105048007",
+  "resolved_strategy": "direct_pageid_pfbid",
+  "ads_manager_url": "https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=2123778324821105&selected_campaign_ids=120250204300410728",
+  "created_at": "2026-05-28T04:14:54.905842+00:00",
+  "updated_at": "2026-05-28T04:15:20.506109+00:00",
+  "published_at": "2026-05-28T04:15:20.505473+00:00"
+}

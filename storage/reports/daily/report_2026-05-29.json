@@ -1,0 +1,48 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-29",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-30T01:00:01.627022+00:00",
+  "pos": {
+    "revenue_total_thb": 9500.0,
+    "revenue_total_vnd": 7742500,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 2,
+    "quantity_total": 2
+  },
+  "ads": {
+    "report_date": "2026-05-29",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-29",
+    "date_stop": "2026-05-29",
+    "spend_vnd": 4930664,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "80c99e4e-04de-4845-a9e2-41cac06c33eb",
+      "variation_id": "80c99e4e-04de-4845-a9e2-41cac06c33eb",
+      "product_id": "JC-V-234",
+      "display_id": "",
+      "name": "JCV234",
+      "quantity": 1,
+      "revenue_thb": 7600.0,
+      "revenue_vnd": 6194000
+    },
+    {
+      "key": "11e20475-07da-481b-a776-68d5658deab3",
+      "variation_id": "11e20475-07da-481b-a776-68d5658deab3",
+      "product_id": "JC-A-253",
+      "display_id": "",
+      "name": "𝑶𝒓𝒆𝒐 𝑳𝒂𝒕𝒕𝒆 𝑻𝒂𝒏𝒌𝒕𝒐𝒑 JCA253",
+      "quantity": 1,
+      "revenue_thb": 1900.0,
+      "revenue_vnd": 1548500
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 1.57
+}

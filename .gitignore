@@ -1,0 +1,17 @@
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Python runtime
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Runtime data
+logs/
+state/
+storage/
+!storage/
+!storage/README.md

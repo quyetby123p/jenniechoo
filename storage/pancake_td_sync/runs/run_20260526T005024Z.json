@@ -1,0 +1,26 @@
+{
+  "ok": false,
+  "started_at": "2026-05-26T00:50:05.712488+00:00",
+  "finished_at": "2026-05-26T00:50:24.763654+00:00",
+  "cursor_from": 1779602776,
+  "cursor_to": 1779602776,
+  "fetch_start_ts": 1779728400,
+  "fetch_end_ts": 1779756605,
+  "fetched": 0,
+  "considered": 0,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 0,
+  "skipped_repeated_error": 0,
+  "failed": 1,
+  "errors": [
+    "Lấy đơn Pancake thất bại: Lỗi kết nối Pancake API: HTTPSConnectionPool(host='pos.pancake.vn', port=443): Max retries exceeded with url: /api/v1/shops/407330767/orders?page_size=200&page_number=1&startDateTime=1779728400&endDateTime=1779756605&access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiUGjhuqFtIFbEg24gUXV54bq_dCIsImV4cCI6MTc3OTc1OTE5NywiYXBwbGljYXRpb24iOjEsInVpZCI6Ijc4MGUzZmEyLTk2Y2MtNGJhYS04ZmM2LTljNWYyMjExNmRkOCIsInNlc3Npb25faWQiOiJmZmEyZWYyZC1lYjU0LTQ2OGEtYTgzNS01MDFjYWNlMmNlMjgiLCJpYXQiOjE3NzE5ODMxOTcsImZiX2lkIjoiNzA1NjYzNTk1MzkxMjY5IiwibG9naW5fc2Vzc2lvbiI6bnVsbCwiZmJfbmFtZSI6IlBo4bqhbSBWxINuIFF1eeG6v3QifQ.Suh58aGk1UahRSCZifgKeCCs1ja8z8maz6ro-yorQo4 (Caused by NameResolutionError(\"HTTPSConnection(host='pos.pancake.vn', port=443): Failed to resolve 'pos.pancake.vn' ([Errno 11001] getaddrinfo failed)\"))"
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10,
+  "pancake_fetch_pause_until_ts": 1779756905
+}

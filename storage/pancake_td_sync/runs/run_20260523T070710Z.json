@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "started_at": "2026-05-23T07:07:01.198138+00:00",
+  "finished_at": "2026-05-23T07:07:10.996607+00:00",
+  "cursor_from": 1779519587,
+  "cursor_to": 1779519587,
+  "fetch_start_ts": 1779519467,
+  "fetch_end_ts": 1779520021,
+  "fetched": 1,
+  "considered": 1,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 0,
+  "failed": 1,
+  "errors": [
+    "Tạo đơn Thái Dương lỗi cho đơn JCT340: API Thai Duong loi (422): {\"status\":422,\"errors\":{\"paymentType\":\"paymentType must be one of the following values: COD, TRANSFER\"},\"stack\":\"HttpException: Http Exception\\n at ValidationPipe.exceptionFactory (/app/dist/src/utils/validation-options.js:17:16)\\n at ValidationPipe.transform (/app/node_modules/@nestjs/common/pipes/validation.pipe.js:74:30)\\n at async resolveParamValue (/app/node_modules/@nestjs/core/router/rou..."
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10
+}

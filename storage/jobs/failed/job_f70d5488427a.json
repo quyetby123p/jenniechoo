@@ -1,0 +1,17 @@
+{
+  "job_id": "job_f70d5488427a",
+  "status": "failed",
+  "version": 6,
+  "campaign_mode": "new",
+  "publish_scope": "tree",
+  "post_url": "https://www.facebook.com/reel/2992172994319258",
+  "post_fingerprint": "05a6c0ef2c4bfb5ed753f948d92a086c10d6424f2a8595499383650373eee1f2",
+  "budget_daily_vnd": 125479,
+  "campaign_id": "120250092660070728",
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Nội dung quảng cáo không tương thích với mục tiêu của chiến dịch chứa quảng cáo đó.",
+  "failed_at": "2026-05-26T09:02:50.472871+00:00",
+  "updated_at": "2026-05-26T09:02:50.472939+00:00"
+}

@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "started_at": "2026-05-27T03:45:32.672680+00:00",
+  "finished_at": "2026-05-27T03:45:37.960341+00:00",
+  "cursor_from": 1779853218,
+  "cursor_to": 1779853218,
+  "fetch_start_ts": 1777261532,
+  "fetch_end_ts": 1779853532,
+  "fetched": 58,
+  "considered": 1,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 1,
+  "skipped_repeated_error": 0,
+  "failed": 1,
+  "errors": [
+    "Map sản phẩm lỗi cho đơn JCT350: Không tìm thấy SKU 'JC-Q-221KEMM' màu 'Kem' trên Thái Dương."
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "print_note_synced": 0,
+  "print_note_failed": 0,
+  "manual_order_code": "JCT350",
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10,
+  "fetched_matched": 1
+}

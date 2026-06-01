@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "started_at": "2026-05-31T14:39:01.519184+00:00",
+  "finished_at": "2026-05-31T14:39:03.938659+00:00",
+  "cursor_from": 1780194144,
+  "cursor_to": 1780238323,
+  "fetch_start_ts": 1780194024,
+  "fetch_end_ts": 1780238341,
+  "fetched": 2,
+  "considered": 2,
+  "created": 1,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 0,
+  "skipped_repeated_error": 1,
+  "failed": 0,
+  "errors": [
+    "Không lấy được ID đơn Thái Dương để chuyển trạng thái Sale xác nhận cho đơn JCT362.",
+    "Không lấy được mã đơn Thái Dương để ghi chú in cho đơn JCT362."
+  ],
+  "created_order_ids": [
+    "90085097093753"
+  ],
+  "processed_order_ids": [
+    "90085097093753"
+  ],
+  "print_note_synced": 0,
+  "print_note_failed": 1,
+  "sale_status_synced": 0,
+  "sale_status_failed": 1,
+  "manual_order_code": "",
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10
+}

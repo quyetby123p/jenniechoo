@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "started_at": "2026-05-26T07:45:17.666339+00:00",
+  "finished_at": "2026-05-26T07:45:21.134203+00:00",
+  "cursor_from": 1779775375,
+  "cursor_to": 1779775375,
+  "fetch_start_ts": 1777189517,
+  "fetch_end_ts": 1779781517,
+  "fetched": 60,
+  "considered": 1,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 1,
+  "skipped_repeated_error": 0,
+  "failed": 1,
+  "errors": [
+    "Map sản phẩm lỗi cho đơn JCT310: Không tìm thấy SKU 'JC-V-239-NUDE BEIGE-M' màu 'Nude Beige' trên Thái Dương."
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "print_note_synced": 0,
+  "print_note_failed": 0,
+  "manual_order_code": "JCT310",
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10,
+  "fetched_matched": 1
+}

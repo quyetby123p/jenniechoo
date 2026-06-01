@@ -1,0 +1,46 @@
+{
+  "job_id": "job_9482d4acc502",
+  "status": "published",
+  "version": 1,
+  "campaign_name": "ADS:QUYET|MK:ThaiLan|SKU:ALL|Video",
+  "sku_code_text": "ALL",
+  "media_label": "Video",
+  "post_url": "https://www.facebook.com/reel/981755687919607",
+  "post_fingerprint": "730d3ed77b7155490d38f028e2eded397aa046100b4e3a3406bf6ee39682a2ed",
+  "budget_daily_vnd": 0,
+  "objective": "OUTCOME_ENGAGEMENT",
+  "conversion_location": "MESSAGING_DESTINATION",
+  "result_goal": "MAXIMIZE_PURCHASES_VIA_MESSAGE",
+  "message_template_name": "Chào JC",
+  "requested_destination_type": "INHERIT_ADSET",
+  "active_destination_type": "INHERIT_ADSET",
+  "destination_fallback_reason": "",
+  "campaign_mode": "existing",
+  "campaign_match_keywords": [
+    "VIDEO"
+  ],
+  "selected_campaign_id": "120248804559650728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|SKU:ALL|Video",
+  "selected_adset_ids": [
+    "120248804559660728"
+  ],
+  "selected_adset_count": 1,
+  "publish_scope": "ads_only",
+  "campaign_id": "120248804559650728",
+  "adset_ids": [],
+  "ad_ids": [
+    "120249995115510728"
+  ],
+  "creative_ids": [
+    "740014209169534"
+  ],
+  "resolved_post_id": "122134484139048007",
+  "resolved_page_id": "853907927797012",
+  "object_story_id": "853907927797012_122134484139048007",
+  "resolved_permalink_url": "https://www.facebook.com/reel/981755687919607/",
+  "resolved_strategy": "matched_page_permalink",
+  "ads_manager_url": "https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=2123778324821105&selected_campaign_ids=120248804559650728",
+  "created_at": "2026-05-25T03:24:33.261774+00:00",
+  "updated_at": "2026-05-25T03:25:23.311575+00:00",
+  "published_at": "2026-05-25T03:25:23.311252+00:00"
+}

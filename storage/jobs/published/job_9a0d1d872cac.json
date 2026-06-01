@@ -1,0 +1,52 @@
+{
+  "job_id": "job_9a0d1d872cac",
+  "status": "published",
+  "version": 2,
+  "campaign_name": "ADS:QUYET|MK:ThaiLan|JCV218",
+  "sku_code_text": "JCV218",
+  "media_label": "Anh",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid02yrwQEzWvQYoz1tF7CRAbvd3X278E4QJf4fnw1fYu72C3ac16ChhiN9ozovSyYPySl",
+  "post_fingerprint": "ef24e35bc9a3a1c13ea9bf0c7895f46b2218d05046568aff6dba29e2d4f0a85b",
+  "budget_daily_vnd": 0,
+  "objective": "OUTCOME_ENGAGEMENT",
+  "conversion_location": "MESSAGING_DESTINATION",
+  "result_goal": "MAXIMIZE_PURCHASES_VIA_MESSAGE",
+  "message_template_name": "Chào JC",
+  "requested_destination_type": "INHERIT_ADSET",
+  "active_destination_type": "INHERIT_ADSET",
+  "destination_fallback_reason": "",
+  "campaign_mode": "existing",
+  "campaign_match_keywords": [
+    "JCV218"
+  ],
+  "selected_campaign_id": "120245195242090728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|JCV218",
+  "selected_adset_ids": [
+    "120245195242200728",
+    "120245195242080728",
+    "120245195242160728"
+  ],
+  "selected_adset_count": 3,
+  "publish_scope": "ads_only",
+  "campaign_id": "120245195242090728",
+  "adset_ids": [],
+  "ad_ids": [
+    "120250498791800728",
+    "120250498795590728",
+    "120250498797330728"
+  ],
+  "creative_ids": [
+    "1471787334220922",
+    "1471787334220922",
+    "871365802023931"
+  ],
+  "resolved_post_id": "122135083305048007",
+  "resolved_page_id": "853907927797012",
+  "object_story_id": "853907927797012_122135083305048007",
+  "resolved_permalink_url": "https://www.facebook.com/122133633243048007/posts/122135083305048007",
+  "resolved_strategy": "direct_pageid_pfbid",
+  "ads_manager_url": "https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=2123778324821105&selected_campaign_ids=120245195242090728",
+  "created_at": "2026-06-01T03:18:44.785862+00:00",
+  "updated_at": "2026-06-01T03:18:57.054110+00:00",
+  "published_at": "2026-06-01T03:18:57.053637+00:00"
+}

@@ -1,0 +1,26 @@
+{
+  "ok": false,
+  "started_at": "2026-05-26T02:48:32.720910+00:00",
+  "finished_at": "2026-05-26T02:48:33.105396+00:00",
+  "cursor_from": 1779759025,
+  "cursor_to": 1779759025,
+  "fetch_start_ts": 1779758905,
+  "fetch_end_ts": 1779763712,
+  "fetched": 0,
+  "considered": 0,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 0,
+  "skipped_repeated_error": 0,
+  "failed": 1,
+  "errors": [
+    "Lấy đơn Pancake thất bại: Pancake API báo lỗi nghiệp vụ: {\"error_code\":102,\"message\":\"access_token is invalid\",\"success\":false}"
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10,
+  "pancake_fetch_pause_until_ts": 1779764012
+}

@@ -1,0 +1,85 @@
+{
+  "default_template_name": "Chào JC",
+  "templates": {
+    "Chào JC": {
+      "description": "Template mac dinh cho muc tieu mua qua tin nhan.",
+      "creative_patch": {
+        "page_welcome_message": {
+          "reengagement": {
+            "text": "Xin chào {{user_first_name}}! Bạn có thắc mắc nào cần trao đổi thêm với chúng tôi không?",
+            "include_products": false
+          },
+          "reengagement_disabled": false,
+          "type": "VISUAL_EDITOR",
+          "version": 2,
+          "landing_screen_type": "welcome_message",
+          "media_type": "text",
+          "text_format": {
+            "customer_action_type": "ice_breakers",
+            "message": {
+              "quick_replies": [],
+              "text": "สวัสดีคุณ {{user_first_name}} 🤍\nขอบคุณที่ให้ความสนใจในแบรนด์ JENNIE CHOO\nทางเรายินดีเป็นอย่างยิ่งในการให้คำแนะนำเกี่ยวกับ ดีไซน์ ขนาด และรายละเอียดของสินค้า เพื่อช่วยให้คุณเลือกแบบที่เหมาะสมที่สุดค่ะ"
+            }
+          },
+          "image_format": {
+            "customer_action_type": "quick_replies",
+            "message": {
+              "attachment": {
+                "type": "template",
+                "payload": {
+                  "template_type": "generic",
+                  "elements": [
+                    {
+                      "title": "",
+                      "buttons": []
+                    }
+                  ]
+                }
+              },
+              "quick_replies": [
+                {
+                  "title": "Tôi muốn tìm hiểu thêm",
+                  "content_type": "text"
+                }
+              ],
+              "text": "สวัสดีคุณ {{user_first_name}} 🤍\nขอบคุณที่ให้ความสนใจในแบรนด์ JENNIE CHOO\nทางเรายินดีเป็นอย่างยิ่งในการให้คำแนะนำเกี่ยวกับ ดีไซน์ ขนาด และรายละเอียดของสินค้า เพื่อช่วยให้คุณเลือกแบบที่เหมาะสมที่สุดค่ะ"
+            }
+          },
+          "video_format": {
+            "customer_action_type": "quick_replies",
+            "message": {
+              "attachment": {
+                "type": "video",
+                "payload": {
+                  "attachment_id": ""
+                }
+              },
+              "quick_replies": [
+                {
+                  "title": "Tôi muốn tìm hiểu thêm",
+                  "content_type": "text"
+                }
+              ],
+              "text": "สวัสดีคุณ {{user_first_name}} 🤍\nขอบคุณที่ให้ความสนใจในแบรนด์ JENNIE CHOO\nทางเรายินดีเป็นอย่างยิ่งในการให้คำแนะนำเกี่ยวกับ ดีไซน์ ขนาด และรายละเอียดของสินค้า เพื่อช่วยให้คุณเลือกแบบที่เหมาะสมที่สุดค่ะ"
+            }
+          },
+          "user_edit": true,
+          "surface": "visual_editor_new",
+          "ai_generated_icebreaker_toggle_enabled": true,
+          "is_eligible_for_customized_greeting": null,
+          "is_user_editing": false,
+          "is_eligible_for_leveraging_inbox_faqs": false,
+          "ai_gen_conversation_model_version": "IBV1",
+          "ice_breakers_edited": true,
+          "welcome_message_edited": true,
+          "has_ai_generated_welcome_message": false,
+          "template_id": "1169691625327338",
+          "template_version": 0
+        },
+        "page_welcome_message_source_creative_id": "2900378033648616"
+      },
+      "ad_patch": {},
+      "adset_patch": {}
+    }
+  }
+}

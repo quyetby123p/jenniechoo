@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "started_at": "2026-06-01T03:50:14.560336+00:00",
+  "finished_at": "2026-06-01T03:50:26.307298+00:00",
+  "cursor_from": 1780238323,
+  "cursor_to": 1780285791,
+  "fetch_start_ts": 1780246800,
+  "fetch_end_ts": 1780285814,
+  "fetched": 1,
+  "considered": 1,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 0,
+  "skipped_repeated_error": 0,
+  "failed": 1,
+  "errors": [
+    "Tạo đơn Thái Dương lỗi cho đơn JCT363: API Thai Duong loi (400): {\"status\":400,\"errors\":\"PrismaClientValidationError: \\nInvalid `this.prisma.order.create()` invocation in\\n/app/dist/src/orders/orders.service.js:171:51\\n\\n 168 console.log('orderUID 111', payload);\\n 169 const commission = await (0, handle_order_update_1.getOrderRefererCommissionPayloadByCustomerCode)(this.prisma, customer === null || customer === void 0 ? void 0 : customer.customerCode);\\n 17..."
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "print_note_synced": 0,
+  "print_note_failed": 0,
+  "sale_status_synced": 0,
+  "sale_status_failed": 0,
+  "manual_order_code": "",
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10
+}

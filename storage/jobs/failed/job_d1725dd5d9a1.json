@@ -1,0 +1,17 @@
+{
+  "job_id": "job_d1725dd5d9a1",
+  "status": "failed",
+  "version": 1,
+  "campaign_mode": "existing",
+  "publish_scope": "ads_only",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid0xgtnxV4aWeQim6pHCv1qPcAS7BRy7eArs3tg68PbGKigzib7sH4VqaYqiSDeg9C4l",
+  "post_fingerprint": "eee2f2838bb2af2fbdc7dfb82633620df98c7140aab99acd7de98713490399b0",
+  "budget_daily_vnd": 0,
+  "campaign_id": null,
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Error validating access token: Session has expired on Sunday, 17-May-26 22:00:00 PDT. The current time is Sunday, 17-May-26 22:52:50 PDT.",
+  "failed_at": "2026-05-18T05:50:18.405786+00:00",
+  "updated_at": "2026-05-18T05:50:18.405838+00:00"
+}

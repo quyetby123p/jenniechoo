@@ -1,0 +1,17 @@
+{
+  "job_id": "job_d6d9f4b9fa0b",
+  "status": "failed",
+  "version": 5,
+  "campaign_mode": "new",
+  "publish_scope": "tree",
+  "post_url": "https://www.facebook.com/reel/2992172994319258",
+  "post_fingerprint": "05a6c0ef2c4bfb5ed753f948d92a086c10d6424f2a8595499383650373eee1f2",
+  "budget_daily_vnd": 125479,
+  "campaign_id": "120250092218220728",
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Bài viết của bạn không có hình ảnh hoặc video. Quảng cáo trên Instagram hiện chỉ hỗ trợ bài viết video, ảnh và liên kết.",
+  "failed_at": "2026-05-26T08:54:10.647520+00:00",
+  "updated_at": "2026-05-26T08:54:10.647589+00:00"
+}

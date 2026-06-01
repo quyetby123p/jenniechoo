@@ -1,0 +1,53 @@
+{
+  "api": {
+    "enabled": true,
+    "base_url_env": "THAI_DUONG_API_BASE_URL",
+    "token_env": "THAI_DUONG_API_TOKEN",
+    "token_header": "Authorization",
+    "token_prefix": "Bearer ",
+    "history_endpoint": {
+      "method": "GET",
+      "path": "/api/v1/cash-flows/cod-histories",
+      "result_path": "data.data",
+      "start_date_param": "filters[validFrom]",
+      "end_date_param": "filters[validTo]",
+      "date_format": "%Y-%m-%d",
+      "page_param": "page",
+      "page_size_param": "limit",
+      "page_size": 200,
+      "total_pages_path": "data.total",
+      "has_next_page_path": "data.hasNextPage"
+    },
+    "detail_endpoint": {
+      "method": "POST",
+      "path": "/api/v1/orders/list",
+      "request_mode": "json_body",
+      "result_path": "data.data",
+      "settlement_date_param": "filters.paymentCodDateFrom",
+      "settlement_date_to_field": "filters.paymentCodDateTo",
+      "settlement_id_param": "",
+      "date_format": "%Y-%m-%d",
+      "page_param": "page",
+      "page_size_param": "limit",
+      "page_field": "page",
+      "page_size_field": "limit",
+      "page_size": 200,
+      "total_pages_path": "data.total",
+      "has_next_page_path": "data.hasNextPage",
+      "body_template": {
+        "searchText": "",
+        "filters": {},
+        "orderBy": {}
+      }
+    }
+  },
+  "csv": {
+    "enabled": true,
+    "history_glob": "storage/reconcile_cod/imports/history/*.csv",
+    "detail_glob": "storage/reconcile_cod/imports/detail/*.csv",
+    "history_encoding": "utf-8-sig",
+    "detail_encoding": "utf-8-sig",
+    "history_date_field": "Ngay tra tien COD",
+    "detail_date_field": "Ngay doi soat"
+  }
+}

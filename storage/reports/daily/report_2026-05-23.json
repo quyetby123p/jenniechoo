@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-23",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-24T01:00:01.644009+00:00",
+  "pos": {
+    "revenue_total_thb": 0.0,
+    "revenue_total_vnd": 0,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 0,
+    "quantity_total": 0
+  },
+  "ads": {
+    "report_date": "2026-05-23",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-23",
+    "date_stop": "2026-05-23",
+    "spend_vnd": 3374426,
+    "currency": "VND"
+  },
+  "top_products": [],
+  "warnings": [
+    "POS chưa trả về chỉ số tổng hợp doanh thu; báo cáo đang fallback theo giá trị từng đơn."
+  ],
+  "errors": {},
+  "roas": 0.0
+}

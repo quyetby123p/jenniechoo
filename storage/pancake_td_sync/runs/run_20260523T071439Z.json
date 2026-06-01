@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "started_at": "2026-05-23T07:14:38.593709+00:00",
+  "finished_at": "2026-05-23T07:14:39.688792+00:00",
+  "cursor_from": 1779519587,
+  "cursor_to": 1779519587,
+  "fetch_start_ts": 1779519467,
+  "fetch_end_ts": 1779520478,
+  "fetched": 1,
+  "considered": 1,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 1,
+  "failed": 1,
+  "errors": [
+    "Map sản phẩm lỗi cho đơn JCT340: Không tìm thấy SKU 'JC-V-143-KEM-M' màu 'trống' trên Thái Dương."
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10
+}

@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "started_at": "2026-05-26T02:58:42.139028+00:00",
+  "finished_at": "2026-05-26T02:58:46.691267+00:00",
+  "cursor_from": 1779759025,
+  "cursor_to": 1779763018,
+  "fetch_start_ts": 1779758905,
+  "fetch_end_ts": 1779764322,
+  "fetched": 2,
+  "considered": 2,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 1,
+  "skipped_repeated_error": 1,
+  "failed": 1,
+  "errors": [
+    "Map sản phẩm lỗi cho đơn JCT347: Không tìm thấy SKU 'JC-A-253-BE: AO BE-M' màu 'Be: Áo be' trên Thái Dương."
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10
+}

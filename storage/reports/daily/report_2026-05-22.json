@@ -1,0 +1,58 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-22",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-23T01:43:14.510340+00:00",
+  "pos": {
+    "revenue_total_thb": 6600.0,
+    "revenue_total_vnd": 5379000,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 3,
+    "quantity_total": 3
+  },
+  "ads": {
+    "report_date": "2026-05-22",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-22",
+    "date_stop": "2026-05-22",
+    "spend_vnd": 3853407,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "8dae7c35-2815-4ac8-ba29-a464e1e38a8f",
+      "variation_id": "8dae7c35-2815-4ac8-ba29-a464e1e38a8f",
+      "product_id": "JCV216",
+      "display_id": "",
+      "name": "JCV216",
+      "quantity": 1,
+      "revenue_thb": 4100.0,
+      "revenue_vnd": 3341500
+    },
+    {
+      "key": "b8137fb0-d657-4f59-b197-4500d8f864d3",
+      "variation_id": "b8137fb0-d657-4f59-b197-4500d8f864d3",
+      "product_id": "JC-V-154",
+      "display_id": "",
+      "name": "\"Somewhere Between\" Dress JCV154",
+      "quantity": 1,
+      "revenue_thb": 3400.0,
+      "revenue_vnd": 2771000
+    },
+    {
+      "key": "cc223e4e-80de-483b-9301-16587a063bf1",
+      "variation_id": "cc223e4e-80de-483b-9301-16587a063bf1",
+      "product_id": "JC-A-250",
+      "display_id": "",
+      "name": "Falling Cloud JCA250",
+      "quantity": 1,
+      "revenue_thb": 2500.0,
+      "revenue_vnd": 2037500
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 1.4
+}

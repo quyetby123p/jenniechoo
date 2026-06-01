@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "started_at": "2026-05-24T14:11:04.819826+00:00",
+  "finished_at": "2026-05-24T14:11:05.507864+00:00",
+  "cursor_from": 1779602776,
+  "cursor_to": 1779602776,
+  "fetch_start_ts": 1779602656,
+  "fetch_end_ts": 1779631864,
+  "fetched": 1,
+  "considered": 1,
+  "created": 0,
+  "skipped_local_duplicate": 1,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 0,
+  "skipped_repeated_error": 0,
+  "failed": 0,
+  "errors": [],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "run_path": "",
+  "notify": false,
+  "notify_max_error_lines": 10
+}

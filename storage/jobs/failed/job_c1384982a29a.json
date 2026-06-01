@@ -1,0 +1,25 @@
+{
+  "job_id": "job_c1384982a29a",
+  "status": "failed",
+  "version": 1,
+  "campaign_mode": "existing",
+  "publish_scope": "ads_only",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid0d68Gn9faxCzYfMqJJtUUR6op5hrSXWeo6QYbg4fiyWue66aUezVDhQDKUPqWnwMtl",
+  "post_fingerprint": "8eca71a0b577a658dcbcc28658f9f6328d831ddafdc76bebf4f35822598c5eaf",
+  "budget_daily_vnd": 0,
+  "campaign_id": "120247013498670728",
+  "selected_campaign_id": "120247013498670728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|JCA224_JCCV232",
+  "selected_adset_ids": [
+    "120247014042320728",
+    "120247014028660728",
+    "120247013498630728"
+  ],
+  "selected_adset_count": 3,
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Nội dung phải có thông số degrees_of_freedom cho quảng cáo nhiều đích đến.",
+  "failed_at": "2026-05-19T05:00:20.874343+00:00",
+  "updated_at": "2026-05-19T05:00:20.874413+00:00"
+}

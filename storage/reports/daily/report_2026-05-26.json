@@ -1,0 +1,98 @@
+{
+  "ok": true,
+  "partial": false,
+  "report_date": "2026-05-26",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "generated_at": "2026-05-27T01:00:01.043940+00:00",
+  "pos": {
+    "revenue_total_thb": 22340.0,
+    "revenue_total_vnd": 18207100,
+    "thb_to_vnd_rate": 815.0,
+    "thb_minor_unit_factor": 100,
+    "order_count": 4,
+    "quantity_total": 8
+  },
+  "ads": {
+    "report_date": "2026-05-26",
+    "account_id": "2123778324821105",
+    "date_start": "2026-05-26",
+    "date_stop": "2026-05-26",
+    "spend_vnd": 5137777,
+    "currency": "VND"
+  },
+  "top_products": [
+    {
+      "key": "513d7965-cfef-488d-9076-199c0187a67e",
+      "variation_id": "513d7965-cfef-488d-9076-199c0187a67e",
+      "product_id": "JC-V-233",
+      "display_id": "",
+      "name": "The Kate Dress JCV233",
+      "quantity": 1,
+      "revenue_thb": 6600.0,
+      "revenue_vnd": 5379000
+    },
+    {
+      "key": "11e20475-07da-481b-a776-68d5658deab3",
+      "variation_id": "11e20475-07da-481b-a776-68d5658deab3",
+      "product_id": "JC-A-253",
+      "display_id": "",
+      "name": "𝑶𝒓𝒆𝒐 𝑳𝒂𝒕𝒕𝒆 𝑻𝒂𝒏𝒌𝒕𝒐𝒑 JCA253",
+      "quantity": 2,
+      "revenue_thb": 3800.0,
+      "revenue_vnd": 3097000
+    },
+    {
+      "key": "8cf57148-5467-4025-b4a3-028397d3e1f0",
+      "variation_id": "8cf57148-5467-4025-b4a3-028397d3e1f0",
+      "product_id": "JCV123-Tay dài",
+      "display_id": "",
+      "name": "Classic Dress JCV123",
+      "quantity": 1,
+      "revenue_thb": 3000.0,
+      "revenue_vnd": 2445000
+    },
+    {
+      "key": "cc223e4e-80de-483b-9301-16587a063bf1",
+      "variation_id": "cc223e4e-80de-483b-9301-16587a063bf1",
+      "product_id": "JC-A-250",
+      "display_id": "",
+      "name": "Falling Cloud JCA250",
+      "quantity": 1,
+      "revenue_thb": 2500.0,
+      "revenue_vnd": 2037500
+    },
+    {
+      "key": "ca05b740-ee30-4fd3-bb42-8549b7c67d5b",
+      "variation_id": "ca05b740-ee30-4fd3-bb42-8549b7c67d5b",
+      "product_id": "JCA158",
+      "display_id": "",
+      "name": "Ivy Chemise JCA158",
+      "quantity": 1,
+      "revenue_thb": 2300.0,
+      "revenue_vnd": 1874500
+    },
+    {
+      "key": "a952c51d-0cec-426e-ac42-84cade30f8cf",
+      "variation_id": "a952c51d-0cec-426e-ac42-84cade30f8cf",
+      "product_id": "JC-A-248",
+      "display_id": "",
+      "name": "Falling Cloud Set JCA248",
+      "quantity": 1,
+      "revenue_thb": 2200.0,
+      "revenue_vnd": 1793000
+    },
+    {
+      "key": "a32873cf-77ab-4816-834f-7db82f811c37",
+      "variation_id": "a32873cf-77ab-4816-834f-7db82f811c37",
+      "product_id": "JCQ158",
+      "display_id": "",
+      "name": "Ivy Skorts JCQ158",
+      "quantity": 1,
+      "revenue_thb": 1940.0,
+      "revenue_vnd": 1581100
+    }
+  ],
+  "warnings": [],
+  "errors": {},
+  "roas": 3.54
+}

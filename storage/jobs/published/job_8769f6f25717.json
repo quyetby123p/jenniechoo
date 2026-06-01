@@ -1,0 +1,54 @@
+{
+  "job_id": "job_8769f6f25717",
+  "status": "published",
+  "version": 2,
+  "campaign_name": "ADS:QUYET|MK:ThaiLan|JCV223|Codex",
+  "sku_code_text": "JCV223",
+  "media_label": "Video",
+  "post_url": "https://www.facebook.com/reel/2179456516232466",
+  "post_fingerprint": "78dc75f13c4d765ecc27fef796b5ff33b938177ec4609a2b78ed636879ab43a1",
+  "budget_daily_vnd": 230159,
+  "objective": "OUTCOME_ENGAGEMENT",
+  "conversion_location": "MESSAGING_DESTINATION",
+  "result_goal": "MAXIMIZE_PURCHASES_VIA_MESSAGE",
+  "message_template_name": "Chào JC",
+  "requested_destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "active_destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "destination_fallback_reason": "",
+  "campaign_mode": "new",
+  "campaign_match_keywords": [],
+  "selected_campaign_id": "120249881371000728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|JCV223|Codex",
+  "selected_adset_ids": [
+    "120249881371460728",
+    "120249881374090728",
+    "120249881377950728"
+  ],
+  "selected_adset_count": 3,
+  "publish_scope": "tree",
+  "campaign_id": "120249881371000728",
+  "adset_ids": [
+    "120249881371460728",
+    "120249881374090728",
+    "120249881377950728"
+  ],
+  "ad_ids": [
+    "120249881373400728",
+    "120249881376430728",
+    "120249881379090728"
+  ],
+  "creative_ids": [
+    "27075514405436989",
+    "27075514405436989",
+    "27075514405436989"
+  ],
+  "resolved_post_id": "122131160895048007",
+  "resolved_page_id": "853907927797012",
+  "object_story_id": "853907927797012_122131160895048007",
+  "resolved_permalink_url": "https://www.facebook.com/reel/2179456516232466/",
+  "resolved_strategy": "matched_page_permalink",
+  "ads_manager_url": "https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=2123778324821105&selected_campaign_ids=120249881371000728",
+  "created_at": "2026-05-23T02:08:13.154797+00:00",
+  "updated_at": "2026-05-23T02:09:04.076959+00:00",
+  "published_at": "2026-05-23T02:09:04.076394+00:00"
+}

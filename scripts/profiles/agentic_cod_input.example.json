@@ -1,0 +1,12 @@
+{
+  "request_text": "đối soát cod hôm qua",
+  "settlement_date": "",
+  "trigger_label": "Agentic Reconcile COD",
+  "apply_updates": "auto",
+  "sync_sheet": "auto",
+  "llm_judge": "auto",
+  "llm_model": "gpt-4.1-mini",
+  "include_records_limit": "30",
+  "output_json": "storage/reconcile_cod/reports/agentic_latest.json",
+  "output_html": "storage/reconcile_cod/reports/agentic_latest.html"
+}

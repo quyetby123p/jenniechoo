@@ -1,0 +1,33 @@
+{
+  "ok": false,
+  "partial": false,
+  "settlement_date": "2026-05-22",
+  "generated_at": "2026-05-22T02:37:03.095172+00:00",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "source_mode": "unknown",
+  "history_count": 0,
+  "detail_count": 0,
+  "pancake_order_count": 331,
+  "summary": {
+    "matched_unique": 0,
+    "already_correct": 0,
+    "ambiguous": 0,
+    "not_found": 0,
+    "unmapped_status": 0,
+    "update_candidates": 0,
+    "total": 0
+  },
+  "conclusion_totals": {
+    "thb_total": 0.0,
+    "vnd_total": 0.0,
+    "vnd_converted_count": 0,
+    "source": "detail_rows"
+  },
+  "records": [],
+  "warnings": [],
+  "errors": {
+    "history": "Khong co nguon du lieu lich su doi soat COD kha dung (API/CSV). Chi tiet: API: API Thai Duong loi (401): {\"message\":\"Unauthorized\",\"statusCode\":401,\"stack\":\"UnauthorizedException: Unauthorized\\n at MixinAuthGuard.handleRequest (/app/node_modules/@nestjs/passport/dist/auth.guard.js:60:30)\\n at /app/node_modules/@nestjs/passport/dist/auth.guard.js:44:124\\n at /app/node_modules/@nestjs/passport/dist/auth.guard.js:83:24\\n at allFailed (/app/node_modules/passport/lib/middleware/authenticate.js:110:18)\\...; CSV: Khong tim thay file CSV doi soat theo pattern: storage/reconcile_cod/imports/history/*.csv",
+    "detail": "Khong co nguon du lieu chi tiet doi soat COD kha dung (API/CSV). Chi tiet: API: API Thai Duong loi (401): {\"message\":\"Unauthorized\",\"statusCode\":401,\"stack\":\"UnauthorizedException: Unauthorized\\n at MixinAuthGuard.handleRequest (/app/node_modules/@nestjs/passport/dist/auth.guard.js:60:30)\\n at /app/node_modules/@nestjs/passport/dist/auth.guard.js:44:124\\n at /app/node_modules/@nestjs/passport/dist/auth.guard.js:83:24\\n at allFailed (/app/node_modules/passport/lib/middleware/authenticate.js:110:18)\\...; CSV: Khong tim thay file CSV doi soat theo pattern: storage/reconcile_cod/imports/detail/*.csv"
+  },
+  "csv_path": "D:\\clawagent-main\\clawagent-main\\codex\\projects\\fb-ads-automation\\storage\\reconcile_cod\\reports\\reconcile_cod_2026-05-22_20260522T023703Z.csv"
+}

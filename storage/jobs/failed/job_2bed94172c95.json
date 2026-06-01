@@ -1,0 +1,23 @@
+{
+  "job_id": "job_2bed94172c95",
+  "status": "failed",
+  "version": 1,
+  "campaign_mode": "existing",
+  "publish_scope": "ads_only",
+  "post_url": "https://www.facebook.com/reel/1293883662350463",
+  "post_fingerprint": "11c75e68f402cb4a133e111caec70645aa7af3ac69c8a7199578ec65507d93e9",
+  "budget_daily_vnd": 0,
+  "campaign_id": "120248804559650728",
+  "selected_campaign_id": "120248804559650728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|SKU:ALL|Video",
+  "selected_adset_ids": [
+    "120248804559660728"
+  ],
+  "selected_adset_count": 1,
+  "adset_ids": [],
+  "ad_ids": [],
+  "creative_ids": [],
+  "error": "Meta API loi (400): Bài viết của bạn không có hình ảnh hoặc video. Quảng cáo trên Instagram hiện chỉ hỗ trợ bài viết video, ảnh và liên kết.",
+  "failed_at": "2026-05-25T01:40:31.532511+00:00",
+  "updated_at": "2026-05-25T01:40:31.532588+00:00"
+}

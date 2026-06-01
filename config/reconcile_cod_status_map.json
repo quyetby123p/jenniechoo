@@ -1,0 +1,53 @@
+{
+  "enabled": true,
+  "mapping": {
+    "giao thanh cong": {
+      "status": 3
+    },
+    "giao hang thanh cong": {
+      "status": 3
+    },
+    "da nhan": {
+      "status": 3
+    },
+    "success": {
+      "status": 3
+    },
+    "da hoan hang": {
+      "status": 4
+    },
+    "dang hoan hang": {
+      "status": 4
+    },
+    "hoan hang thanh cong": {
+      "status": 4
+    },
+    "returned": {
+      "status": 4
+    },
+    "returning": {
+      "status": 4
+    },
+    "being_returned": {
+      "status": 4
+    },
+    "being returned": {
+      "status": 4
+    }
+  },
+  "update_endpoint": {
+    "method": "PUT",
+    "path": "/shops/{shop_id}/orders/{order_id}",
+    "status_field": "status",
+    "extra_payload": {}
+  },
+  "pre_update_transition": {
+    "enabled": true,
+    "from_statuses": [1, 13],
+    "intermediate_status": 2,
+    "retry_if_error_contains": [
+      "chưa có thông tin sản phẩm",
+      "chua co thong tin san pham"
+    ]
+  }
+}

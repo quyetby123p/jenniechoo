@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "started_at": "2026-05-23T08:09:55.275789+00:00",
+  "finished_at": "2026-05-23T08:10:00.391732+00:00",
+  "cursor_from": 1779523669,
+  "cursor_to": 1779523669,
+  "fetch_start_ts": 1779523549,
+  "fetch_end_ts": 1779523795,
+  "fetched": 1,
+  "considered": 1,
+  "created": 0,
+  "skipped_local_duplicate": 0,
+  "skipped_remote_duplicate": 0,
+  "skipped_unmapped": 1,
+  "failed": 1,
+  "errors": [
+    "Map sản phẩm lỗi cho đơn JCT341: Không tìm thấy SKU 'JCV237-KEM NUDE-L' màu 'trống' trên Thái Dương."
+  ],
+  "created_order_ids": [],
+  "processed_order_ids": [],
+  "run_path": "",
+  "notify": true,
+  "notify_max_error_lines": 10
+}

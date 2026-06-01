@@ -1,0 +1,46 @@
+{
+  "job_id": "job_93142ff1f3bd",
+  "status": "published",
+  "version": 1,
+  "campaign_name": "ADS:QUYET|MK:ThaiLan|Gộp",
+  "sku_code_text": "ALL",
+  "media_label": "Anh",
+  "post_url": "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid02vQCwjNZFWLYLEezeEDUego8VXAV8GQgnAt1KrW8ik1x6NsRmAWty4HTAHcRrrTsAl",
+  "post_fingerprint": "5547dca488a722346511b7f72715b393ca6e08cf83e61022f2b238e965096aff",
+  "budget_daily_vnd": 0,
+  "objective": "OUTCOME_ENGAGEMENT",
+  "conversion_location": "MESSAGING_DESTINATION",
+  "result_goal": "MAXIMIZE_PURCHASES_VIA_MESSAGE",
+  "message_template_name": "Chào JC",
+  "requested_destination_type": "INHERIT_ADSET",
+  "active_destination_type": "INHERIT_ADSET",
+  "destination_fallback_reason": "",
+  "campaign_mode": "existing",
+  "campaign_match_keywords": [
+    "GỘP"
+  ],
+  "selected_campaign_id": "120248810313860728",
+  "selected_campaign_name": "ADS:QUYET|MK:ThaiLan|Gộp",
+  "selected_adset_ids": [
+    "120248810313850728"
+  ],
+  "selected_adset_count": 1,
+  "publish_scope": "ads_only",
+  "campaign_id": "120248810313860728",
+  "adset_ids": [],
+  "ad_ids": [
+    "120250019222090728"
+  ],
+  "creative_ids": [
+    "1019217450461996"
+  ],
+  "resolved_post_id": "122134506885048007",
+  "resolved_page_id": "853907927797012",
+  "object_story_id": "853907927797012_122134506885048007",
+  "resolved_permalink_url": "https://www.facebook.com/122133633243048007/posts/122134506885048007",
+  "resolved_strategy": "direct_pageid_pfbid",
+  "ads_manager_url": "https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=2123778324821105&selected_campaign_ids=120248810313860728",
+  "created_at": "2026-05-25T09:18:59.369221+00:00",
+  "updated_at": "2026-05-25T09:19:07.596351+00:00",
+  "published_at": "2026-05-25T09:19:07.596030+00:00"
+}

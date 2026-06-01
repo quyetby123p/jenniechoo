@@ -1,0 +1,70 @@
+{% extends "web_report/base.html" %}
+{% block title %}{{ status_title }}{% endblock %}
+{% block content %}
+<div class="brand-card p-3 mb-3">
+  <h2 class="h5 mb-1">{{ status_title }}</h2>
+  <div class="text-muted small">Ngày dữ liệu: {{ snapshot.report_date }} · Số dòng: {{ "{:,}".format(rows|length) }}</div>
+</div>
+
+<div class="brand-card p-3">
+  <div class="table-responsive">
+    {% if status_key == "waiting" %}
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Mã đơn</th>
+            <th>Brand</th>
+            <th>Thời gian tạo</th>
+            <th>Trạng thái</th>
+            <th>SKU thiếu</th>
+            <th>Số item</th>
+            <th>Giá trị đơn</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><strong>{{ row.order_ref }}</strong></td>
+            <td>{{ row.brand_name }}</td>
+            <td>{{ row.created_at }}</td>
+            <td>{{ row.status_label or row.status_code }}</td>
+            <td>{{ ", ".join(row.missing_skus[:4]) }}{% if row.missing_skus|length > 4 %}...{% endif %}</td>
+            <td>{{ "{:,}".format(row.item_count) }}</td>
+            <td>{{ row.order_total_text }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="text-muted">Không có đơn chờ hàng.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Mã đơn</th>
+            <th>Match result</th>
+            <th>Khách hàng</th>
+            <th>AWB</th>
+            <th>Trạng thái TD</th>
+            <th>Lý do</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><strong>{{ row.pancake_order_ref }}</strong></td>
+            <td>{{ row.match_result }}</td>
+            <td>{{ row.customer_name }}</td>
+            <td>{{ row.td_awb }}</td>
+            <td>{{ row.td_status }}</td>
+            <td>{{ row.reason }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="text-muted">Không có đơn chờ đối soát.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
