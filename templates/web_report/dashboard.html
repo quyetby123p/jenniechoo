@@ -96,6 +96,11 @@
       <small class="text-muted">Đơn chờ hàng có sản phẩm thiếu</small>
     </div>
     <div class="metric-card p-3">
+      <div class="label">Số lượng thiếu</div>
+      <div class="value text-danger">{{ "{:,}".format(snapshot.metrics.missing_quantity) }}</div>
+      <small class="text-muted">Tổng số lượng sản phẩm thiếu</small>
+    </div>
+    <div class="metric-card p-3">
       <div class="label">List mã sản phẩm thiếu</div>
       {% if missing_overview.missing_skus %}
         <div class="mt-1">
