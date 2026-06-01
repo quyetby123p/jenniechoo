@@ -251,5 +251,8 @@ def test_status_page_shows_total_orders_and_total_revenue_summary(tmp_path: Path
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "Tổng đơn: 1" in html
-    assert "Tổng doanh số: 1,000 THB (~ 810,000 VNĐ)" in html
+    assert "Tổng đơn" in html
+    assert "Tổng doanh số" in html
+    assert "1,000 THB" in html
+    assert "~ 810,000 VNĐ" in html
+    assert "Số dòng hiển thị" in html

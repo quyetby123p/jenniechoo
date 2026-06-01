@@ -3,11 +3,23 @@
 {% block content %}
 <div class="brand-card p-3 mb-3">
   <h2 class="h5 mb-1">{{ status_title }}</h2>
-  <div class="text-muted small">
+  <div class="text-muted small mb-3">
     Kỳ dữ liệu: {{ snapshot.period.label }}
-    · Tổng đơn: {{ "{:,}".format(status_summary.orders) }}
-    · Tổng doanh số: {{ status_summary.value_thb_text }} THB (~ {{ status_summary.value_vnd_text }} VNĐ)
-    · Số dòng hiển thị: {{ "{:,}".format(rows|length) }}
+  </div>
+  <div class="kpi-grid kpi-grid-status">
+    <div class="metric-card p-3">
+      <div class="label">Tổng đơn</div>
+      <div class="value">{{ "{:,}".format(status_summary.orders) }}</div>
+    </div>
+    <div class="metric-card p-3">
+      <div class="label">Tổng doanh số</div>
+      <div class="value" style="font-size: 24px;">{{ status_summary.value_thb_text }} THB</div>
+      <small class="text-muted">~ {{ status_summary.value_vnd_text }} VNĐ</small>
+    </div>
+    <div class="metric-card p-3">
+      <div class="label">Số dòng hiển thị</div>
+      <div class="value">{{ "{:,}".format(rows|length) }}</div>
+    </div>
   </div>
 </div>
 
