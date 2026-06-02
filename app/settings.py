@@ -46,9 +46,9 @@ class Settings:
     daily_report_notify_chat_id: int = 0
     reconcile_cod_enabled: bool = False
     reconcile_cod_auto_enabled: bool = False
-    reconcile_cod_hour: int = 9
-    reconcile_cod_minute: int = 30
-    reconcile_cod_auto_weekdays: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6)
+    reconcile_cod_hour: int = 15
+    reconcile_cod_minute: int = 0
+    reconcile_cod_auto_weekdays: tuple[int, ...] = (0, 4)
     reconcile_cod_weekly_summary_enabled: bool = False
     reconcile_cod_weekly_summary_weekday: int = 5
     reconcile_cod_notify_chat_id: int = 0
@@ -395,20 +395,20 @@ def load_settings(project_root: Path | None = None) -> Settings:
         default=False,
     )
     reconcile_cod_hour = _parse_int_with_range(
-        os.getenv("RECONCILE_COD_HOUR", "9"),
-        default=9,
+        os.getenv("RECONCILE_COD_HOUR", "15"),
+        default=15,
         min_value=0,
         max_value=23,
     )
     reconcile_cod_minute = _parse_int_with_range(
-        os.getenv("RECONCILE_COD_MINUTE", "30"),
-        default=30,
+        os.getenv("RECONCILE_COD_MINUTE", "0"),
+        default=0,
         min_value=0,
         max_value=59,
     )
     reconcile_cod_auto_weekdays = _parse_weekday_list(
-        os.getenv("RECONCILE_COD_AUTO_WEEKDAYS", ""),
-        default=(0, 1, 2, 3, 4, 5, 6),
+        os.getenv("RECONCILE_COD_AUTO_WEEKDAYS", "0,4"),
+        default=(0, 4),
     )
     reconcile_cod_weekly_summary_enabled = _parse_bool(
         os.getenv("RECONCILE_COD_WEEKLY_SUMMARY_ENABLED", "0"),
