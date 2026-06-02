@@ -860,46 +860,35 @@ def test_get_daily_spend_raises_when_empty_data() -> None:
         client.get_daily_spend(date(2026, 5, 15), "Asia/Ho_Chi_Minh")
 
 
-def test_get_spend_for_range_sums_daily_rows() -> None:
+def test_get_spend_for_range_uses_account_total_without_time_increment() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
 
     def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
         assert method == "GET"
         assert path == "/act_1/insights"
         assert params["level"] == "account"
+        assert "time_increment" not in params
         assert json.loads(params["time_range"]) == {
             "since": "2026-05-01",
-            "until": "2026-05-03",
+            "until": "2026-05-31",
         }
         return {
             "data": [
                 {
                     "account_id": "act_1",
                     "date_start": "2026-05-01",
-                    "date_stop": "2026-05-01",
-                    "spend": "100000",
-                },
-                {
-                    "account_id": "act_1",
-                    "date_start": "2026-05-02",
-                    "date_stop": "2026-05-02",
-                    "spend": "200000.5",
-                },
-                {
-                    "account_id": "act_1",
-                    "date_start": "2026-05-03",
-                    "date_stop": "2026-05-03",
-                    "spend": "300000",
+                    "date_stop": "2026-05-31",
+                    "spend": "130929340",
                 },
             ]
         }
 
     client._request = fake_request  # type: ignore[method-assign]
-    result = client.get_spend_for_range(date(2026, 5, 1), date(2026, 5, 3), "Asia/Ho_Chi_Minh")
+    result = client.get_spend_for_range(date(2026, 5, 1), date(2026, 5, 31), "Asia/Ho_Chi_Minh")
 
-    assert result["spend_vnd"] == 600000
+    assert result["spend_vnd"] == 130929340
     assert result["date_start"] == "2026-05-01"
-    assert result["date_stop"] == "2026-05-03"
+    assert result["date_stop"] == "2026-05-31"
 
 
 def test_find_active_campaigns_by_keywords_returns_sorted_matches() -> None:

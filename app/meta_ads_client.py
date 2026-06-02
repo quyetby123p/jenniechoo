@@ -342,7 +342,6 @@ class MetaAdsClient:
             params={
                 "fields": "spend,account_id,date_start,date_stop",
                 "level": "account",
-                "time_increment": 1,
                 "time_range": json.dumps(time_range, ensure_ascii=False),
             },
             access_token=self.settings.meta_access_token,
