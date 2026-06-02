@@ -270,3 +270,18 @@ def test_status_page_shows_total_orders_and_total_revenue_summary(tmp_path: Path
     assert "Số dòng hiển thị" in html
     assert 'label text-danger">Tổng đơn' in html
     assert 'label text-danger">Tổng doanh số' in html
+
+
+def test_dashboard_css_wraps_mobile_metric_values(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    app = create_app(settings=settings, report_service=_StubReportService(_snapshot_payload()))
+    app.testing = True
+    client = app.test_client()
+
+    response = client.get("/?mode=today")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "overflow-wrap: anywhere" in html
+    assert "@media (max-width: 575.98px)" in html
+    assert ".kpi-grid-quick { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in html

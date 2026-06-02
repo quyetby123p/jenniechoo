@@ -9,9 +9,16 @@
   <style>
     body { background: #f7f8fa; color: #1e1e1e; }
     .brand-card { border: 1px solid #d8dde5; border-radius: 10px; background: #fff; }
-    .metric-card { border: 1px solid #d8dde5; border-radius: 10px; background: #fff; min-height: 112px; }
+    .metric-card { border: 1px solid #d8dde5; border-radius: 10px; background: #fff; min-height: 112px; min-width: 0; }
     .metric-card .label { color: #667085; font-size: 13px; }
-    .metric-card .value { font-size: 30px; font-weight: 700; line-height: 1.2; }
+    .metric-card .value {
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1.2;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
     .kpi-grid { display: grid; gap: 12px; grid-auto-flow: row dense; }
     .kpi-grid-quick { grid-template-columns: repeat(7, minmax(0, 1fr)); }
     .kpi-grid-main { grid-template-columns: repeat(5, minmax(0, 1fr)); }
@@ -53,9 +60,12 @@
       .date-toolbar .preset-chip { width: auto; font-size: 13px; padding: 6px 10px; }
       .date-toolbar .range-input { min-width: 0; width: 100%; max-width: 100%; font-size: 14px; }
       .date-toolbar .btn-primary { width: 100%; }
-      .metric-card { padding: 10px !important; }
+      .metric-card { padding: 10px !important; overflow: hidden; }
       .metric-card .label { font-size: 12px; line-height: 1.25; }
-      .metric-card .value { font-size: 22px; }
+      .metric-card .value {
+        font-size: clamp(18px, 5.4vw, 22px) !important;
+        letter-spacing: -0.03em;
+      }
       .metric-card .text-muted { font-size: 12px !important; line-height: 1.2; }
       .mobile-table-cards thead { display: none; }
       .mobile-table-cards tbody,
@@ -96,6 +106,12 @@
         content: none;
       }
       .mobile-table-cards tr:last-child { margin-bottom: 0; }
+    }
+    @media (max-width: 575.98px) {
+      .kpi-grid-quick { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .kpi-grid-main { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric-card .label { font-size: 11.5px; }
+      .metric-card .value { font-size: clamp(17px, 7vw, 21px) !important; }
     }
     @media (max-width: 389.98px) {
       .kpi-grid-quick { grid-template-columns: repeat(2, minmax(0, 1fr)); }
