@@ -6,7 +6,7 @@ on:
     - cron: "*/30 * * * *"      # Pancake -> Thai Duong batch sync.
     - cron: "0 1 * * *"         # 08:00 ICT morning daily report.
     - cron: "0 2 * * *"         # 09:00 ICT token health.
-    - cron: "30 2 * * *"        # 09:30 ICT Thai Duong cash-in report.
+    - cron: "0 8 * * 1,5"       # 15:00 ICT Monday/Friday Thai Duong cash-in report.
     - cron: "35 2 * * 6"        # 09:35 ICT Saturday weekly cash-in summary.
     - cron: "0 14 * * *"        # 21:00 ICT evening daily report.
   workflow_dispatch:
@@ -171,7 +171,7 @@ jobs:
             "0 2 * * *")
               echo "task=token-health" >> "$GITHUB_OUTPUT"
               ;;
-            "30 2 * * *")
+            "0 8 * * 1,5")
               echo "task=reconcile-cash-in" >> "$GITHUB_OUTPUT"
               ;;
             "35 2 * * 6")

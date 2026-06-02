@@ -188,7 +188,7 @@ Script tren can GitHub CLI (`gh`) va `gh auth login` truoc khi chay.
 - Moi 30 phut: chay 1 batch `Pancake -> Thai Duong` neu `PANCAKE_TD_SYNC_ENABLED=1`.
 - 08:00 (Asia/Ho_Chi_Minh): gui daily report ngay hom qua.
 - 09:00: kiem tra token Meta/Thai Duong.
-- 09:30: gui bao cao tien ve Thai Duong.
+- 15:00 thu 2 va thu 6: gui bao cao tien ve Thai Duong.
 - 09:35 thu 7: gui tong ket tien ve theo tuan.
 - 21:00: gui daily report ngay hom nay.
 - Workflow co cache `state/` + storage runtime lien quan de giu cursor/lich su giua cac lan chay.
