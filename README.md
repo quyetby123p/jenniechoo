@@ -61,14 +61,14 @@ pip install -r requirements.txt
 - `PANCAKE_API_KEY` (neu anh dang dung API key trong CRM > Cau hinh ung dung > Webhook va API Key)
 - `PANCAKE_SHOP_ID` (id cua shop Pancake POS)
 - `PANCAKE_PAGE_SIZE` (mac dinh `200`)
-- `REPORT_THB_TO_VND_RATE` (ty gia quy doi THB -> VND trong bao cao, mac dinh `815`)
+- `REPORT_THB_TO_VND_RATE` (ty gia quy doi THB -> VND trong bao cao, mac dinh `810`)
 - `REPORT_THB_MINOR_UNIT_FACTOR` (he so don vi tien THB tu API -> THB hien thi, mac dinh `100`)
 - `RECONCILE_COD_ENABLED` (bat/tat doi soat COD, mac dinh `0`)
 - `RECONCILE_COD_AUTO_ENABLED` (bat/tat lich doi soat COD tu dong, mac dinh `0`)
 - `RECONCILE_COD_HOUR` (gio chay tu dong, mac dinh `15`)
 - `RECONCILE_COD_MINUTE` (phut chay tu dong, mac dinh `0`)
 - `RECONCILE_COD_AUTO_WEEKDAYS` (danh sach thu chay bao cao tien ve, format `0-6` voi `0=T2`, `6=CN`, mac dinh `0,4` = T2,T6)
-- `RECONCILE_COD_WEEKLY_SUMMARY_ENABLED` (bat/tat bao cao tong tien nhan theo tuan, mac dinh `0`)
+- `RECONCILE_COD_WEEKLY_SUMMARY_ENABLED` (bat/tat bao cao tong tien nhan theo tuan, mac dinh `1`)
 - `RECONCILE_COD_WEEKLY_SUMMARY_WEEKDAY` (thu gui tong tien nhan tuan, `0=T2` ... `6=CN`, mac dinh `5` = T7)
 - `RECONCILE_COD_NOTIFY_CHAT_ID` (chat id nhan bao cao doi soat COD tu dong; de trong hoac `0` thi fallback ve `DAILY_REPORT_NOTIFY_CHAT_ID`, neu van trong thi ve `TELEGRAM_ALLOWED_USER_ID`)
 - `RECONCILE_COD_BATCH_LIMIT` (gioi han cap nhat moi batch, mac dinh `100`)
@@ -189,7 +189,7 @@ Script tren can GitHub CLI (`gh`) va `gh auth login` truoc khi chay.
 - 08:00 (Asia/Ho_Chi_Minh): gui daily report ngay hom qua.
 - 09:00: kiem tra token Meta/Thai Duong.
 - 15:00 thu 2 va thu 6: gui bao cao tien ve Thai Duong.
-- 09:35 thu 7: gui tong ket tien ve theo tuan.
+- 15:00 thu 7: gui tong ket tien ve theo tuan.
 - 21:00: gui daily report ngay hom nay.
 - Workflow co cache `state/` + storage runtime lien quan de giu cursor/lich su giua cac lan chay.
 

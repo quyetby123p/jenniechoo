@@ -377,8 +377,8 @@ def load_settings(project_root: Path | None = None) -> Settings:
         max_value=500,
     )
     report_thb_to_vnd_rate = _parse_optional_float(
-        os.getenv("REPORT_THB_TO_VND_RATE", "815"),
-        default=815.0,
+        os.getenv("REPORT_THB_TO_VND_RATE", "810"),
+        default=810.0,
     )
     report_thb_minor_unit_factor = _parse_int_with_range(
         os.getenv("REPORT_THB_MINOR_UNIT_FACTOR", "100"),
@@ -411,8 +411,8 @@ def load_settings(project_root: Path | None = None) -> Settings:
         default=(0, 4),
     )
     reconcile_cod_weekly_summary_enabled = _parse_bool(
-        os.getenv("RECONCILE_COD_WEEKLY_SUMMARY_ENABLED", "0"),
-        default=False,
+        os.getenv("RECONCILE_COD_WEEKLY_SUMMARY_ENABLED", "1"),
+        default=True,
     )
     reconcile_cod_weekly_summary_weekday = _parse_int_with_range(
         os.getenv("RECONCILE_COD_WEEKLY_SUMMARY_WEEKDAY", "5"),
