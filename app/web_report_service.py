@@ -302,7 +302,10 @@ class WebReportService:
             order_value_minor_by_ref=order_value_minor_by_ref,
         )
         revenue_total_minor = self._extract_revenue_minor_from_aggs(aggs, fallback=order_value_total_minor)
+        revenue_total_thb = self._minor_to_thb_major(revenue_total_minor)
+        revenue_total_vnd = self._thb_to_vnd(revenue_total_thb)
         ads_spend_vnd = self._fetch_ads_spend_vnd(start_date=start_date, end_date=end_date)
+        roas = self._calculate_roas(revenue_total_vnd, ads_spend_vnd)
 
         brand_overview: list[dict[str, Any]] = []
         brand_detail: dict[str, Any] = {}
@@ -384,12 +387,14 @@ class WebReportService:
                 "closed_orders": closed_orders,
                 "revenue_total_minor": revenue_total_minor,
                 "revenue_total_text": self._fmt_currency(revenue_total_minor),
-                "revenue_total_thb": self._minor_to_thb_major(revenue_total_minor),
-                "revenue_total_vnd": self._thb_to_vnd(self._minor_to_thb_major(revenue_total_minor)),
-                "revenue_total_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(revenue_total_minor)),
-                "revenue_total_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(revenue_total_minor))),
+                "revenue_total_thb": revenue_total_thb,
+                "revenue_total_vnd": revenue_total_vnd,
+                "revenue_total_thb_text": self._fmt_thb_amount(revenue_total_thb),
+                "revenue_total_vnd_text": self._fmt_vnd_amount(revenue_total_vnd),
                 "ads_spend_vnd": ads_spend_vnd,
                 "ads_spend_vnd_text": self._fmt_vnd_amount(ads_spend_vnd),
+                "roas": roas,
+                "roas_text": self._fmt_roas(roas),
                 "exchange_rate_thb_to_vnd": float(self.settings.report_thb_to_vnd_rate),
                 "waiting_orders": waiting_orders_count,
                 "returning_orders": returning_orders_count,
@@ -1282,6 +1287,12 @@ class WebReportService:
         return int(round(thb_major * rate))
 
     @staticmethod
+    def _calculate_roas(revenue_vnd: int, ads_spend_vnd: int) -> float:
+        if ads_spend_vnd <= 0:
+            return 0.0
+        return round(float(revenue_vnd) / float(ads_spend_vnd), 2)
+
+    @staticmethod
     def _fmt_thb_amount(thb_major: float) -> str:
         rounded = round(float(thb_major), 2)
         if abs(rounded - round(rounded)) < 1e-9:
@@ -1291,6 +1302,10 @@ class WebReportService:
     @staticmethod
     def _fmt_vnd_amount(vnd_value: int) -> str:
         return f"{int(vnd_value):,}"
+
+    @staticmethod
+    def _fmt_roas(roas: float) -> str:
+        return f"{float(roas):,.2f}x"
 
     @staticmethod
     def _format_dt(value: datetime | None, *, tz: timezone | ZoneInfo) -> str:

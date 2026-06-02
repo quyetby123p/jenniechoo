@@ -431,7 +431,7 @@ def test_revenue_total_prefers_aggs_snapshot_values(tmp_path: Path) -> None:
 
 def test_snapshot_includes_ads_spend_for_selected_range(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
-    meta = _FakeMetaClient(spend_vnd=1_230_000)
+    meta = _FakeMetaClient(spend_vnd=1_630_000)
     service = WebReportService(
         settings=settings,
         logger=logging.getLogger("test"),
@@ -441,9 +441,33 @@ def test_snapshot_includes_ads_spend_for_selected_range(tmp_path: Path) -> None:
 
     snapshot = service.get_snapshot(date(2026, 5, 1), date(2026, 5, 31))
 
-    assert snapshot["metrics"]["ads_spend_vnd"] == 1_230_000
-    assert snapshot["metrics"]["ads_spend_vnd_text"] == "1,230,000"
+    assert snapshot["metrics"]["ads_spend_vnd"] == 1_630_000
+    assert snapshot["metrics"]["ads_spend_vnd_text"] == "1,630,000"
+    assert snapshot["metrics"]["roas"] == 0.0
+    assert snapshot["metrics"]["roas_text"] == "0.00x"
     assert meta.calls == [(date(2026, 5, 1), date(2026, 5, 31), "Asia/Ho_Chi_Minh")]
+
+
+def test_snapshot_calculates_roas_from_vnd_revenue_and_ads_spend(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [],
+            aggs={
+                "cod": {"value": 500_000},
+                "prepaid": {"value": 500_000},
+            },
+        ),
+        meta_client=_FakeMetaClient(spend_vnd=1_630_000),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["revenue_total_vnd"] == 8_150_000
+    assert snapshot["metrics"]["roas"] == 5.0
+    assert snapshot["metrics"]["roas_text"] == "5.00x"
 
 
 def test_snapshot_ads_spend_failure_falls_back_to_zero(tmp_path: Path) -> None:
