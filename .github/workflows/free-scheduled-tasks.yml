@@ -1,0 +1,237 @@
+name: free scheduled tasks
+
+on:
+  schedule:
+    # GitHub cron is UTC. Asia/Ho_Chi_Minh = UTC+7.
+    - cron: "*/30 * * * *"      # Pancake -> Thai Duong batch sync.
+    - cron: "0 1 * * *"         # 08:00 ICT morning daily report.
+    - cron: "0 2 * * *"         # 09:00 ICT token health.
+    - cron: "30 2 * * *"        # 09:30 ICT Thai Duong cash-in report.
+    - cron: "35 2 * * 6"        # 09:35 ICT Saturday weekly cash-in summary.
+    - cron: "0 14 * * *"        # 21:00 ICT evening daily report.
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Task to run"
+        required: true
+        default: "token-health"
+        type: choice
+        options:
+          - token-health
+          - daily-report
+          - reconcile-cash-in
+          - reconcile-weekly
+          - pancake-td-sync
+      slot:
+        description: "Daily report slot"
+        required: false
+        default: "morning"
+        type: choice
+        options:
+          - morning
+          - evening
+      date:
+        description: "Optional report date YYYY-MM-DD"
+        required: false
+        default: ""
+      pancake_notify:
+        description: "Pancake sync notification mode"
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - always
+
+concurrency:
+  group: free-scheduled-tasks
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      APP_TIMEZONE: ${{ secrets.APP_TIMEZONE || 'Asia/Ho_Chi_Minh' }}
+      APP_CURRENCY: ${{ secrets.APP_CURRENCY || 'VND' }}
+      APP_RETRY_MAX: ${{ secrets.APP_RETRY_MAX }}
+      APP_RETRY_BACKOFF: ${{ secrets.APP_RETRY_BACKOFF }}
+      TOKEN_HEALTHCHECK_ENABLED: ${{ secrets.TOKEN_HEALTHCHECK_ENABLED }}
+      TOKEN_HEALTHCHECK_HOUR: ${{ secrets.TOKEN_HEALTHCHECK_HOUR }}
+      TOKEN_HEALTHCHECK_MINUTE: ${{ secrets.TOKEN_HEALTHCHECK_MINUTE }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ALLOWED_USER_ID: ${{ secrets.TELEGRAM_ALLOWED_USER_ID }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      META_PAGE_ACCESS_TOKEN: ${{ secrets.META_PAGE_ACCESS_TOKEN }}
+      META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
+      META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+      META_API_VERSION: ${{ secrets.META_API_VERSION }}
+      PANCAKE_API_BASE_URL: ${{ secrets.PANCAKE_API_BASE_URL }}
+      PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
+      PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      PANCAKE_SHOP_ID: ${{ secrets.PANCAKE_SHOP_ID }}
+      PANCAKE_PAGE_SIZE: ${{ secrets.PANCAKE_PAGE_SIZE }}
+      REPORT_THB_TO_VND_RATE: ${{ secrets.REPORT_THB_TO_VND_RATE }}
+      REPORT_THB_MINOR_UNIT_FACTOR: ${{ secrets.REPORT_THB_MINOR_UNIT_FACTOR }}
+      DAILY_REPORT_ENABLED: ${{ secrets.DAILY_REPORT_ENABLED }}
+      DAILY_REPORT_HOUR: ${{ secrets.DAILY_REPORT_HOUR }}
+      DAILY_REPORT_MINUTE: ${{ secrets.DAILY_REPORT_MINUTE }}
+      DAILY_REPORT_HISTORY_DAYS: ${{ secrets.DAILY_REPORT_HISTORY_DAYS }}
+      DAILY_REPORT_NOTIFY_CHAT_ID: ${{ secrets.DAILY_REPORT_NOTIFY_CHAT_ID }}
+      RECONCILE_COD_ENABLED: ${{ secrets.RECONCILE_COD_ENABLED }}
+      RECONCILE_COD_AUTO_ENABLED: ${{ secrets.RECONCILE_COD_AUTO_ENABLED }}
+      RECONCILE_COD_HOUR: ${{ secrets.RECONCILE_COD_HOUR }}
+      RECONCILE_COD_MINUTE: ${{ secrets.RECONCILE_COD_MINUTE }}
+      RECONCILE_COD_AUTO_WEEKDAYS: ${{ secrets.RECONCILE_COD_AUTO_WEEKDAYS }}
+      RECONCILE_COD_WEEKLY_SUMMARY_ENABLED: ${{ secrets.RECONCILE_COD_WEEKLY_SUMMARY_ENABLED }}
+      RECONCILE_COD_WEEKLY_SUMMARY_WEEKDAY: ${{ secrets.RECONCILE_COD_WEEKLY_SUMMARY_WEEKDAY }}
+      RECONCILE_COD_NOTIFY_CHAT_ID: ${{ secrets.RECONCILE_COD_NOTIFY_CHAT_ID }}
+      RECONCILE_COD_BATCH_LIMIT: ${{ secrets.RECONCILE_COD_BATCH_LIMIT }}
+      RECONCILE_COD_UPDATE_ENABLED: ${{ secrets.RECONCILE_COD_UPDATE_ENABLED }}
+      RECONCILE_COD_STATUS_MAP_PATH: ${{ secrets.RECONCILE_COD_STATUS_MAP_PATH }}
+      RECONCILE_COD_PANCAKE_LOOKBACK_DAYS: ${{ secrets.RECONCILE_COD_PANCAKE_LOOKBACK_DAYS }}
+      RECONCILE_COD_SHEET_ENABLED: ${{ secrets.RECONCILE_COD_SHEET_ENABLED }}
+      RECONCILE_COD_SHEET_MODE: ${{ secrets.RECONCILE_COD_SHEET_MODE }}
+      RECONCILE_COD_SHEET_WEBHOOK_URL: ${{ secrets.RECONCILE_COD_SHEET_WEBHOOK_URL }}
+      RECONCILE_COD_SHEET_WEBHOOK_SECRET: ${{ secrets.RECONCILE_COD_SHEET_WEBHOOK_SECRET }}
+      RECONCILE_COD_SHEET_WEBHOOK_TIMEOUT_SECONDS: ${{ secrets.RECONCILE_COD_SHEET_WEBHOOK_TIMEOUT_SECONDS }}
+      RECONCILE_COD_SHEET_SPREADSHEET_ID: ${{ secrets.RECONCILE_COD_SHEET_SPREADSHEET_ID }}
+      RECONCILE_COD_SHEET_GID: ${{ secrets.RECONCILE_COD_SHEET_GID }}
+      RECONCILE_COD_SHEET_OAUTH_CLIENT_ID: ${{ secrets.RECONCILE_COD_SHEET_OAUTH_CLIENT_ID }}
+      RECONCILE_COD_SHEET_OAUTH_CLIENT_SECRET: ${{ secrets.RECONCILE_COD_SHEET_OAUTH_CLIENT_SECRET }}
+      RECONCILE_COD_SHEET_OAUTH_REFRESH_TOKEN: ${{ secrets.RECONCILE_COD_SHEET_OAUTH_REFRESH_TOKEN }}
+      RECONCILE_COD_SHEET_OAUTH_TOKEN_URI: ${{ secrets.RECONCILE_COD_SHEET_OAUTH_TOKEN_URI }}
+      PANCAKE_TD_SYNC_ENABLED: ${{ secrets.PANCAKE_TD_SYNC_ENABLED }}
+      PANCAKE_TD_SYNC_POLL_SECONDS: ${{ secrets.PANCAKE_TD_SYNC_POLL_SECONDS }}
+      PANCAKE_TD_SYNC_BATCH_LIMIT: ${{ secrets.PANCAKE_TD_SYNC_BATCH_LIMIT }}
+      PANCAKE_TD_SYNC_NOTIFY_CHAT_ID: ${{ secrets.PANCAKE_TD_SYNC_NOTIFY_CHAT_ID }}
+      PANCAKE_TD_SYNC_PRODUCT_REFRESH_MINUTES: ${{ secrets.PANCAKE_TD_SYNC_PRODUCT_REFRESH_MINUTES }}
+      PANCAKE_TD_SYNC_STATE_PATH: ${{ secrets.PANCAKE_TD_SYNC_STATE_PATH }}
+      THAI_DUONG_API_BASE_URL: ${{ secrets.THAI_DUONG_API_BASE_URL }}
+      THAI_DUONG_API_TOKEN: ${{ secrets.THAI_DUONG_API_TOKEN }}
+      THAI_DUONG_AUTO_AUTH_ENABLED: ${{ secrets.THAI_DUONG_AUTO_AUTH_ENABLED }}
+      THAI_DUONG_AUTO_REFRESH_THRESHOLD_MINUTES: ${{ secrets.THAI_DUONG_AUTO_REFRESH_THRESHOLD_MINUTES }}
+      THAI_DUONG_AUTO_AUTH_MIN_RETRY_SECONDS: ${{ secrets.THAI_DUONG_AUTO_AUTH_MIN_RETRY_SECONDS }}
+      THAI_DUONG_AUTH_LOGIN_PATH: ${{ secrets.THAI_DUONG_AUTH_LOGIN_PATH }}
+      THAI_DUONG_AUTH_REFRESH_PATH: ${{ secrets.THAI_DUONG_AUTH_REFRESH_PATH }}
+      THAI_DUONG_AUTH_EMAIL: ${{ secrets.THAI_DUONG_AUTH_EMAIL }}
+      THAI_DUONG_AUTH_PASSWORD: ${{ secrets.THAI_DUONG_AUTH_PASSWORD }}
+      THAI_DUONG_AUTH_USERNAME: ${{ secrets.THAI_DUONG_AUTH_USERNAME }}
+      THAI_DUONG_CUSTOMER_CODE: ${{ secrets.THAI_DUONG_CUSTOMER_CODE }}
+      THAI_DUONG_AUTH_REFRESH_TOKEN: ${{ secrets.THAI_DUONG_AUTH_REFRESH_TOKEN }}
+      THAI_DUONG_AUTO_AUTH_STATE_PATH: ${{ secrets.THAI_DUONG_AUTO_AUTH_STATE_PATH }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore runtime state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            state
+            storage/pancake_td_sync
+            storage/thai_duong_auth
+            storage/reports
+            storage/reconcile_cod
+          key: ops-state-${{ github.run_id }}
+          restore-keys: |
+            ops-state-
+
+      - name: Resolve task
+        id: task
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "task=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
+            echo "slot=${{ inputs.slot }}" >> "$GITHUB_OUTPUT"
+            echo "date=${{ inputs.date }}" >> "$GITHUB_OUTPUT"
+            echo "pancake_notify=${{ inputs.pancake_notify }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          case "${{ github.event.schedule }}" in
+            "*/30 * * * *")
+              echo "task=pancake-td-sync" >> "$GITHUB_OUTPUT"
+              echo "pancake_notify=auto" >> "$GITHUB_OUTPUT"
+              ;;
+            "0 1 * * *")
+              echo "task=daily-report" >> "$GITHUB_OUTPUT"
+              echo "slot=morning" >> "$GITHUB_OUTPUT"
+              ;;
+            "0 2 * * *")
+              echo "task=token-health" >> "$GITHUB_OUTPUT"
+              ;;
+            "30 2 * * *")
+              echo "task=reconcile-cash-in" >> "$GITHUB_OUTPUT"
+              ;;
+            "35 2 * * 6")
+              echo "task=reconcile-weekly" >> "$GITHUB_OUTPUT"
+              ;;
+            "0 14 * * *")
+              echo "task=daily-report" >> "$GITHUB_OUTPUT"
+              echo "slot=evening" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unknown schedule: ${{ github.event.schedule }}"
+              exit 1
+              ;;
+          esac
+
+      - name: Check minimum secrets
+        shell: bash
+        run: |
+          missing=()
+          for key in TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USER_ID META_ACCESS_TOKEN META_AD_ACCOUNT_ID META_PAGE_ID; do
+            if [ -z "${!key}" ]; then
+              missing+=("$key")
+            fi
+          done
+          if [ -z "$PANCAKE_ACCESS_TOKEN" ] && [ -z "$PANCAKE_API_KEY" ]; then
+            missing+=("PANCAKE_ACCESS_TOKEN or PANCAKE_API_KEY")
+          fi
+          if [ -z "$PANCAKE_SHOP_ID" ]; then
+            missing+=("PANCAKE_SHOP_ID")
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing GitHub Actions secrets:\n'
+            printf ' - %s\n' "${missing[@]}"
+            exit 1
+          fi
+
+      - name: Run scheduled task
+        shell: bash
+        run: |
+          task="${{ steps.task.outputs.task }}"
+          args=("$task")
+          if [ "$task" = "daily-report" ]; then
+            args+=("--slot" "${{ steps.task.outputs.slot || 'morning' }}")
+            if [ -n "${{ steps.task.outputs.date }}" ]; then
+              args+=("--date" "${{ steps.task.outputs.date }}")
+            fi
+          fi
+          if [ "$task" = "pancake-td-sync" ]; then
+            args+=("--notify" "${{ steps.task.outputs.pancake_notify || 'auto' }}")
+          fi
+          python -m app.scheduled_tasks "${args[@]}"
+
+      - name: Save runtime state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            state
+            storage/pancake_td_sync
+            storage/thai_duong_auth
+            storage/reports
+            storage/reconcile_cod
+          key: ops-state-${{ github.run_id }}

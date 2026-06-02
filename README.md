@@ -151,22 +151,17 @@ Mac dinh web chay `http://127.0.0.1:8000`.
 
 File map status/brand: `config/web_report_status_map.json`.
 
-### Deploy GitHub -> Render (quick path)
+### Deploy free: Render web + GitHub Actions
 
-File deploy dung cho repo nay: `render.yaml` (ngay tai root `projects/fb-ads-automation`).
+Phuong an free:
+- Render free chi chay `fb-ops-web-report` (web report).
+- GitHub Actions chay cac job dinh ky thay cho worker realtime.
+- Telegram polling realtime (`len camp` ngay khi nhan tin) van can may local hoac worker/VM chay 24/7.
 
-1. Kiem tra nhanh truoc khi push.
-
-Web report only:
+1. Kiem tra nhanh truoc khi push:
 
 ```powershell
 .\scripts\deploy\render-preflight.ps1
-```
-
-Full stack (web report + main bot + media bot + assistant bot):
-
-```powershell
-.\scripts\deploy\render-preflight.ps1 -Scope stack
 ```
 
 2. Push GitHub bang 1 lenh (tu init git -> commit -> set remote -> push):
@@ -175,37 +170,42 @@ Full stack (web report + main bot + media bot + assistant bot):
 .\scripts\deploy\bootstrap-github-render.ps1 -GitHubRepoUrl "https://github.com/<org-or-user>/<repo>.git"
 ```
 
-3. Tao/cap nhat service Render tu dong bang API (khong can bam tay trong dashboard).
-
-Web report only (legacy):
+3. Tao/cap nhat Render web report tu dong bang API:
 
 ```powershell
 .\scripts\deploy\render-create-service.ps1 -RenderApiKey "<RENDER_API_KEY>" -RepoUrl "https://github.com/<org-or-user>/<repo>"
 ```
 
-Full stack (khuyen nghi):
+4. Dong bo `.env` len GitHub Actions Secrets de job dinh ky chay online:
 
 ```powershell
-.\scripts\deploy\render-sync-stack.ps1 -RenderApiKey "<RENDER_API_KEY>" -RepoUrl "https://github.com/<org-or-user>/<repo>"
+.\scripts\deploy\github-actions-secrets.ps1 -Repo "quyetby123p/jenniechoo"
 ```
 
-4. Hoac neu muon deploy bang UI (khong dung API):
-   1. `New +` -> `Blueprint`.
-   2. Chon repo GitHub vua push.
-   3. Render doc `render.yaml` va tao 4 service:
-      - `fb-ops-web-report` (`web`, plan `free`)
-      - `fb-ops-main-bot` (`worker`, plan `starter`)
-      - `fb-ops-media-bot` (`worker`, plan `starter`)
-      - `fb-ops-assistant-bot` (`worker`, plan `starter`)
-   4. Dien env secrets theo tung service (tat ca key `sync: false`).
-   5. Deploy, mo `https://<service>.onrender.com/healthz` de check web report song.
+Script tren can GitHub CLI (`gh`) va `gh auth login` truoc khi chay.
+
+5. GitHub Actions tu chay theo lich trong `.github/workflows/free-scheduled-tasks.yml`:
+- Moi 30 phut: chay 1 batch `Pancake -> Thai Duong` neu `PANCAKE_TD_SYNC_ENABLED=1`.
+- 08:00 (Asia/Ho_Chi_Minh): gui daily report ngay hom qua.
+- 09:00: kiem tra token Meta/Thai Duong.
+- 09:30: gui bao cao tien ve Thai Duong.
+- 09:35 thu 7: gui tong ket tien ve theo tuan.
+- 21:00: gui daily report ngay hom nay.
+- Workflow co cache `state/` + storage runtime lien quan de giu cursor/lich su giua cac lan chay.
+
+Co the chay thu cong tren GitHub:
+- Vao `Actions` -> `free scheduled tasks` -> `Run workflow`.
+- Chon task: `token-health`, `daily-report`, `reconcile-cash-in`, `reconcile-weekly`, `pancake-td-sync`.
 
 Tuy chon:
 - Muon bo qua test nhanh khi push: them `-SkipTests`.
 - Muon push branch rieng: them `-Branch feature/web-report-v1`.
 - Muon chi init/commit/remote, chua push ngay: them `-NoPush`.
 - Neu may chua config Git user: them `-GitUserName "Ten cua anh" -GitUserEmail "email@domain.com"`.
-- Doi plan workers (neu can): them `-WorkerPlan standard` trong `render-sync-stack.ps1`.
+
+Ghi chu:
+- `render-sync-stack.ps1` van ton tai cho phuong an Render worker tra phi, nhung khong dung trong phuong an free.
+- GitHub Actions la chay theo lich nen khong thay the duoc Telegram polling realtime.
 
 ## Cu phap Telegram
 
