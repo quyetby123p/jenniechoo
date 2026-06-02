@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from flask import Flask, abort, jsonify, render_template, request
 
 from app.logger import configure_logger
+from app.meta_ads_client import MetaAdsClient
 from app.pancake_pos_client import PancakePosClient
 from app.settings import Settings, load_settings
 from app.web_report_service import WebReportService
@@ -36,6 +37,7 @@ def create_app(
         settings=current_settings,
         logger=current_logger,
         pancake_client=PancakePosClient(settings=current_settings, logger=current_logger),
+        meta_client=MetaAdsClient(settings=current_settings, logger=current_logger),
     )
 
     app = Flask(
@@ -69,6 +71,7 @@ def create_app(
             "closed_today": int((today_snapshot.get("metrics") or {}).get("closed_orders") or 0),
             "revenue_today_thb_text": str((today_snapshot.get("metrics") or {}).get("revenue_total_thb_text") or "0"),
             "revenue_today_vnd_text": str((today_snapshot.get("metrics") or {}).get("revenue_total_vnd_text") or "0"),
+            "ads_spend_today_vnd_text": str((today_snapshot.get("metrics") or {}).get("ads_spend_vnd_text") or "0"),
             "waiting_total": int((overall_snapshot.get("metrics") or {}).get("waiting_orders") or 0),
             "shipping_total": int((overall_snapshot.get("metrics") or {}).get("shipping_orders") or 0),
             "pending_reconcile_total": int((overall_snapshot.get("metrics") or {}).get("pending_reconcile_orders") or 0),

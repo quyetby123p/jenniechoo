@@ -15,6 +15,11 @@
       <small class="text-muted">~ {{ summary_cards.revenue_today_vnd_text }} VNĐ</small>
     </div>
     <div class="metric-card p-3">
+      <div class="label">Chi phí Ads</div>
+      <div class="value text-danger" style="font-size: 24px;">{{ summary_cards.ads_spend_today_vnd_text }} VNĐ</div>
+      <small class="text-muted">Theo ngày hôm nay</small>
+    </div>
+    <div class="metric-card p-3">
       <div class="label">Đơn chờ (Tổng)</div>
       <div class="value text-danger">{{ "{:,}".format(summary_cards.waiting_total) }}</div>
       <small class="text-muted">Tổng đơn: {{ "{:,}".format(summary_cards.waiting_total) }}</small>
@@ -49,6 +54,11 @@
     <div class="label">Doanh số</div>
     <div class="value" style="font-size: 24px;">{{ snapshot.metrics.revenue_total_thb_text }} THB</div>
     <small class="text-muted">~ {{ snapshot.metrics.revenue_total_vnd_text }} VNĐ</small>
+  </div>
+  <div class="metric-card p-3">
+    <div class="label">Chi phí Ads</div>
+    <div class="value text-danger" style="font-size: 24px;">{{ snapshot.metrics.ads_spend_vnd_text }} VNĐ</div>
+    <small class="text-muted">Theo kỳ lọc</small>
   </div>
   <div class="metric-card p-3">
     <div class="label">Đơn chốt</div>

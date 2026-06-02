@@ -9,6 +9,7 @@ import time
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.meta_ads_client import MetaAdsClient
 from app.pancake_pos_client import PancakePosClient
 from app.settings import Settings
 from app.utils import load_json, now_utc_iso
@@ -22,10 +23,12 @@ class WebReportService:
         settings: Settings,
         logger: logging.Logger,
         pancake_client: PancakePosClient,
+        meta_client: MetaAdsClient | None = None,
     ) -> None:
         self.settings = settings
         self.logger = logger
         self.pancake = pancake_client
+        self.meta = meta_client
         self._cache_lock = Lock()
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
@@ -299,6 +302,7 @@ class WebReportService:
             order_value_minor_by_ref=order_value_minor_by_ref,
         )
         revenue_total_minor = self._extract_revenue_minor_from_aggs(aggs, fallback=order_value_total_minor)
+        ads_spend_vnd = self._fetch_ads_spend_vnd(start_date=start_date, end_date=end_date)
 
         brand_overview: list[dict[str, Any]] = []
         brand_detail: dict[str, Any] = {}
@@ -384,6 +388,8 @@ class WebReportService:
                 "revenue_total_vnd": self._thb_to_vnd(self._minor_to_thb_major(revenue_total_minor)),
                 "revenue_total_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(revenue_total_minor)),
                 "revenue_total_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(revenue_total_minor))),
+                "ads_spend_vnd": ads_spend_vnd,
+                "ads_spend_vnd_text": self._fmt_vnd_amount(ads_spend_vnd),
                 "exchange_rate_thb_to_vnd": float(self.settings.report_thb_to_vnd_rate),
                 "waiting_orders": waiting_orders_count,
                 "returning_orders": returning_orders_count,
@@ -458,6 +464,23 @@ class WebReportService:
         if not isinstance(orders, list):
             orders = []
         return [item for item in orders if isinstance(item, dict)], {}
+
+    def _fetch_ads_spend_vnd(self, *, start_date: date, end_date: date) -> int:
+        if self.meta is None:
+            return 0
+        try:
+            if hasattr(self.meta, "get_spend_for_range"):
+                payload = self.meta.get_spend_for_range(start_date, end_date, self.settings.app_timezone)
+                return max(0, self._to_int(payload.get("spend_vnd")))
+
+            total = 0
+            for report_date in self._iter_dates(start_date, end_date):
+                payload = self.meta.get_daily_spend(report_date, self.settings.app_timezone)
+                total += max(0, self._to_int(payload.get("spend_vnd")))
+            return total
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Khong lay duoc chi phi Ads cho web report: %s", exc)
+            return 0
 
     @staticmethod
     def _iter_dates(start_date: date, end_date: date):

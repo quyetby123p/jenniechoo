@@ -322,10 +322,19 @@ class MetaAdsClient:
             raise
 
     def get_daily_spend(self, report_date: date, timezone_name: str) -> dict[str, Any]:
+        result = self.get_spend_for_range(report_date, report_date, timezone_name)
+        return {
+            **result,
+            "report_date": report_date.isoformat(),
+        }
+
+    def get_spend_for_range(self, start_date: date, end_date: date, timezone_name: str) -> dict[str, Any]:
         del timezone_name  # Meta insights nhận time_range theo ngày; timezone dùng theo ad account.
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
         time_range = {
-            "since": report_date.isoformat(),
-            "until": report_date.isoformat(),
+            "since": start_date.isoformat(),
+            "until": end_date.isoformat(),
         }
         payload = self._request(
             "GET",
@@ -340,16 +349,21 @@ class MetaAdsClient:
         )
         data = payload.get("data", [])
         if not isinstance(data, list) or not data:
-            raise MetaApiError("Meta không trả dữ liệu spend cho ngày yêu cầu.")
+            raise MetaApiError("Meta không trả dữ liệu spend cho khoảng ngày yêu cầu.")
 
-        first = data[0] if isinstance(data[0], dict) else {}
-        spend_raw = str(first.get("spend", "0")).strip()
-        spend_vnd = self._to_vnd_int(spend_raw)
+        rows = [item for item in data if isinstance(item, dict)]
+        if not rows:
+            raise MetaApiError("Meta không trả dữ liệu spend cho khoảng ngày yêu cầu.")
+
+        spend_vnd = sum(self._to_vnd_int(str(row.get("spend", "0")).strip()) for row in rows)
+        first = rows[0]
+        last = rows[-1]
         return {
-            "report_date": report_date.isoformat(),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
             "account_id": str(first.get("account_id", self.ad_account_id)),
-            "date_start": str(first.get("date_start", report_date.isoformat())),
-            "date_stop": str(first.get("date_stop", report_date.isoformat())),
+            "date_start": str(first.get("date_start", start_date.isoformat())),
+            "date_stop": str(last.get("date_stop", end_date.isoformat())),
             "spend_vnd": spend_vnd,
             "currency": self.settings.app_currency,
         }

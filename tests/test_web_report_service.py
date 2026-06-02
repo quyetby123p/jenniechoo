@@ -25,6 +25,19 @@ class _FakePancakeClient:
         }
 
 
+class _FakeMetaClient:
+    def __init__(self, spend_vnd: int = 0, *, error: Exception | None = None):
+        self.spend_vnd = spend_vnd
+        self.error = error
+        self.calls: list[tuple[date, date, str]] = []
+
+    def get_spend_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
+        self.calls.append((start_date, end_date, timezone_name))
+        if self.error is not None:
+            raise self.error
+        return {"spend_vnd": self.spend_vnd}
+
+
 def _dummy_settings(tmp_path: Path, **overrides) -> Settings:
     base = Settings(
         project_root=tmp_path,
@@ -414,6 +427,38 @@ def test_revenue_total_prefers_aggs_snapshot_values(tmp_path: Path) -> None:
     assert snapshot["metrics"]["revenue_total_minor"] == 800_000
     assert "THB" in snapshot["metrics"]["revenue_total_text"]
     assert "VNĐ" in snapshot["metrics"]["revenue_total_text"]
+
+
+def test_snapshot_includes_ads_spend_for_selected_range(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    meta = _FakeMetaClient(spend_vnd=1_230_000)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+        meta_client=meta,
+    )
+
+    snapshot = service.get_snapshot(date(2026, 5, 1), date(2026, 5, 31))
+
+    assert snapshot["metrics"]["ads_spend_vnd"] == 1_230_000
+    assert snapshot["metrics"]["ads_spend_vnd_text"] == "1,230,000"
+    assert meta.calls == [(date(2026, 5, 1), date(2026, 5, 31), "Asia/Ho_Chi_Minh")]
+
+
+def test_snapshot_ads_spend_failure_falls_back_to_zero(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+        meta_client=_FakeMetaClient(error=RuntimeError("meta down")),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["ads_spend_vnd"] == 0
+    assert snapshot["metrics"]["ads_spend_vnd_text"] == "0"
 
 
 def test_shipping_status_metric_and_list(tmp_path: Path) -> None:
