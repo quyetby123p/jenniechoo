@@ -197,6 +197,36 @@ Co the chay thu cong tren GitHub:
 - Vao `Actions` -> `free scheduled tasks` -> `Run workflow`.
 - Chon task: `token-health`, `daily-report`, `reconcile-cash-in`, `reconcile-weekly`, `pancake-td-sync`.
 
+### Telegram online mien phi khi tat may
+
+Phuong an free on dinh nhat hien tai:
+- Cloudflare Worker nhan webhook Telegram.
+- Worker goi GitHub Actions task `telegram-update`.
+- GitHub Actions chay code Python trong repo de xu ly lenh va gui lai Telegram.
+
+Tradeoff:
+- Mien phi va khong can may local bat.
+- Cham hon bot polling/worker tra phi, thuong can cho GitHub Actions khoi dong job.
+- Phu hop cho lenh len camp, report, doi soat, nut duyet/callback; khong phu hop neu can chat realtime toc do cao.
+
+Deploy Cloudflare Worker:
+
+```powershell
+.\scripts\deploy\cloudflare-telegram-webhook.ps1
+```
+
+Yeu cau:
+- Node.js co `npx`.
+- Da login Cloudflare Wrangler (`npx wrangler login`).
+- `.env` local da co Telegram/Meta/Pancake keys.
+- Git credential local co quyen repo GitHub.
+
+Sau khi deploy, script se:
+- set Cloudflare Worker secrets;
+- deploy worker `fb-ads-telegram-dispatcher`;
+- set Telegram webhook den `/telegram/webhook`;
+- worker se dispatch update sang GitHub Actions `free-scheduled-tasks.yml`.
+
 Tuy chon:
 - Muon bo qua test nhanh khi push: them `-SkipTests`.
 - Muon push branch rieng: them `-Branch feature/web-report-v1`.
@@ -205,7 +235,8 @@ Tuy chon:
 
 Ghi chu:
 - `render-sync-stack.ps1` van ton tai cho phuong an Render worker tra phi, nhung khong dung trong phuong an free.
-- GitHub Actions la chay theo lich nen khong thay the duoc Telegram polling realtime.
+- GitHub Actions theo lich khong thay the Telegram polling realtime neu dung mot minh.
+- Them Cloudflare Worker webhook thi Telegram co the nhan lenh khi may local tat, nhung van co do tre do GitHub Actions khoi dong job.
 
 ## Cu phap Telegram
 

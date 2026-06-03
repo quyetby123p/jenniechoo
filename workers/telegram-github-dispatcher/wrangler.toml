@@ -1,0 +1,7 @@
+name = "fb-ads-telegram-dispatcher"
+main = "src/index.js"
+compatibility_date = "2026-06-03"
+workers_dev = true
+
+[observability]
+enabled = true
