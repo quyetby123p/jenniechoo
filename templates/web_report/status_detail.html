@@ -108,26 +108,28 @@
       <table class="table table-sm align-middle mb-0 mobile-table-cards">
         <thead>
           <tr>
-            <th>Mã đơn</th>
+            <th>Mã đơn / AWB</th>
             <th>Match result</th>
             <th>Khách hàng</th>
             <th>AWB</th>
             <th>Trạng thái TD</th>
+            <th>COD</th>
             <th>Ngày đối soát</th>
           </tr>
         </thead>
         <tbody>
         {% for row in rows %}
           <tr>
-            <td data-label="Mã đơn"><strong>{{ row.pancake_order_ref }}</strong></td>
+            <td data-label="Mã đơn / AWB"><strong>{{ row.display_ref or row.pancake_order_ref or row.td_awb }}</strong></td>
             <td data-label="Match result">{{ row.match_result }}</td>
             <td data-label="Khách hàng">{{ row.customer_name }}</td>
             <td data-label="AWB">{{ row.td_awb }}</td>
             <td data-label="Trạng thái TD">{{ row.td_status }}</td>
+            <td data-label="COD">{{ row.td_cod_thb_text }} THB</td>
             <td data-label="Ngày đối soát">{{ row.settlement_date }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="6" class="text-muted" data-label="">Không có đơn đối soát đã nhận.</td></tr>
+          <tr><td colspan="7" class="text-muted" data-label="">Không có đơn đối soát đã nhận.</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -135,7 +137,7 @@
       <table class="table table-sm align-middle mb-0 mobile-table-cards">
         <thead>
           <tr>
-            <th>Mã đơn</th>
+            <th>Mã đơn / AWB</th>
             <th>Match result</th>
             <th>Khách hàng</th>
             <th>AWB</th>
@@ -147,7 +149,7 @@
         <tbody>
         {% for row in rows %}
           <tr>
-            <td data-label="Mã đơn"><strong>{{ row.pancake_order_ref }}</strong></td>
+            <td data-label="Mã đơn / AWB"><strong>{{ row.display_ref or row.pancake_order_ref or row.td_awb }}</strong></td>
             <td data-label="Match result">{{ row.match_result }}</td>
             <td data-label="Khách hàng">{{ row.customer_name }}</td>
             <td data-label="AWB">{{ row.td_awb }}</td>

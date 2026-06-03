@@ -565,7 +565,10 @@ class WebReportService:
                 row = self._build_reconcile_row(record, match_result)
                 order_ref = self._normalize_text(str(row.get("pancake_order_ref", "")).strip())
                 fingerprint = self._normalize_text(str(record.get("fingerprint", "")).strip())
-                dedupe_ref = order_ref or fingerprint or f"row-{len(pending_rows) + len(received_rows)}"
+                reconcile_ref = self._normalize_text(str(row.get("reconcile_ref", "")).strip())
+                dedupe_ref = reconcile_ref or order_ref or fingerprint or f"row-{len(pending_rows) + len(received_rows)}"
+                if not str(row.get("reconcile_ref", "")).strip():
+                    row["reconcile_ref"] = dedupe_ref
 
                 is_pending = self._is_pending_reconcile_row(
                     record=record,
@@ -710,19 +713,33 @@ class WebReportService:
 
     def _build_reconcile_row(self, record: dict[str, Any], match_result: str) -> dict[str, Any]:
         ref = str(record.get("pancake_display_id", "")).strip() or str(record.get("pancake_order_id", "")).strip()
+        td_awb = str(record.get("td_awb", "")).strip()
+        fingerprint = str(record.get("fingerprint", "")).strip()
+        reconcile_ref = ref or td_awb or fingerprint
         td_cod_minor = max(0, self._to_int(record.get("td_cod_minor"), fallback=0))
         if td_cod_minor <= 0:
             td_cod_minor = max(0, self._to_int(record.get("td_amount_minor"), fallback=0))
         return {
             "pancake_order_ref": ref,
+            "reconcile_ref": reconcile_ref,
+            "display_ref": ref or td_awb or reconcile_ref,
             "match_result": match_result,
             "reason": str(record.get("reason", "")).strip(),
-            "td_awb": str(record.get("td_awb", "")).strip(),
+            "td_awb": td_awb,
             "td_status": str(record.get("td_status", "")).strip(),
             "customer_name": str(record.get("td_customer_name", "")).strip(),
             "settlement_date": str(record.get("settlement_date", "")).strip(),
             "td_cod_minor": td_cod_minor,
+            "td_cod_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(td_cod_minor)),
+            "td_cod_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(td_cod_minor))),
         }
+
+    def _reconcile_row_key(self, row: dict[str, Any]) -> str:
+        for field in ("reconcile_ref", "pancake_order_ref", "td_awb"):
+            normalized = self._normalize_text(str(row.get(field, "")).strip())
+            if normalized:
+                return normalized
+        return ""
 
     def _count_unique_reconcile_order_refs(self, rows: Any) -> int:
         refs: set[str] = set()
@@ -731,7 +748,7 @@ class WebReportService:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            normalized_ref = self._normalize_text(str(row.get("pancake_order_ref", "")).strip())
+            normalized_ref = self._reconcile_row_key(row)
             if normalized_ref:
                 refs.add(normalized_ref)
         return len(refs)
@@ -744,12 +761,13 @@ class WebReportService:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            normalized_ref = self._normalize_text(str(row.get("pancake_order_ref", "")).strip())
-            if not normalized_ref or normalized_ref in unique_refs:
+            row_key = self._reconcile_row_key(row)
+            if not row_key or row_key in unique_refs:
                 continue
-            unique_refs.add(normalized_ref)
+            unique_refs.add(row_key)
+            normalized_ref = self._normalize_text(str(row.get("pancake_order_ref", "")).strip())
             row_minor = max(0, self._to_int(row.get("td_cod_minor"), fallback=0))
-            if row_minor <= 0:
+            if row_minor <= 0 and normalized_ref:
                 row_minor = max(0, self._to_int(order_value_minor_by_ref.get(normalized_ref)))
             total_minor += row_minor
         return total_minor

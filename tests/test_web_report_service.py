@@ -564,6 +564,73 @@ def test_reconcile_received_td_status_only_mode_counts_td_rows(tmp_path: Path) -
     assert snapshot["metrics"]["pending_reconcile_orders"] == 1
 
 
+def test_reconcile_received_includes_success_rows_without_pancake_ref(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+    config_root.mkdir(parents=True, exist_ok=True)
+    status_map_path = config_root / "custom_status_map.json"
+    dump_json(
+        status_map_path,
+        {
+            "reconcile_received_mode": "td_status_only",
+            "reconcile_received_td_statuses": ["SUCCESS"],
+            "pending_reconcile_match_results": [],
+            "brand_rules": [],
+        },
+    )
+    settings = _dummy_settings(
+        tmp_path,
+        web_report_status_map_path=str(status_map_path),
+    )
+    run_path = settings.reconcile_cod_runs_dir / "run_2026-06-01_20260601T030000Z.json"
+    dump_json(
+        run_path,
+        {
+            "settlement_date": "2026-06-01",
+            "generated_at": "2026-06-01T03:00:00+00:00",
+            "records": [
+                {
+                    "match_result": "already_correct",
+                    "td_status": "SUCCESS",
+                    "pancake_display_id": "JCT901",
+                    "td_awb": "AWB-MAPPED",
+                    "td_cod_minor": 550_000,
+                },
+                {
+                    "match_result": "not_found",
+                    "td_status": "SUCCESS",
+                    "td_awb": "AWB-NO-PANCAKE",
+                    "td_cod_minor": 1_200_000,
+                },
+                {
+                    "match_result": "ambiguous",
+                    "td_status": "SUCCESS",
+                    "td_awb": "AWB-ZERO-COD",
+                    "td_cod_minor": 0,
+                },
+                {
+                    "match_result": "already_correct",
+                    "td_status": "RETURNED",
+                    "td_awb": "AWB-RETURNED",
+                    "td_cod_minor": 990_000,
+                },
+            ],
+        },
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+    rows = snapshot["status_lists"]["reconcile-received"]
+
+    assert snapshot["metrics"]["reconcile_received_orders"] == 3
+    assert snapshot["metrics"]["reconcile_received_value_minor"] == 1_750_000
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 0
+    assert {row["display_ref"] for row in rows} == {"JCT901", "AWB-NO-PANCAKE", "AWB-ZERO-COD"}
+
+
 def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) -> None:
     config_root = tmp_path / "config"
     config_root.mkdir(parents=True, exist_ok=True)
