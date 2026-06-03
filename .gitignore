@@ -8,6 +8,8 @@
 .pytest_cache/
 __pycache__/
 *.pyc
+.wrangler/
+workers/**/.wrangler/
 
 # Runtime data
 logs/**

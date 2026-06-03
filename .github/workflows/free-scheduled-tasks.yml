@@ -165,7 +165,6 @@ jobs:
             echo "slot=${{ inputs.slot }}" >> "$GITHUB_OUTPUT"
             echo "date=${{ inputs.date }}" >> "$GITHUB_OUTPUT"
             echo "pancake_notify=${{ inputs.pancake_notify }}" >> "$GITHUB_OUTPUT"
-            echo "update_b64=${{ inputs.update_b64 }}" >> "$GITHUB_OUTPUT"
             echo "source=${{ inputs.source }}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -234,12 +233,7 @@ jobs:
             args+=("--notify" "${{ steps.task.outputs.pancake_notify || 'auto' }}")
           fi
           if [ "$task" = "telegram-update" ]; then
-            update_b64="${{ steps.task.outputs.update_b64 }}"
-            if [ -z "$update_b64" ]; then
-              echo "Missing update_b64 for telegram-update."
-              exit 1
-            fi
-            printf '%s' "$update_b64" > telegram_update.b64
+            python -c 'import json, os, sys; event=json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8")); update_b64=(event.get("inputs") or {}).get("update_b64", ""); sys.exit("Missing update_b64 for telegram-update.") if not update_b64 else open("telegram_update.b64", "w", encoding="utf-8").write(update_b64)'
             python -m app.telegram_update_runner --update-b64-file telegram_update.b64
           else
             python -m app.scheduled_tasks "${args[@]}"

@@ -55,6 +55,36 @@ function New-WebhookSecret {
     return ([Convert]::ToBase64String($bytes)).TrimEnd("=").Replace("+", "_").Replace("/", "-")
 }
 
+function Set-EnvFileValue {
+    param(
+        [string]$Path,
+        [string]$Name,
+        [string]$Value
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $found = $false
+    if (Test-Path $Path) {
+        foreach ($line in Get-Content -Path $Path) {
+            if ($line -match "^\s*$([regex]::Escape($Name))\s*=") {
+                $lines.Add(("{0}={1}" -f $Name, $Value))
+                $found = $true
+            } else {
+                $lines.Add($line)
+            }
+        }
+    }
+    if (-not $found) {
+        if ($lines.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($lines[$lines.Count - 1])) {
+            $lines.Add("")
+        }
+        $lines.Add(("{0}={1}" -f $Name, $Value))
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines((Resolve-Path -Path (Split-Path -Parent $Path)).Path + "\" + (Split-Path -Leaf $Path), $lines, $utf8NoBom)
+}
+
 function Set-WranglerSecret {
     param(
         [string]$Name,
@@ -95,7 +125,12 @@ if ([string]::IsNullOrWhiteSpace($telegramToken) -or [string]::IsNullOrWhiteSpac
     throw "TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_ID are required in $EnvFile."
 }
 if ([string]::IsNullOrWhiteSpace($WebhookSecret)) {
+    $WebhookSecret = [string]$envValues["TELEGRAM_WEBHOOK_SECRET"]
+}
+if ([string]::IsNullOrWhiteSpace($WebhookSecret)) {
     $WebhookSecret = New-WebhookSecret
+    Set-EnvFileValue -Path $envPath -Name "TELEGRAM_WEBHOOK_SECRET" -Value $WebhookSecret
+    Write-Host "Generated TELEGRAM_WEBHOOK_SECRET and saved it to $EnvFile."
 }
 
 $botInfo = Invoke-RestMethod -Method Get -Uri ("https://api.telegram.org/bot{0}/getMe" -f $telegramToken)
