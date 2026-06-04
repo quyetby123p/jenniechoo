@@ -35,10 +35,30 @@ function Write-WatchdogLog {
     Add-Content -Path $watchdogLog -Value "$timestamp [WATCHDOG] $Message"
 }
 
-function Get-AppMainProcesses {
+function Get-PythonModuleProcesses {
+    param([Parameter(Mandatory = $true)][string]$ModuleName)
     $escapedRoot = [Regex]::Escape($resolvedProjectRoot)
+    $escapedModule = [Regex]::Escape($ModuleName)
     Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object {
-        $_.CommandLine -match "-m app\.main" -and $_.CommandLine -match $escapedRoot
+        $_.CommandLine -match "-m $escapedModule" -and $_.CommandLine -match $escapedRoot
+    }
+}
+
+function Ensure-PythonModuleRunning {
+    param([Parameter(Mandatory = $true)][string]$ModuleName)
+
+    $running = @(Get-PythonModuleProcesses -ModuleName $ModuleName)
+    if ($running.Count -eq 0) {
+        Write-WatchdogLog "Khong tim thay $ModuleName, bat dau khoi dong lai."
+        Start-Process -FilePath $PythonExe -ArgumentList "-m $ModuleName" -WorkingDirectory $resolvedProjectRoot -WindowStyle Hidden | Out-Null
+        Start-Sleep -Seconds 3
+        $afterStart = @(Get-PythonModuleProcesses -ModuleName $ModuleName)
+        if ($afterStart.Count -gt 0) {
+            $pids = ($afterStart | Select-Object -ExpandProperty ProcessId) -join ","
+            Write-WatchdogLog "Khoi dong lai $ModuleName thanh cong. PIDs=$pids"
+        } else {
+            Write-WatchdogLog "Khoi dong lai $ModuleName that bai: khong tim thay process sau khi start."
+        }
     }
 }
 
@@ -58,19 +78,8 @@ try {
 
     while ($true) {
         try {
-            $running = @(Get-AppMainProcesses)
-            if ($running.Count -eq 0) {
-                Write-WatchdogLog "Khong tim thay app.main, bat dau khoi dong lai."
-                Start-Process -FilePath $PythonExe -ArgumentList "-m app.main" -WorkingDirectory $resolvedProjectRoot -WindowStyle Hidden | Out-Null
-                Start-Sleep -Seconds 3
-                $afterStart = @(Get-AppMainProcesses)
-                if ($afterStart.Count -gt 0) {
-                    $pids = ($afterStart | Select-Object -ExpandProperty ProcessId) -join ","
-                    Write-WatchdogLog "Khoi dong lai thanh cong. PIDs=$pids"
-                } else {
-                    Write-WatchdogLog "Khoi dong lai that bai: khong tim thay process sau khi start."
-                }
-            }
+            Ensure-PythonModuleRunning -ModuleName "app.main"
+            Ensure-PythonModuleRunning -ModuleName "app.assistant_main"
         } catch {
             Write-WatchdogLog ("Loi watchdog loop: " + $_.Exception.Message)
         }

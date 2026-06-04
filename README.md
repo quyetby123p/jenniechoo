@@ -56,6 +56,9 @@ pip install -r requirements.txt
 - `DAILY_REPORT_HISTORY_DAYS` (mac dinh `90`)
 - `DAILY_REPORT_STARTUP_ALERT_ONLY_ON_FAILURE` (giu tuong thich env cu, hien khong gui bao cao ngay luc khoi dong bot)
 - `DAILY_REPORT_NOTIFY_CHAT_ID` (chat id nhan **them** daily report; de trong hoac `0` thi chi gui ve `TELEGRAM_ALLOWED_USER_ID`, group/supergroup thuong la so am `-100...`)
+- `DAILY_REPORT_TASK_SUMMARY_ENABLED` (mac dinh `1`, noi them tong ket task cong viec vao bao cao tu dong buoi toi)
+- `DAILY_REPORT_TASK_SUMMARY_MAX_ITEMS` (mac dinh `5`, so task toi da hien trong moi khoi danh sach)
+- `DAILY_REPORT_TASK_DB_PATH` (mac dinh `storage/assistant_bot/tasks.db`, dung chung DB task cua Bot 3)
 - `PANCAKE_API_BASE_URL` (mac dinh `https://pos.pancake.vn/api/v1`)
 - `PANCAKE_ACCESS_TOKEN` (neu anh dang duoc Pancake cap theo dang access token)
 - `PANCAKE_API_KEY` (neu anh dang dung API key trong CRM > Cau hinh ung dung > Webhook va API Key)
@@ -710,6 +713,11 @@ Can dien cac bien trong `.env`:
 - `BOT3_TASK_WEEKLY_SUMMARY_HOUR` (mac dinh `15`)
 - `BOT3_TASK_WEEKLY_SUMMARY_MINUTE` (mac dinh `0`)
 - `BOT3_TASK_WEEKLY_SUMMARY_MAX_ITEMS` (mac dinh `5`)
+- `BOT3_DAILY_TASK_CHECKIN_ENABLED` (mac dinh `0`, dat `1` de bat hoi task 09:00/17:00)
+- `BOT3_DAILY_TASK_MORNING_HOUR` / `BOT3_DAILY_TASK_MORNING_MINUTE` (mac dinh `9:00`)
+- `BOT3_DAILY_TASK_EVENING_HOUR` / `BOT3_DAILY_TASK_EVENING_MINUTE` (mac dinh `17:00`)
+- `BOT3_DAILY_TASK_WEEKDAYS` (mac dinh `0,1,2,3,4,5` = T2-T7)
+- `BOT3_DAILY_TASK_MAX_ITEMS` (mac dinh `20`)
 
 ### Kiem tra config Bot 3
 
@@ -755,6 +763,10 @@ Lenh tu nhien:
   - `thêm công việc: <tên task>`
   - bot se hoi lan luot: noi dung -> deadline -> tinh trang (`chưa làm`/`đang làm`/`hoàn thành`)
   - huy wizard: `/cancel`
+- Daily task check-in:
+  - 09:00 T2-T7 bot hoi viec hom nay trong chat rieng; moi dong anh gui se thanh 1 task deadline hom nay.
+  - 17:00 bot gui lai danh sach task hom nay; anh cap nhat bang 1 tin nhieu dong theo so thu tu.
+  - `/cancel` huy phien dang cho tra loi.
 - Trong group task (co tag bot): `bao cao tien do`, `tong ket tuan`, `viec da hoan thanh`, `viec chua hoan thanh`
 
 ## Work Progress Service (Telegram + Zalo + Pancake Work)
@@ -873,7 +885,7 @@ Zalo webhook co the day payload raw (nested) vao `POST /ingest/zalo`, bot se tu 
 - Lenh thu cong (`/report` hoac cau tu nhien `bao cao ...`) cung dung cung co che dich nhan nhu tren.
 - Rieng ban report tu dong gui vao group `DAILY_REPORT_NOTIFY_CHAT_ID`:
   - Moc `08:00` se noi them 2 khoi tong hop `3 ngay gan nhat` va `7 ngay gan nhat`.
-  - Moc `21:00` chi gui tong ket ngay (khong them `3d/7d`).
+  - Moc `21:00` khong them `3d/7d`, nhung se noi them khoi `Task cong viec cuoi ngay` neu `DAILY_REPORT_TASK_SUMMARY_ENABLED=1`.
   - Ban gui ve personal va report thu cong van giu cau truc cu.
 - Bot khong gui daily report ngay luc khoi dong.
 - Quyen trong group:

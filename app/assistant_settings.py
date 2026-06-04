@@ -52,6 +52,13 @@ class AssistantSettings:
     task_weekly_summary_minute: int = 0
     task_weekly_summary_max_items: int = 5
     task_db_path: Path | None = None
+    daily_task_checkin_enabled: bool = False
+    daily_task_morning_hour: int = 9
+    daily_task_morning_minute: int = 0
+    daily_task_evening_hour: int = 17
+    daily_task_evening_minute: int = 0
+    daily_task_weekdays: tuple[int, ...] = (0, 1, 2, 3, 4, 5)
+    daily_task_max_items: int = 20
 
     @property
     def pending_requests_dir(self) -> Path:
@@ -159,6 +166,24 @@ def _parse_csv_int(raw: str) -> list[int]:
         seen.add(value)
         values.append(value)
     return values
+
+
+def _parse_weekday_tuple(raw: str, *, default: tuple[int, ...]) -> tuple[int, ...]:
+    values: list[int] = []
+    seen: set[int] = set()
+    for item in str(raw or "").split(","):
+        token = item.strip()
+        if not token:
+            continue
+        try:
+            value = int(token)
+        except (TypeError, ValueError):
+            continue
+        if value < 0 or value > 6 or value in seen:
+            continue
+        values.append(value)
+        seen.add(value)
+    return tuple(values) if values else default
 
 
 def _parse_optional_int(raw: str, *, default: int) -> int:
@@ -286,6 +311,41 @@ def load_assistant_settings(project_root: Path | None = None) -> AssistantSettin
         min_value=1,
         max_value=20,
     )
+    daily_task_checkin_enabled = _parse_bool(os.getenv("BOT3_DAILY_TASK_CHECKIN_ENABLED", "0"), default=False)
+    daily_task_morning_hour = _parse_int(
+        os.getenv("BOT3_DAILY_TASK_MORNING_HOUR", "9"),
+        default=9,
+        min_value=0,
+        max_value=23,
+    )
+    daily_task_morning_minute = _parse_int(
+        os.getenv("BOT3_DAILY_TASK_MORNING_MINUTE", "0"),
+        default=0,
+        min_value=0,
+        max_value=59,
+    )
+    daily_task_evening_hour = _parse_int(
+        os.getenv("BOT3_DAILY_TASK_EVENING_HOUR", "17"),
+        default=17,
+        min_value=0,
+        max_value=23,
+    )
+    daily_task_evening_minute = _parse_int(
+        os.getenv("BOT3_DAILY_TASK_EVENING_MINUTE", "0"),
+        default=0,
+        min_value=0,
+        max_value=59,
+    )
+    daily_task_weekdays = _parse_weekday_tuple(
+        os.getenv("BOT3_DAILY_TASK_WEEKDAYS", "0,1,2,3,4,5"),
+        default=(0, 1, 2, 3, 4, 5),
+    )
+    daily_task_max_items = _parse_int(
+        os.getenv("BOT3_DAILY_TASK_MAX_ITEMS", "20"),
+        default=20,
+        min_value=1,
+        max_value=50,
+    )
 
     storage_root = project_root / "storage" / "assistant_bot"
     logs_root = project_root / "logs" / "assistant_bot"
@@ -346,4 +406,11 @@ def load_assistant_settings(project_root: Path | None = None) -> AssistantSettin
         task_weekly_summary_minute=task_weekly_summary_minute,
         task_weekly_summary_max_items=task_weekly_summary_max_items,
         task_db_path=task_db_path,
+        daily_task_checkin_enabled=daily_task_checkin_enabled,
+        daily_task_morning_hour=daily_task_morning_hour,
+        daily_task_morning_minute=daily_task_morning_minute,
+        daily_task_evening_hour=daily_task_evening_hour,
+        daily_task_evening_minute=daily_task_evening_minute,
+        daily_task_weekdays=daily_task_weekdays,
+        daily_task_max_items=daily_task_max_items,
     )

@@ -12,6 +12,7 @@ from aiogram import Bot
 
 from app.approval_service import ApprovalService
 from app.daily_report_service import DailyReportService
+from app.daily_task_summary_service import DailyTaskSummaryService
 from app.dedup_service import DedupService
 from app.logger import configure_logger
 from app.meta_ads_client import MetaAdsClient
@@ -59,6 +60,7 @@ def build_runtime(project_root: Path | None = None) -> ScheduledRuntime:
         pancake_client=pancake,
         meta_client=meta,
     )
+    daily_task_summary = DailyTaskSummaryService(settings=settings, logger=logger)
     reconcile = ReconcileCodService(
         settings=settings,
         logger=logger,
@@ -83,6 +85,7 @@ def build_runtime(project_root: Path | None = None) -> ScheduledRuntime:
         dedup=DedupService(storage=storage),
         meta_client=meta,
         daily_report_service=reports,
+        daily_task_summary_service=daily_task_summary,
         reconcile_cod_service=reconcile,
         reconcile_cod_sheet_service=reconcile_sheet,
         pancake_td_sync_service=pancake_td_sync,
@@ -131,6 +134,7 @@ async def run_daily_report(runtime: ScheduledRuntime, *, slot: str, report_date:
             notify_success=True,
             report_payload=report_payload,
             include_recent_rollups=(selected_slot == "morning" and runtime.bot._is_report_group_chat(chat_id)),
+            include_task_summary=(selected_slot == "evening"),
         )
 
 

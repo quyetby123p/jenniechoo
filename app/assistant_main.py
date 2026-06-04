@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime
 import logging
 from pathlib import Path
 import sys
+import time
 
 from app.assistant_approval_service import AssistantApprovalService
 from app.assistant_bot import TelegramAssistantBot
@@ -90,6 +92,11 @@ def check_runtime_configuration() -> str:
             missing.append("env.BOT3_MANAGER_USER_IDS")
         if int(settings.task_weekly_summary_weekday) < 0 or int(settings.task_weekly_summary_weekday) > 6:
             missing.append("env.BOT3_TASK_WEEKLY_SUMMARY_WEEKDAY")
+        if settings.daily_task_checkin_enabled:
+            if not settings.daily_task_weekdays:
+                missing.append("env.BOT3_DAILY_TASK_WEEKDAYS")
+            if int(settings.daily_task_max_items) <= 0:
+                missing.append("env.BOT3_DAILY_TASK_MAX_ITEMS")
 
     if missing:
         return "Config assistant bot chua hop le, thieu cac muc: " + ", ".join(missing)
@@ -132,6 +139,27 @@ async def run_bot() -> None:
     await bot.run()
 
 
+def run_bot_forever() -> None:
+    attempt = 0
+    while True:
+        try:
+            asyncio.run(run_bot())
+            attempt = 0
+            _print_line("Assistant bot polling da dung, thu khoi dong lai sau 5 giay...")
+            time.sleep(5)
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            attempt += 1
+            delay_seconds = min(60, 5 * attempt)
+            timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            _print_line(
+                f"[{timestamp}] Assistant bot gap loi: {exc}. "
+                f"Thu khoi dong lai sau {delay_seconds} giay..."
+            )
+            time.sleep(delay_seconds)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Personal assistant Telegram bot (Bot 3).")
     parser.add_argument(
@@ -152,7 +180,7 @@ def main() -> int:
     try:
         settings = load_assistant_settings(project_root=Path(__file__).resolve().parents[1])
         with single_instance_lock(settings.lock_file):
-            asyncio.run(run_bot())
+            run_bot_forever()
     except KeyboardInterrupt:
         return 0
     except Exception as exc:  # noqa: BLE001

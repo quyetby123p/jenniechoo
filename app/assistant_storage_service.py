@@ -116,6 +116,18 @@ class AssistantStorageService:
         data["updated_at"] = now_utc_iso()
         dump_json(self.settings.reminder_state_file, data)
 
+    def load_daily_task_checkin_state(self) -> dict[str, Any]:
+        path = self.settings.state_root / "daily_task_checkin_state.json"
+        if not path.exists():
+            return {}
+        payload = load_json(path)
+        return payload if isinstance(payload, dict) else {}
+
+    def save_daily_task_checkin_state(self, payload: dict[str, Any]) -> None:
+        data = dict(payload)
+        data["updated_at"] = now_utc_iso()
+        dump_json(self.settings.state_root / "daily_task_checkin_state.json", data)
+
     def check_and_increment_rate_limit(self, *, user_id: int) -> tuple[bool, int]:
         state = self._load_rate_limit_state()
         minute_key = datetime.now(timezone.utc).strftime("%Y%m%d%H%M")

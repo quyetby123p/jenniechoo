@@ -67,6 +67,8 @@ class TelegramAssistantBot:
         self._event_task: asyncio.Task[None] | None = None
         self._eod_task: asyncio.Task[None] | None = None
         self._task_weekly_task: asyncio.Task[None] | None = None
+        self._daily_task_checkin_task: asyncio.Task[None] | None = None
+        self._memory_rebuild_task: asyncio.Task[None] | None = None
         self._bot_username: str = ""
 
         self.router.message.register(self.handle_start_command, Command("start"))
@@ -82,7 +84,10 @@ class TelegramAssistantBot:
         self.router.callback_query.register(self.handle_callback, F.data)
 
     async def run(self) -> None:
-        self.memory.rebuild_index()
+        self._memory_rebuild_task = asyncio.create_task(
+            self._rebuild_memory_index_background(),
+            name="assistant_memory_rebuild",
+        )
         bot = Bot(token=self.settings.telegram_bot_token)
         self._bot = bot
         with suppress(Exception):
@@ -102,18 +107,52 @@ class TelegramAssistantBot:
                 self._task_weekly_summary_loop(),
                 name="assistant_task_weekly_summary_loop",
             )
+        if self.settings.tasks_enabled and self.settings.daily_task_checkin_enabled:
+            self._daily_task_checkin_task = asyncio.create_task(
+                self._daily_task_checkin_loop(),
+                name="assistant_daily_task_checkin_loop",
+            )
 
         self.logger.info("Assistant bot dang chay polling...")
         try:
             await dispatcher.start_polling(bot)
         finally:
-            for task in (self._agenda_task, self._event_task, self._eod_task, self._task_weekly_task):
+            for task in (
+                self._agenda_task,
+                self._event_task,
+                self._eod_task,
+                self._task_weekly_task,
+                self._daily_task_checkin_task,
+                self._memory_rebuild_task,
+            ):
                 if task:
                     task.cancel()
-            for task in (self._agenda_task, self._event_task, self._eod_task, self._task_weekly_task):
+            for task in (
+                self._agenda_task,
+                self._event_task,
+                self._eod_task,
+                self._task_weekly_task,
+                self._daily_task_checkin_task,
+                self._memory_rebuild_task,
+            ):
                 if task:
                     with suppress(asyncio.CancelledError):
                         await task
+
+    async def _rebuild_memory_index_background(self) -> None:
+        try:
+            result = await asyncio.to_thread(self.memory.rebuild_index)
+            self.logger.info(
+                "Rebuild assistant memory index xong: files=%s inserted=%s updated=%s skipped=%s",
+                result.get("files_total"),
+                result.get("inserted"),
+                result.get("updated"),
+                result.get("skipped"),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self.logger.exception("Rebuild assistant memory index that bai: %s", exc)
 
     async def handle_start_command(self, message: Message) -> None:
         if not self._is_authorized(message.from_user.id if message.from_user else None):
@@ -177,13 +216,21 @@ class TelegramAssistantBot:
         if not raw:
             return
         if self._is_private_chat(message) and self._is_authorized(user_id) and self.settings.tasks_enabled:
-            start_reply = self._try_start_task_wizard(raw=raw, user_id=int(user_id or 0), chat_id=int(chat_id or 0))
-            if start_reply:
-                await self._send_and_log(chat_id or 0, raw_text=raw, intent="task_wizard", reply=start_reply)
+            daily_reply = self._continue_daily_task_checkin_if_active(
+                raw=raw,
+                user_id=int(user_id or 0),
+                chat_id=int(chat_id or 0),
+            )
+            if daily_reply:
+                await self._send_and_log(chat_id or 0, raw_text=raw, intent="daily_task_checkin", reply=daily_reply)
                 return
             draft_reply = self._continue_task_wizard_if_active(raw=raw, user_id=int(user_id or 0), chat_id=int(chat_id or 0))
             if draft_reply:
                 await self._send_and_log(chat_id or 0, raw_text=raw, intent="task_wizard", reply=draft_reply)
+                return
+            start_reply = self._try_start_task_wizard(raw=raw, user_id=int(user_id or 0), chat_id=int(chat_id or 0))
+            if start_reply:
+                await self._send_and_log(chat_id or 0, raw_text=raw, intent="task_wizard", reply=start_reply)
                 return
         raw_for_parse = self._strip_bot_mention_tokens(raw)
         try:
@@ -353,6 +400,131 @@ class TelegramAssistantBot:
         self.storage.delete_task_draft(user_id=user_id)
         return "Phiên tạo task bị lỗi bước xử lý, anh thử lại: `thêm công việc: <tên task>`."
 
+    def _continue_daily_task_checkin_if_active(self, *, raw: str, user_id: int, chat_id: int) -> str:
+        draft = self.storage.load_task_draft(user_id=user_id)
+        if not draft:
+            return ""
+        mode = str(draft.get("mode", "")).strip()
+        if mode not in {"daily_task_morning", "daily_task_evening"}:
+            return ""
+
+        normalized = _normalize_question_text(raw)
+        if normalized in {"cancel", "huy", "huy bo", "bo qua"} or str(raw).strip().lower() == "/cancel":
+            self.storage.delete_task_draft(user_id=user_id)
+            return "Đã hủy phiên check-in task hôm nay."
+
+        if mode == "daily_task_morning":
+            return self._handle_daily_task_morning_reply(raw=raw, user_id=user_id, chat_id=chat_id, draft=draft)
+        return self._handle_daily_task_evening_reply(raw=raw, user_id=user_id, chat_id=chat_id, draft=draft)
+
+    def _handle_daily_task_morning_reply(
+        self,
+        *,
+        raw: str,
+        user_id: int,
+        chat_id: int,
+        draft: dict[str, Any],
+    ) -> str:
+        day_key = str(draft.get("date", "")).strip() or self.scheduler.now_local().date().isoformat()
+        state = self.storage.load_daily_task_checkin_state()
+        day_state = self._get_daily_task_day_state(state, day_key)
+
+        normalized = _normalize_question_text(raw)
+        if normalized in {"khong co", "khong", "hom nay khong co", "khong co viec"}:
+            day_state["morning_answered"] = True
+            day_state["no_tasks"] = True
+            day_state["task_uids"] = []
+            self._save_daily_task_day_state(state, day_key, day_state)
+            self.storage.delete_task_draft(user_id=user_id)
+            return "Em đã ghi nhận hôm nay anh chưa có task mới. 17h em sẽ không hỏi tiến độ."
+
+        titles = self._parse_daily_task_title_lines(raw)
+        if not titles:
+            return "Em chưa tách được task nào. Anh gửi mỗi dòng một việc, hoặc gửi `không có`."
+
+        max_items = int(self.settings.daily_task_max_items)
+        if len(titles) > max_items:
+            titles = titles[:max_items]
+
+        created: list[dict[str, Any]] = []
+        for title in titles:
+            task = self.tasks.create_task(
+                title=title,
+                created_by=int(user_id),
+                source_type="self",
+                assigned_by=int(user_id),
+                group_chat_id=int(self.settings.task_group_chat_id),
+                note=f"Daily check-in {day_key}",
+                deadline_date=day_key,
+            )
+            if task:
+                created.append(task)
+
+        existing_uids = [str(item).strip() for item in day_state.get("task_uids", []) if str(item).strip()]
+        new_uids = [str(item.get("task_uid", "")).strip() for item in created if str(item.get("task_uid", "")).strip()]
+        day_state["morning_answered"] = True
+        day_state["no_tasks"] = False
+        day_state["task_uids"] = [*existing_uids, *new_uids]
+        self._save_daily_task_day_state(state, day_key, day_state)
+        self.storage.delete_task_draft(user_id=user_id)
+
+        lines = [f"Em đã lưu {len(created)} task cho hôm nay:"]
+        for idx, task in enumerate(created, start=1):
+            lines.append(f"{idx}. {task.get('title')}")
+        lines.append("17h em sẽ hỏi lại tiến độ các việc này.")
+        return "\n".join(lines)
+
+    def _handle_daily_task_evening_reply(
+        self,
+        *,
+        raw: str,
+        user_id: int,
+        chat_id: int,
+        draft: dict[str, Any],
+    ) -> str:
+        day_key = str(draft.get("date", "")).strip() or self.scheduler.now_local().date().isoformat()
+        task_uids = [str(item).strip() for item in draft.get("task_uids", []) if str(item).strip()]
+        tasks = self.tasks.list_tasks_by_uids(task_uids)
+        if not tasks:
+            self.storage.delete_task_draft(user_id=user_id)
+            return "Em không còn thấy task nào của hôm nay để cập nhật."
+
+        updates, errors = self._parse_daily_task_progress_lines(raw, tasks)
+        updated_items: list[dict[str, Any]] = []
+        for item in updates:
+            task = item["task"]
+            payload = self.tasks.update_task(
+                task_uid=str(task.get("task_uid", "")),
+                updated_by=int(user_id),
+                chat_id=int(chat_id),
+                status=str(item.get("status", "")),
+                progress_percent=int(item.get("progress_percent", 0)),
+                note=str(item.get("note", "")),
+                blocked_reason=str(item.get("blocked_reason", "")),
+                next_step=str(item.get("next_step", "")),
+                action_name="daily_checkin_update",
+            )
+            updated_items.append(payload)
+
+        lines: list[str] = []
+        if updated_items:
+            lines.append(f"Em đã cập nhật {len(updated_items)} task hôm nay:")
+            for item in updated_items:
+                lines.append(f"- {self._format_task_item(item)}")
+        if errors:
+            if lines:
+                lines.append("")
+            lines.append("Có dòng em chưa khớp được, anh gửi lại riêng các dòng này nhé:")
+            lines.extend(f"- {item}" for item in errors)
+            return "\n".join(lines)
+
+        state = self.storage.load_daily_task_checkin_state()
+        day_state = self._get_daily_task_day_state(state, day_key)
+        day_state["evening_answered"] = True
+        self._save_daily_task_day_state(state, day_key, day_state)
+        self.storage.delete_task_draft(user_id=user_id)
+        return "\n".join(lines) if lines else "Em chưa thấy dòng tiến độ nào để cập nhật."
+
     def _extract_task_title_from_natural(self, raw: str) -> str:
         text = " ".join(str(raw or "").split()).strip()
         if not text:
@@ -416,6 +588,133 @@ class TelegramAssistantBot:
         if normalized in {"done", "hoan thanh", "xong", "completed"}:
             return "done"
         return ""
+
+    def _parse_daily_task_title_lines(self, raw: str) -> list[str]:
+        titles: list[str] = []
+        seen: set[str] = set()
+        for line in _split_nonempty_lines(raw):
+            title = _strip_daily_task_line_prefix(line)
+            if not title:
+                continue
+            normalized = _normalize_question_text(title)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            titles.append(title)
+        return titles
+
+    def _parse_daily_task_progress_lines(
+        self,
+        raw: str,
+        tasks: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        updates: list[dict[str, Any]] = []
+        errors: list[str] = []
+        matched_uids: set[str] = set()
+        for line in _split_nonempty_lines(raw):
+            task = self._match_daily_task_progress_line(line, tasks)
+            if not task:
+                errors.append(line)
+                continue
+            task_uid = str(task.get("task_uid", "")).strip()
+            if not task_uid or task_uid in matched_uids:
+                continue
+            matched_uids.add(task_uid)
+            updates.append(self._build_daily_task_progress_update(line=line, task=task))
+        return updates, errors
+
+    def _match_daily_task_progress_line(self, line: str, tasks: list[dict[str, Any]]) -> dict[str, Any] | None:
+        match = re.match(r"^\s*(\d{1,2})[\).\-\s]+(.+)$", str(line or "").strip())
+        if match:
+            idx = int(match.group(1))
+            if 1 <= idx <= len(tasks):
+                return tasks[idx - 1]
+
+        normalized_line = _normalize_question_text(line)
+        if not normalized_line:
+            return None
+        best: tuple[int, dict[str, Any]] | None = None
+        for task in tasks:
+            title_norm = _normalize_question_text(str(task.get("title", "")))
+            if not title_norm:
+                continue
+            score = 0
+            if title_norm in normalized_line:
+                score = len(title_norm.split()) + 10
+            else:
+                tokens = [item for item in title_norm.split() if len(item) >= 3]
+                score = sum(1 for token in tokens if token in normalized_line)
+            if score <= 0:
+                continue
+            if best is None or score > best[0]:
+                best = (score, task)
+        return best[1] if best else None
+
+    def _build_daily_task_progress_update(self, *, line: str, task: dict[str, Any]) -> dict[str, Any]:
+        raw_note = _strip_daily_task_line_prefix(line)
+        normalized = _normalize_question_text(raw_note)
+        percent_match = re.search(r"(\d{1,3})\s*%", raw_note)
+        percent = _to_int(task.get("progress_percent"), fallback=0)
+        if percent_match:
+            percent = max(0, min(100, int(percent_match.group(1))))
+
+        if any(token in normalized for token in ("xong", "hoan thanh", "done", "completed")):
+            status = "done"
+            percent = 100
+            blocked_reason = ""
+            next_step = ""
+        elif any(token in normalized for token in ("blocked", "block", "vuong", "ket", "bi chan")):
+            status = "blocked"
+            if percent <= 0:
+                percent = 1
+            blocked_reason = raw_note or "Cần cập nhật"
+            next_step = "Cần cập nhật bước tiếp theo"
+        elif "chua lam" in normalized or "chua bat dau" in normalized:
+            status = "todo"
+            percent = 0
+            blocked_reason = "Chưa bắt đầu"
+            next_step = "Bắt đầu xử lý"
+        else:
+            status = "doing"
+            if percent <= 0:
+                percent = max(1, _to_int(task.get("progress_percent"), fallback=50) or 50)
+            blocked_reason = "Đang triển khai"
+            next_step = "Tiếp tục xử lý"
+
+        return {
+            "task": task,
+            "status": status,
+            "progress_percent": percent,
+            "note": raw_note,
+            "blocked_reason": blocked_reason,
+            "next_step": next_step,
+        }
+
+    def _get_daily_task_day_state(self, state: dict[str, Any], day_key: str) -> dict[str, Any]:
+        days = state.get("days", {})
+        if not isinstance(days, dict):
+            days = {}
+        raw = days.get(day_key, {})
+        day_state = raw if isinstance(raw, dict) else {}
+        day_state.setdefault("date", day_key)
+        day_state.setdefault("task_uids", [])
+        day_state.setdefault("morning_sent", False)
+        day_state.setdefault("morning_answered", False)
+        day_state.setdefault("evening_sent", False)
+        day_state.setdefault("evening_answered", False)
+        day_state.setdefault("no_tasks", False)
+        return day_state
+
+    def _save_daily_task_day_state(self, state: dict[str, Any], day_key: str, day_state: dict[str, Any]) -> None:
+        days = state.get("days", {})
+        if not isinstance(days, dict):
+            days = {}
+        days[day_key] = day_state
+        if len(days) > 60:
+            keys = sorted(str(key) for key in days.keys())
+            days = {key: days[key] for key in keys[-60:] if key in days}
+        state["days"] = days
+        self.storage.save_daily_task_checkin_state(state)
 
     async def _handle_task_intent(self, message: Message, command: ParsedAssistantCommand, *, raw_text: str) -> None:
         if not self.settings.tasks_enabled:
@@ -1089,6 +1388,116 @@ class TelegramAssistantBot:
                 self.logger.exception("Task weekly summary loop loi: %s", exc)
             await asyncio.sleep(20)
 
+    async def _daily_task_checkin_loop(self) -> None:
+        self.logger.info(
+            "Bat daily task check-in: morning=%02d:%02d evening=%02d:%02d weekdays=%s",
+            int(self.settings.daily_task_morning_hour),
+            int(self.settings.daily_task_morning_minute),
+            int(self.settings.daily_task_evening_hour),
+            int(self.settings.daily_task_evening_minute),
+            ",".join(str(item) for item in self.settings.daily_task_weekdays),
+        )
+        while True:
+            try:
+                now_local = self.scheduler.now_local()
+                if now_local.weekday() not in set(self.settings.daily_task_weekdays):
+                    await asyncio.sleep(20)
+                    continue
+
+                day_key = now_local.date().isoformat()
+                state = self.storage.load_daily_task_checkin_state()
+                day_state = self._get_daily_task_day_state(state, day_key)
+                if (
+                    now_local.hour == int(self.settings.daily_task_morning_hour)
+                    and now_local.minute == int(self.settings.daily_task_morning_minute)
+                    and not bool(day_state.get("morning_sent"))
+                ):
+                    await self._send_daily_task_morning_prompt(day_key=day_key, state=state, day_state=day_state)
+                    await asyncio.sleep(65)
+                    continue
+
+                task_uids = [str(item).strip() for item in day_state.get("task_uids", []) if str(item).strip()]
+                if (
+                    now_local.hour == int(self.settings.daily_task_evening_hour)
+                    and now_local.minute == int(self.settings.daily_task_evening_minute)
+                    and not bool(day_state.get("evening_sent"))
+                    and bool(day_state.get("morning_answered"))
+                    and not bool(day_state.get("no_tasks"))
+                    and task_uids
+                ):
+                    await self._send_daily_task_evening_prompt(
+                        day_key=day_key,
+                        task_uids=task_uids,
+                        state=state,
+                        day_state=day_state,
+                    )
+                    await asyncio.sleep(65)
+                    continue
+            except Exception as exc:  # noqa: BLE001
+                self.logger.exception("Daily task check-in loop loi: %s", exc)
+            await asyncio.sleep(20)
+
+    async def _send_daily_task_morning_prompt(
+        self,
+        *,
+        day_key: str,
+        state: dict[str, Any],
+        day_state: dict[str, Any],
+    ) -> None:
+        user_id = int(self.settings.telegram_allowed_user_id)
+        self.storage.save_task_draft(
+            user_id=user_id,
+            payload={
+                "mode": "daily_task_morning",
+                "date": day_key,
+                "chat_id": user_id,
+                "user_id": user_id,
+            },
+        )
+        await self._bot_send_message(
+            user_id,
+            "Anh ơi, hôm nay anh có công việc gì?\n"
+            "Anh gửi mỗi dòng một việc nhé. Nếu không có, gửi: `không có`.",
+        )
+        day_state["morning_sent"] = True
+        self._save_daily_task_day_state(state, day_key, day_state)
+
+    async def _send_daily_task_evening_prompt(
+        self,
+        *,
+        day_key: str,
+        task_uids: list[str],
+        state: dict[str, Any],
+        day_state: dict[str, Any],
+    ) -> None:
+        user_id = int(self.settings.telegram_allowed_user_id)
+        tasks = await asyncio.to_thread(self.tasks.list_tasks_by_uids, task_uids)
+        if not tasks:
+            day_state["evening_sent"] = True
+            self._save_daily_task_day_state(state, day_key, day_state)
+            return
+        self.storage.save_task_draft(
+            user_id=user_id,
+            payload={
+                "mode": "daily_task_evening",
+                "date": day_key,
+                "chat_id": user_id,
+                "user_id": user_id,
+                "task_uids": [str(item.get("task_uid", "")).strip() for item in tasks],
+            },
+        )
+        lines = ["17h rồi anh ơi, anh cập nhật tiến độ các việc hôm nay giúp em:"]
+        for idx, task in enumerate(tasks, start=1):
+            lines.append(f"{idx}. {task.get('title')}")
+        lines.append("")
+        lines.append("Ví dụ:")
+        lines.append("1. xong")
+        lines.append("2. đang làm 60% - còn phần test")
+        lines.append("3. blocked - thiếu data, mai xin Huy")
+        await self._bot_send_message(user_id, "\n".join(lines))
+        day_state["evening_sent"] = True
+        self._save_daily_task_day_state(state, day_key, day_state)
+
     async def _setup_bot_commands(self) -> None:
         if not self._bot:
             return
@@ -1151,6 +1560,9 @@ class TelegramAssistantBot:
             f"- EOD giờ: {self.settings.eod_hour:02d}:00\n"
             f"- Task tracker: {'Bật' if self.settings.tasks_enabled else 'Tắt'}\n"
             f"- Task group chat id: {self.settings.task_group_chat_id}\n"
+            f"- Daily task check-in: {'Bật' if self.settings.daily_task_checkin_enabled else 'Tắt'} "
+            f"({self.settings.daily_task_morning_hour:02d}:{self.settings.daily_task_morning_minute:02d}/"
+            f"{self.settings.daily_task_evening_hour:02d}:{self.settings.daily_task_evening_minute:02d})\n"
             f"- Google connector: {'OK' if google_ok else f'LỖI ({google_reason})'}\n"
             f"- OpenAI connector: {openai_status}\n"
             f"- Memory index: {memory_status.get('doc_count', 0)} docs"
@@ -1250,7 +1662,8 @@ class TelegramAssistantBot:
             "- /run report|reconcile cod|reconcile sheet|media sheet\n"
             "- /ask <câu hỏi bất kỳ>\n"
             "- /task add|update|done|list|report|week|pending\n"
-            "- Hoặc nhập tự nhiên: thêm công việc: <tên task>"
+            "- Hoặc nhập tự nhiên: thêm công việc: <tên task>\n"
+            "- Check-in task ngày: bot hỏi 09:00 và 17:00 từ T2-T7 nếu đang bật"
         )
 
     def _format_action_result(self, action_name: str, payload: dict[str, Any]) -> str:
@@ -1393,6 +1806,22 @@ class TelegramAssistantBot:
 
     def _is_authorized(self, user_id: int | None) -> bool:
         return user_id == self.settings.telegram_allowed_user_id
+
+
+def _split_nonempty_lines(raw: str) -> list[str]:
+    lines: list[str] = []
+    for line in str(raw or "").replace("\r", "\n").split("\n"):
+        cleaned = " ".join(line.split()).strip()
+        if cleaned:
+            lines.append(cleaned)
+    return lines
+
+
+def _strip_daily_task_line_prefix(line: str) -> str:
+    text = " ".join(str(line or "").split()).strip()
+    text = re.sub(r"^\s*[-*•]+\s*", "", text)
+    text = re.sub(r"^\s*\d{1,2}[\).\-\s]+", "", text)
+    return text.strip(" -:\t")
 
 
 def _parse_iso_date(raw: Any) -> date | None:
