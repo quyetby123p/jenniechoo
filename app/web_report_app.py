@@ -16,6 +16,9 @@ from app.settings import Settings, load_settings
 from app.web_report_service import WebReportService
 
 
+REPORT_BASELINE_DATE = date(2026, 2, 1)
+
+
 def create_app(
     *,
     settings: Settings | None = None,
@@ -66,7 +69,8 @@ def create_app(
         missing_overview = _build_missing_overview(snapshot)
         today = datetime.now(_resolve_timezone(current_settings.app_timezone)).date()
         today_snapshot = current_report_service.get_snapshot(today, today)
-        overall_snapshot = current_report_service.get_snapshot(date(2020, 1, 1), today)
+        overall_start = min(REPORT_BASELINE_DATE, today)
+        overall_snapshot = current_report_service.get_snapshot(overall_start, today)
         summary_cards = {
             "closed_today": int((today_snapshot.get("metrics") or {}).get("closed_orders") or 0),
             "revenue_today_thb_text": str((today_snapshot.get("metrics") or {}).get("revenue_total_thb_text") or "0"),

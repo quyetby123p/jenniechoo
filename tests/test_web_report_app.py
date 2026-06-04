@@ -250,6 +250,7 @@ def test_dashboard_daily_revenue_uses_today_snapshot_not_selected_range(tmp_path
     assert "1,200,000 VNĐ" in html
     assert "19.98x" in html
     assert "77.75x" in html
+    assert any(start == date(2026, 2, 1) for start, end in service.calls if start != end)
 
 
 def test_status_page_shows_total_orders_and_total_revenue_summary(tmp_path: Path) -> None:
