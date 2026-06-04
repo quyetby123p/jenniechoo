@@ -186,7 +186,7 @@ def test_snapshot_supports_date_range_and_new_metrics(tmp_path: Path) -> None:
                 {
                     "match_result": "matched_unique",
                     "td_status": "SUCCESS",
-                    "pancake_display_id": "JCT301",
+                    "pancake_display_id": "JC-C1",
                     "td_awb": "AWB1",
                 }
             ],
@@ -561,7 +561,7 @@ def test_reconcile_received_td_status_only_mode_counts_td_rows(tmp_path: Path) -
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot["metrics"]["reconcile_received_orders"] == 2
-    assert snapshot["metrics"]["pending_reconcile_orders"] == 1
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 0
 
 
 def test_reconcile_received_includes_success_rows_without_pancake_ref(tmp_path: Path) -> None:
@@ -629,6 +629,66 @@ def test_reconcile_received_includes_success_rows_without_pancake_ref(tmp_path: 
     assert snapshot["metrics"]["reconcile_received_value_minor"] == 1_750_000
     assert snapshot["metrics"]["pending_reconcile_orders"] == 0
     assert {row["display_ref"] for row in rows} == {"JCT901", "AWB-NO-PANCAKE", "AWB-ZERO-COD"}
+
+
+def test_pending_reconcile_uses_delivered_orders_not_present_in_reconcile(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    run_path = settings.reconcile_cod_runs_dir / "run_2026-06-01_20260601T030000Z.json"
+    dump_json(
+        run_path,
+        {
+            "settlement_date": "2026-06-01",
+            "generated_at": "2026-06-01T03:00:00+00:00",
+            "records": [
+                {
+                    "match_result": "already_correct",
+                    "td_status": "SUCCESS",
+                    "td_awb": "AWB-DONE",
+                    "td_cod_minor": 100_000,
+                }
+            ],
+        },
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-DONE",
+                    "status": 3,
+                    "tracking_number": "AWB-DONE",
+                    "total_price": 100_000,
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-PENDING",
+                    "status": 3,
+                    "total_price": 200_000,
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-RETURNING",
+                    "status": 4,
+                    "total_price": 300_000,
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-SHIPPING",
+                    "status": 2,
+                    "total_price": 400_000,
+                    "items": [],
+                },
+            ]
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+    pending_refs = {row["pancake_order_ref"] for row in snapshot["status_lists"]["pending-reconcile"]}
+
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 2
+    assert snapshot["metrics"]["pending_reconcile_value_minor"] == 500_000
+    assert pending_refs == {"JC-PENDING", "JC-RETURNING"}
 
 
 def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) -> None:
@@ -848,5 +908,5 @@ def test_status_value_metrics_include_shipping_returning_and_reconcile(tmp_path:
     assert metrics["returning_value_minor"] == 180_000
     assert metrics["reconcile_received_orders"] == 2
     assert metrics["reconcile_received_value_minor"] == 570_000
-    assert metrics["pending_reconcile_orders"] == 0
-    assert metrics["pending_reconcile_value_minor"] == 0
+    assert metrics["pending_reconcile_orders"] == 1
+    assert metrics["pending_reconcile_value_minor"] == 180_000

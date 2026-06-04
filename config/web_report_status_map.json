@@ -27,6 +27,17 @@
     "dang giao",
     "shipping"
   ],
+  "pending_reconcile_order_status_codes": [
+    3,
+    4,
+    5
+  ],
+  "pending_reconcile_order_status_labels": [
+    "Đã nhận",
+    "Đang hoàn",
+    "Đã hoàn",
+    "Giao hàng thành công"
+  ],
   "pending_reconcile_match_results": [
     "not_found",
     "ambiguous",
