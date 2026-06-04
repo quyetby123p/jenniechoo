@@ -1202,10 +1202,19 @@ class WebReportService:
     def _order_reconcile_match_keys(self, *, order_ref: str, awb: str) -> set[str]:
         keys: set[str] = set()
         for value in (order_ref, awb):
-            normalized = self._normalize_text(str(value).strip())
-            if normalized:
-                keys.add(normalized)
+            keys.update(self._reconcile_ref_aliases(value))
         return keys
+
+    def _reconcile_ref_aliases(self, value: Any) -> set[str]:
+        normalized = self._normalize_text(str(value or "").strip())
+        if not normalized:
+            return set()
+        aliases = {normalized}
+        if normalized.startswith("jct") and normalized[3:].isdigit():
+            aliases.add(normalized[3:])
+        elif normalized.isdigit():
+            aliases.add(f"jct{normalized}")
+        return aliases
 
     def _extract_order_awb(self, order: dict[str, Any]) -> str:
         candidates: list[Any] = [

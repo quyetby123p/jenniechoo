@@ -645,6 +645,12 @@ def test_pending_reconcile_uses_delivered_orders_not_present_in_reconcile(tmp_pa
                     "td_status": "SUCCESS",
                     "td_awb": "AWB-DONE",
                     "td_cod_minor": 100_000,
+                },
+                {
+                    "match_result": "already_correct",
+                    "td_status": "SUCCESS",
+                    "pancake_display_id": "JCT349",
+                    "td_cod_minor": 500_000,
                 }
             ],
         },
@@ -665,6 +671,12 @@ def test_pending_reconcile_uses_delivered_orders_not_present_in_reconcile(tmp_pa
                     "display_id": "JC-PENDING",
                     "status": 3,
                     "total_price": 200_000,
+                    "items": [],
+                },
+                {
+                    "display_id": "349",
+                    "status": 3,
+                    "total_price": 500_000,
                     "items": [],
                 },
                 {
