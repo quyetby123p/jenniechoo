@@ -186,14 +186,17 @@ Phuong an free:
 Script tren can GitHub CLI (`gh`) va `gh auth login` truoc khi chay.
 
 5. Cloudflare Worker cron tu dispatch GitHub Actions theo lich:
-- Moi 30 phut: chay 1 batch `Pancake -> Thai Duong` neu `PANCAKE_TD_SYNC_ENABLED=1`.
-- 08:00 (Asia/Ho_Chi_Minh): gui daily report ngay hom qua.
-- 09:00: kiem tra token Meta/Thai Duong.
-- 15:00 thu 2 va thu 6: gui bao cao tien ve Thai Duong.
-- 15:00 thu 7: gui tong ket tien ve theo tuan.
-- 21:00: gui daily report ngay hom nay.
+- Local bot la scheduler chinh neu may dang bat. Khi local chay thanh cong, local goi Worker `/schedule/mark` de danh dau slot da xong.
+- Cloudflare Worker la backup +5 phut: neu khong thay marker local thi moi dispatch GitHub Actions.
+- Moi 30 phut: local sync truoc; cloud backup tai phut `:05/:35` cho batch `Pancake -> Thai Duong`.
+- 08:00 (Asia/Ho_Chi_Minh): local gui daily report ngay hom qua; cloud backup luc 08:05.
+- 09:00: local kiem tra token Meta/Thai Duong; cloud backup luc 09:05.
+- 15:00 thu 2 va thu 6: local gui bao cao tien ve Thai Duong; cloud backup luc 15:05.
+- 15:00 thu 7: local gui tong ket tien ve theo tuan; cloud backup luc 15:05.
+- 21:00: local gui daily report ngay hom nay; cloud backup luc 21:05.
 - Workflow co cache `state/` + storage runtime lien quan de giu cursor/lich su giua cac lan chay.
 - GitHub native `on.schedule` da tat de tranh delayed run cua GitHub gui bao cao sai khung gio.
+- Guard marker duoc luu vao GitHub Actions repository variable `LOCAL_SCHEDULE_MARKS`; neu Worker khong doc/ghi duoc variable thi fail-open de cloud van chay backup.
 
 Co the chay thu cong tren GitHub:
 - Vao `Actions` -> `free scheduled tasks` -> `Run workflow`.
@@ -227,6 +230,7 @@ Sau khi deploy, script se:
 - set Cloudflare Worker secrets;
 - deploy worker `fb-ads-telegram-dispatcher`;
 - set Telegram webhook den `/telegram/webhook`;
+- luu `CLOUD_SCHEDULE_GUARD_MARK_URL` va `CLOUD_SCHEDULE_GUARD_SECRET` vao `.env` local;
 - worker se dispatch update Telegram va cron schedule sang GitHub Actions `free-scheduled-tasks.yml`.
 
 Tuy chon:

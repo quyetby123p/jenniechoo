@@ -30,6 +30,7 @@ from app.command_parser import (
     try_parse_reconcile_cod_command,
     try_parse_report_command,
 )
+from app.cloud_schedule_guard import CloudScheduleGuardClient
 from app.daily_report_service import DailyReportService
 from app.dedup_service import DedupService
 from app.exceptions import CommandParseError, MetaApiError, ValidationError
@@ -63,6 +64,7 @@ class TelegramAdsBot:
     ) -> None:
         self.settings = settings
         self.logger = logger
+        self.cloud_schedule_guard = CloudScheduleGuardClient.from_env(logger=logger)
         self.storage = storage
         self.dedup = dedup
         self.meta = meta_client
@@ -1896,6 +1898,28 @@ class TelegramAdsBot:
             return label
         return label[:55] + "..."
 
+    async def _mark_cloud_schedule_completed(
+        self,
+        *,
+        task: str,
+        slot: str | None = None,
+        run_date: date | None = None,
+        bucket: str | None = None,
+    ) -> None:
+        await asyncio.to_thread(
+            self.cloud_schedule_guard.mark_completed,
+            task=task,
+            slot=slot,
+            run_date=run_date,
+            bucket=bucket,
+        )
+
+    def _current_pancake_td_sync_bucket(self) -> str:
+        now_local = datetime.now(self._resolve_timezone())
+        minute = 30 if now_local.minute >= 30 else 0
+        bucket_at = now_local.replace(minute=minute, second=0, microsecond=0)
+        return bucket_at.strftime("%Y-%m-%dT%H:%M")
+
     async def _token_health_monitor_loop(self) -> None:
         self.logger.info(
             "Bat token healthcheck scheduler: %02d:%02d (%s)",
@@ -1920,6 +1944,10 @@ class TelegramAdsBot:
                     f"({self.settings.token_healthcheck_hour:02d}:{self.settings.token_healthcheck_minute:02d})"
                 ),
                 notify_success=True,
+            )
+            await self._mark_cloud_schedule_completed(
+                task="token-health",
+                run_date=datetime.now(self._resolve_timezone()).date(),
             )
 
     async def _daily_report_monitor_loop(self) -> None:
@@ -1958,6 +1986,11 @@ class TelegramAdsBot:
                 all_delivered = all_delivered and bool(self._last_daily_report_send_ok)
             if all_delivered:
                 self._mark_daily_report_slot_sent(slot, run_date=run_date)
+                await self._mark_cloud_schedule_completed(
+                    task="daily-report",
+                    slot=slot,
+                    run_date=run_date,
+                )
             else:
                 self._mark_daily_report_slot_failed(slot, run_date=run_date)
                 self.logger.warning(
@@ -2001,22 +2034,27 @@ class TelegramAdsBot:
                 ",".join(slots) if slots else "none",
             )
             await asyncio.sleep(wait_seconds)
+            run_date = datetime.now(self._resolve_timezone()).date()
             if "cash_in" in slots:
-                await self._send_reconcile_cod_cash_in_report(
+                sent = await self._send_reconcile_cod_cash_in_report(
                     chat_id=notify_chat_id,
                     trigger_label=(
                         "Báo cáo tiền về tự động Thái Dương "
                         f"({self.settings.reconcile_cod_hour:02d}:{self.settings.reconcile_cod_minute:02d})"
                     ),
                 )
+                if sent:
+                    await self._mark_cloud_schedule_completed(task="reconcile-cash-in", run_date=run_date)
             if "weekly_summary" in slots:
-                await self._send_reconcile_cod_weekly_summary_report(
+                sent = await self._send_reconcile_cod_weekly_summary_report(
                     chat_id=notify_chat_id,
                     trigger_label=(
                         "Tổng tiền nhận tuần tự động Thái Dương "
                         f"({self.settings.reconcile_cod_hour:02d}:{self.settings.reconcile_cod_minute:02d})"
                     ),
                 )
+                if sent:
+                    await self._mark_cloud_schedule_completed(task="reconcile-weekly", run_date=run_date)
 
     async def _pancake_td_sync_monitor_loop(self) -> None:
         if not self.pancake_td_sync:
@@ -2038,6 +2076,10 @@ class TelegramAdsBot:
                 self.logger.exception("Pancake -> Thai Duong sync loop gap loi")
                 await asyncio.sleep(interval_seconds)
                 continue
+            await self._mark_cloud_schedule_completed(
+                task="pancake-td-sync",
+                bucket=self._current_pancake_td_sync_bucket(),
+            )
 
             should_notify = bool(report.get("notify"))
             if should_notify and self._bot:
@@ -2202,6 +2244,11 @@ class TelegramAdsBot:
             all_delivered = all_delivered and bool(self._last_daily_report_send_ok)
         if all_delivered:
             self._mark_daily_report_slot_sent("morning", run_date=run_date)
+            await self._mark_cloud_schedule_completed(
+                task="daily-report",
+                slot="morning",
+                run_date=run_date,
+            )
             self.logger.info("Da gui bu daily report buoi sang sau khoi dong lai bot.")
         else:
             self._mark_daily_report_slot_failed("morning", run_date=run_date)
@@ -2238,6 +2285,11 @@ class TelegramAdsBot:
                 all_delivered = all_delivered and bool(self._last_daily_report_send_ok)
             if all_delivered:
                 self._mark_daily_report_slot_sent(slot, run_date=pending_run_date)
+                await self._mark_cloud_schedule_completed(
+                    task="daily-report",
+                    slot=slot,
+                    run_date=pending_run_date,
+                )
                 self.logger.info("Da gui lai daily report slot %s bi pending (%s).", slot, pending_run_date.isoformat())
             else:
                 self._mark_daily_report_slot_failed(slot, run_date=pending_run_date)
@@ -2513,9 +2565,9 @@ class TelegramAdsBot:
             self._last_daily_report_send_ok = False
         return report
 
-    async def _send_reconcile_cod_cash_in_report(self, *, chat_id: int, trigger_label: str) -> None:
+    async def _send_reconcile_cod_cash_in_report(self, *, chat_id: int, trigger_label: str) -> bool:
         if not self._bot or not self.reconcile:
-            return
+            return False
         try:
             report = await asyncio.to_thread(self.reconcile.generate_report, None)
             summary = await asyncio.to_thread(self.reconcile.summarize_cash_in_from_report, report)
@@ -2529,12 +2581,14 @@ class TelegramAdsBot:
             )
         try:
             await self._bot.send_message(chat_id=chat_id, text=text)
+            return True
         except Exception:  # noqa: BLE001
             self.logger.exception("Gui bao cao tien ve tu dong qua Telegram that bai")
+            return False
 
-    async def _send_reconcile_cod_weekly_summary_report(self, *, chat_id: int, trigger_label: str) -> None:
+    async def _send_reconcile_cod_weekly_summary_report(self, *, chat_id: int, trigger_label: str) -> bool:
         if not self._bot or not self.reconcile:
-            return
+            return False
         try:
             weekly = await asyncio.to_thread(self.reconcile.build_weekly_cash_in_summary)
             text = self._build_reconcile_weekly_cash_in_message(weekly=weekly, trigger_label=trigger_label)
@@ -2547,8 +2601,10 @@ class TelegramAdsBot:
             )
         try:
             await self._bot.send_message(chat_id=chat_id, text=text)
+            return True
         except Exception:  # noqa: BLE001
             self.logger.exception("Gui bao cao tong tuan tu dong qua Telegram that bai")
+            return False
 
     def _build_reconcile_cash_in_message(self, *, summary: dict[str, Any], trigger_label: str) -> str:
         settlement_date = str(summary.get("settlement_date", "")).strip()
