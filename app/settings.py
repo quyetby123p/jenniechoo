@@ -44,6 +44,9 @@ class Settings:
     report_thb_to_vnd_rate: float
     report_thb_minor_unit_factor: int
     daily_report_notify_chat_id: int = 0
+    daily_report_task_summary_enabled: bool = True
+    daily_report_task_summary_max_items: int = 5
+    daily_report_task_db_path: str = "storage/assistant_bot/tasks.db"
     reconcile_cod_enabled: bool = False
     reconcile_cod_auto_enabled: bool = False
     reconcile_cod_hour: int = 15
@@ -215,6 +218,14 @@ class Settings:
             return path
         return self.project_root / path
 
+    @property
+    def daily_report_task_db_file(self) -> Path:
+        raw = str(self.daily_report_task_db_path).strip()
+        path = Path(raw) if raw else Path("storage/assistant_bot/tasks.db")
+        if path.is_absolute():
+            return path
+        return self.project_root / path
+
 
 def _require_env(key: str) -> str:
     value = os.getenv(key, "").strip()
@@ -366,6 +377,20 @@ def load_settings(project_root: Path | None = None) -> Settings:
         os.getenv("DAILY_REPORT_NOTIFY_CHAT_ID", ""),
         default=0,
     )
+    daily_report_task_summary_enabled = _parse_bool(
+        os.getenv("DAILY_REPORT_TASK_SUMMARY_ENABLED", "1"),
+        default=True,
+    )
+    daily_report_task_summary_max_items = _parse_int_with_range(
+        os.getenv("DAILY_REPORT_TASK_SUMMARY_MAX_ITEMS", "5"),
+        default=5,
+        min_value=1,
+        max_value=20,
+    )
+    daily_report_task_db_path = os.getenv(
+        "DAILY_REPORT_TASK_DB_PATH",
+        os.getenv("BOT3_TASK_DB_PATH", "storage/assistant_bot/tasks.db"),
+    ).strip()
     pancake_api_base_url = os.getenv("PANCAKE_API_BASE_URL", "https://pos.pancake.vn/api/v1").strip().rstrip("/")
     pancake_api_key = os.getenv("PANCAKE_API_KEY", "").strip()
     pancake_access_token = os.getenv("PANCAKE_ACCESS_TOKEN", "").strip()
@@ -591,6 +616,9 @@ def load_settings(project_root: Path | None = None) -> Settings:
         report_thb_to_vnd_rate=report_thb_to_vnd_rate,
         report_thb_minor_unit_factor=report_thb_minor_unit_factor,
         daily_report_notify_chat_id=daily_report_notify_chat_id,
+        daily_report_task_summary_enabled=daily_report_task_summary_enabled,
+        daily_report_task_summary_max_items=daily_report_task_summary_max_items,
+        daily_report_task_db_path=daily_report_task_db_path,
         reconcile_cod_enabled=reconcile_cod_enabled,
         reconcile_cod_auto_enabled=reconcile_cod_auto_enabled,
         reconcile_cod_hour=reconcile_cod_hour,

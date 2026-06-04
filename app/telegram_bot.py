@@ -35,6 +35,7 @@ from app.command_parser import (
 )
 from app.cloud_schedule_guard import CloudScheduleGuardClient
 from app.daily_report_service import DailyReportService
+from app.daily_task_summary_service import DailyTaskSummaryService
 from app.dedup_service import DedupService
 from app.exceptions import CommandParseError, MetaApiError, ValidationError
 from app.meta_ads_client import MetaAdsClient
@@ -63,6 +64,7 @@ class TelegramAdsBot:
         daily_report_service: DailyReportService,
         approval_service: ApprovalService,
         rollback_service: RollbackService,
+        daily_task_summary_service: DailyTaskSummaryService | None = None,
         reconcile_cod_service: ReconcileCodService | None = None,
         reconcile_cod_sheet_service: ReconcileCodSheetService | None = None,
         pancake_td_sync_service: PancakeToThaiDuongSyncService | None = None,
@@ -75,6 +77,7 @@ class TelegramAdsBot:
         self.dedup = dedup
         self.meta = meta_client
         self.reports = daily_report_service
+        self.daily_task_summary = daily_task_summary_service
         self.reconcile = reconcile_cod_service
         self.reconcile_sheet = reconcile_cod_sheet_service
         self.pancake_td_sync = pancake_td_sync_service
@@ -2078,6 +2081,7 @@ class TelegramAdsBot:
                     notify_success=True,
                     report_payload=report_payload,
                     include_recent_rollups=(slot == "morning" and self._is_report_group_chat(chat_id)),
+                    include_task_summary=(slot == "evening"),
                 )
                 all_delivered = all_delivered and bool(self._last_daily_report_send_ok)
             if all_delivered:
@@ -2263,7 +2267,7 @@ class TelegramAdsBot:
                 self.settings.daily_report_minute,
             ), "morning"
         delta = next_run - now_local
-        return max(1, int(delta.total_seconds())), next_slot
+        return max(1, math.ceil(delta.total_seconds())), next_slot
 
     def _seconds_until_next_reconcile_schedule(self) -> tuple[int, list[str]]:
         tzinfo = self._resolve_timezone()
@@ -2298,7 +2302,7 @@ class TelegramAdsBot:
         next_run = min(item[0] for item in candidates)
         slots = sorted({slot for run_at, slot in candidates if run_at == next_run})
         delta = next_run - now_local
-        return max(1, int(delta.total_seconds())), slots
+        return max(1, math.ceil(delta.total_seconds())), slots
 
     @staticmethod
     def _next_scheduled_weekday_run(
@@ -2348,6 +2352,7 @@ class TelegramAdsBot:
                 notify_success=True,
                 report_payload=report_payload,
                 include_recent_rollups=self._is_report_group_chat(chat_id),
+                include_task_summary=False,
             )
             all_delivered = all_delivered and bool(self._last_daily_report_send_ok)
         if all_delivered:
@@ -2393,6 +2398,7 @@ class TelegramAdsBot:
                     notify_success=True,
                     report_payload=report_payload,
                     include_recent_rollups=(slot == "morning" and self._is_report_group_chat(chat_id)),
+                    include_task_summary=(slot == "evening"),
                 )
                 all_delivered = all_delivered and bool(self._last_daily_report_send_ok)
             if all_delivered:
@@ -2431,6 +2437,13 @@ class TelegramAdsBot:
         state.pop(f"{normalized_slot}_pending_run_date", None)
         state.pop(f"{normalized_slot}_last_failed_at", None)
         self._save_daily_report_scheduler_state(state)
+
+    def _daily_report_slot_already_sent(self, slot: str, run_date: date) -> bool:
+        normalized_slot = str(slot).strip().lower()
+        if normalized_slot not in {"morning", "evening"}:
+            return False
+        state = self._load_daily_report_scheduler_state()
+        return str(state.get(f"{normalized_slot}_last_sent_run_date", "")).strip() == run_date.isoformat()
 
     def _mark_daily_report_slot_failed(self, slot: str, run_date: date | None = None) -> None:
         normalized_slot = str(slot).strip().lower()
@@ -2509,7 +2522,7 @@ class TelegramAdsBot:
         if next_run <= now_local:
             next_run = next_run + timedelta(days=1)
         delta = next_run - now_local
-        return max(1, int(delta.total_seconds()))
+        return max(1, math.ceil(delta.total_seconds()))
 
     def _resolve_timezone(self) -> timezone | ZoneInfo:
         try:
@@ -2632,6 +2645,7 @@ class TelegramAdsBot:
         notify_success: bool,
         report_payload: dict[str, Any] | None = None,
         include_recent_rollups: bool = False,
+        include_task_summary: bool = False,
     ) -> dict[str, Any] | None:
         if not self._bot:
             return report_payload
@@ -2670,6 +2684,14 @@ class TelegramAdsBot:
             )
             if rollup_text:
                 text = text + "\n\n" + rollup_text
+        if include_task_summary and self.settings.daily_report_task_summary_enabled:
+            target_date = self._extract_report_date(report=report, fallback=report_date)
+            task_text = await asyncio.to_thread(
+                self._build_daily_task_summary_text_sync,
+                target_date,
+            )
+            if task_text:
+                text = text + "\n\n" + task_text
         try:
             await self._bot.send_message(chat_id=chat_id, text=text)
             self._last_daily_report_send_ok = True
@@ -2677,6 +2699,19 @@ class TelegramAdsBot:
             self.logger.exception("Gui bao cao ngay qua Telegram that bai")
             self._last_daily_report_send_ok = False
         return report
+
+    def _build_daily_task_summary_text_sync(self, target_date: date | None) -> str:
+        if not self.daily_task_summary:
+            return ""
+        try:
+            summary = self.daily_task_summary.build_summary(target_date)
+            return self.daily_task_summary.build_message(summary)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.exception("Tong hop task cuoi ngay that bai")
+            return "Task công việc cuối ngày:\n- Không tổng hợp được task công việc: " + self._short_error(
+                str(exc),
+                max_len=180,
+            )
 
     async def _send_reconcile_cod_cash_in_report(self, *, chat_id: int, trigger_label: str) -> bool:
         if not self._bot or not self.reconcile:

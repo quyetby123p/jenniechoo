@@ -113,6 +113,27 @@ class AssistantTaskService:
             row = conn.execute("SELECT * FROM tasks WHERE task_uid = ? LIMIT 1", (value,)).fetchone()
         return _row_to_dict(row)
 
+    def list_tasks_by_uids(self, task_uids: list[str]) -> list[dict[str, Any]]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in task_uids:
+            value = _clean_text(item)
+            if not value or value in seen:
+                continue
+            cleaned.append(value)
+            seen.add(value)
+        if not cleaned:
+            return []
+        placeholders = ",".join("?" for _ in cleaned)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"SELECT * FROM tasks WHERE task_uid IN ({placeholders})",
+                cleaned,
+            ).fetchall()
+        by_uid = {str(row["task_uid"]): _row_to_dict(row) for row in rows if row is not None}
+        return [by_uid[item] for item in cleaned if item in by_uid]
+
     def list_tasks(self, *, status: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         normalized_status = _normalize_status(status) if status else ""
         safe_limit = max(1, min(100, int(limit)))

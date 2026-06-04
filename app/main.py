@@ -9,6 +9,7 @@ import time
 
 from app.approval_service import ApprovalService
 from app.daily_report_service import DailyReportService
+from app.daily_task_summary_service import DailyTaskSummaryService
 from app.dedup_service import DedupService
 from app.instance_lock import single_instance_lock
 from app.logger import configure_logger
@@ -164,6 +165,7 @@ async def run_bot() -> None:
         pancake_client=pancake,
         meta_client=meta,
     )
+    daily_task_summary = DailyTaskSummaryService(settings=settings, logger=logger)
     reconcile = ReconcileCodService(
         settings=settings,
         logger=logger,
@@ -190,6 +192,7 @@ async def run_bot() -> None:
         dedup=dedup,
         meta_client=meta,
         daily_report_service=reports,
+        daily_task_summary_service=daily_task_summary,
         reconcile_cod_service=reconcile,
         reconcile_cod_sheet_service=reconcile_sheet,
         pancake_td_sync_service=pancake_td_sync,

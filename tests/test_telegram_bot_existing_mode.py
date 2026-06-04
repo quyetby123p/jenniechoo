@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 from app.approval_service import ApprovalService
 from app.exceptions import MetaApiError, ValidationError
@@ -1689,7 +1690,7 @@ def test_daily_report_scheduler_sends_to_personal_and_group_chat() -> None:
         daily_report_notify_chat_id=-1001234567890,
     )
 
-    captured_calls: list[tuple[int, bool]] = []
+    captured_calls: list[tuple[int, bool, bool]] = []
 
     async def _capture_send_daily_report(
         *,
@@ -1699,8 +1700,9 @@ def test_daily_report_scheduler_sends_to_personal_and_group_chat() -> None:
         notify_success: bool,  # noqa: ARG001
         report_payload: dict[str, Any] | None = None,  # noqa: ARG001
         include_recent_rollups: bool = False,
+        include_task_summary: bool = False,
     ) -> dict[str, Any]:
-        captured_calls.append((chat_id, include_recent_rollups))
+        captured_calls.append((chat_id, include_recent_rollups, include_task_summary))
         if len(captured_calls) >= 2:
             raise asyncio.CancelledError()
         return {"ok": True, "partial": False}
@@ -1711,13 +1713,14 @@ def test_daily_report_scheduler_sends_to_personal_and_group_chat() -> None:
     bot._send_missed_morning_daily_report_on_startup = (  # type: ignore[method-assign]
         lambda *_args, **_kwargs: asyncio.sleep(0)
     )
+    bot._daily_report_slot_already_sent = lambda *_args, **_kwargs: False  # type: ignore[method-assign]
 
     try:
         asyncio.run(bot._daily_report_monitor_loop())
     except asyncio.CancelledError:
         pass
 
-    assert captured_calls == [(778899, False), (-1001234567890, True)]
+    assert captured_calls == [(778899, False, False), (-1001234567890, True, False)]
 
 
 def test_daily_report_scheduler_falls_back_to_allowed_user_id() -> None:
@@ -1731,7 +1734,7 @@ def test_daily_report_scheduler_falls_back_to_allowed_user_id() -> None:
         daily_report_notify_chat_id=0,
     )
 
-    captured_calls: list[tuple[int, bool]] = []
+    captured_calls: list[tuple[int, bool, bool]] = []
 
     async def _capture_send_daily_report(
         *,
@@ -1741,8 +1744,9 @@ def test_daily_report_scheduler_falls_back_to_allowed_user_id() -> None:
         notify_success: bool,  # noqa: ARG001
         report_payload: dict[str, Any] | None = None,  # noqa: ARG001
         include_recent_rollups: bool = False,
+        include_task_summary: bool = False,
     ) -> dict[str, Any]:
-        captured_calls.append((chat_id, include_recent_rollups))
+        captured_calls.append((chat_id, include_recent_rollups, include_task_summary))
         raise asyncio.CancelledError()
 
     bot._seconds_until_next_daily_report_schedule = lambda: (1, "evening")  # type: ignore[method-assign]
@@ -1751,13 +1755,14 @@ def test_daily_report_scheduler_falls_back_to_allowed_user_id() -> None:
     bot._send_missed_morning_daily_report_on_startup = (  # type: ignore[method-assign]
         lambda *_args, **_kwargs: asyncio.sleep(0)
     )
+    bot._daily_report_slot_already_sent = lambda *_args, **_kwargs: False  # type: ignore[method-assign]
 
     try:
         asyncio.run(bot._daily_report_monitor_loop())
     except asyncio.CancelledError:
         pass
 
-    assert captured_calls == [(778899, False)]
+    assert captured_calls == [(778899, False, True)]
 
 
 def test_daily_report_scheduler_evening_group_does_not_include_rollups() -> None:
@@ -1771,7 +1776,7 @@ def test_daily_report_scheduler_evening_group_does_not_include_rollups() -> None
         daily_report_notify_chat_id=-1001234567890,
     )
 
-    captured_calls: list[tuple[int, bool]] = []
+    captured_calls: list[tuple[int, bool, bool]] = []
 
     async def _capture_send_daily_report(
         *,
@@ -1781,8 +1786,9 @@ def test_daily_report_scheduler_evening_group_does_not_include_rollups() -> None
         notify_success: bool,  # noqa: ARG001
         report_payload: dict[str, Any] | None = None,  # noqa: ARG001
         include_recent_rollups: bool = False,
+        include_task_summary: bool = False,
     ) -> dict[str, Any]:
-        captured_calls.append((chat_id, include_recent_rollups))
+        captured_calls.append((chat_id, include_recent_rollups, include_task_summary))
         if len(captured_calls) >= 2:
             raise asyncio.CancelledError()
         return {"ok": True, "partial": False}
@@ -1793,13 +1799,43 @@ def test_daily_report_scheduler_evening_group_does_not_include_rollups() -> None
     bot._send_missed_morning_daily_report_on_startup = (  # type: ignore[method-assign]
         lambda *_args, **_kwargs: asyncio.sleep(0)
     )
+    bot._daily_report_slot_already_sent = lambda *_args, **_kwargs: False  # type: ignore[method-assign]
 
     try:
         asyncio.run(bot._daily_report_monitor_loop())
     except asyncio.CancelledError:
         pass
 
-    assert captured_calls == [(778899, False), (-1001234567890, False)]
+    assert captured_calls == [(778899, False, True), (-1001234567890, False, True)]
+
+
+def test_daily_report_schedule_ceil_waits_until_evening_boundary() -> None:
+    meta = FakeMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001
+            return cls(2026, 6, 3, 20, 59, 57, 100000, tzinfo=tz)
+
+    with patch.object(telegram_bot_module, "datetime", _FixedDateTime):
+        wait_seconds, slot = bot._seconds_until_next_daily_report_schedule()
+
+    assert slot == "evening"
+    assert wait_seconds == 3
+
+
+def test_daily_report_slot_already_sent_checks_run_date() -> None:
+    meta = FakeMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+    bot._load_daily_report_scheduler_state = lambda: {"evening_last_sent_run_date": "2026-06-03"}  # type: ignore[method-assign]
+
+    assert bot._daily_report_slot_already_sent("evening", date(2026, 6, 3)) is True
+    assert bot._daily_report_slot_already_sent("evening", date(2026, 6, 4)) is False
 
 
 def test_send_missed_morning_daily_report_on_startup_sends_to_personal_and_group() -> None:
@@ -1813,7 +1849,7 @@ def test_send_missed_morning_daily_report_on_startup_sends_to_personal_and_group
         daily_report_notify_chat_id=-1001234567890,
     )
 
-    captured_calls: list[tuple[int, bool]] = []
+    captured_calls: list[tuple[int, bool, bool]] = []
     marked_slots: list[str] = []
 
     async def _capture_send_daily_report(
@@ -1824,8 +1860,9 @@ def test_send_missed_morning_daily_report_on_startup_sends_to_personal_and_group
         notify_success: bool,  # noqa: ARG001
         report_payload: dict[str, Any] | None = None,  # noqa: ARG001
         include_recent_rollups: bool = False,
+        include_task_summary: bool = False,
     ) -> dict[str, Any]:
-        captured_calls.append((chat_id, include_recent_rollups))
+        captured_calls.append((chat_id, include_recent_rollups, include_task_summary))
         return {"ok": True, "partial": False}
 
     bot._send_daily_report = _capture_send_daily_report  # type: ignore[method-assign]
@@ -1835,7 +1872,7 @@ def test_send_missed_morning_daily_report_on_startup_sends_to_personal_and_group
 
     asyncio.run(bot._send_missed_morning_daily_report_on_startup([778899, -1001234567890]))  # noqa: SLF001
 
-    assert captured_calls == [(778899, False), (-1001234567890, True)]
+    assert captured_calls == [(778899, False, False), (-1001234567890, True, False)]
     assert marked_slots == ["morning"]
 
 
@@ -1875,7 +1912,7 @@ def test_retry_pending_daily_reports_on_startup_sends_pending_evening() -> None:
         daily_report_notify_chat_id=-1001234567890,
     )
 
-    captured_calls: list[tuple[int, bool, date | None]] = []
+    captured_calls: list[tuple[int, bool, bool, date | None]] = []
     marked_sent: list[tuple[str, str]] = []
 
     async def _capture_send_daily_report(
@@ -1886,8 +1923,9 @@ def test_retry_pending_daily_reports_on_startup_sends_pending_evening() -> None:
         notify_success: bool,  # noqa: ARG001
         report_payload: dict[str, Any] | None = None,  # noqa: ARG001
         include_recent_rollups: bool = False,
+        include_task_summary: bool = False,
     ) -> dict[str, Any]:
-        captured_calls.append((chat_id, include_recent_rollups, report_date))
+        captured_calls.append((chat_id, include_recent_rollups, include_task_summary, report_date))
         return {"ok": True, "partial": False}
 
     bot._send_daily_report = _capture_send_daily_report  # type: ignore[method-assign]
@@ -1901,8 +1939,8 @@ def test_retry_pending_daily_reports_on_startup_sends_pending_evening() -> None:
     asyncio.run(bot._retry_pending_daily_reports_on_startup([778899, -1001234567890]))  # noqa: SLF001
 
     assert captured_calls == [
-        (778899, False, date(2026, 5, 27)),
-        (-1001234567890, False, date(2026, 5, 27)),
+        (778899, False, True, date(2026, 5, 27)),
+        (-1001234567890, False, True, date(2026, 5, 27)),
     ]
     assert marked_sent == [("evening", "2026-05-27")]
 
@@ -1949,6 +1987,45 @@ def test_send_daily_report_appends_rollup_text_only_when_enabled() -> None:
 
     assert bot._bot.messages[0]["text"] == "BASE\n\nROLLUP 3D7D"
     assert bot._bot.messages[1]["text"] == "BASE"
+
+
+def test_send_daily_report_appends_task_summary_when_enabled() -> None:
+    meta = FakeMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+    bot._bot = FakeBot()
+    base_report = {
+        "ok": True,
+        "partial": False,
+        "report_date": "2026-06-04",
+        "generated_at": "2026-06-04T12:00:00+00:00",
+        "pos": {},
+        "ads": {},
+    }
+    captured_dates: list[date | None] = []
+    bot.reports = SimpleNamespace(
+        generate_report=lambda *_args, **_kwargs: dict(base_report),
+        default_report_date=lambda: date(2026, 6, 4),
+        build_message=lambda *_args, **_kwargs: "BASE",
+    )
+    bot.daily_task_summary = SimpleNamespace(
+        build_summary=lambda target_date: captured_dates.append(target_date) or {"available": True},
+        build_message=lambda _summary: "TASK SUMMARY",
+    )
+
+    asyncio.run(
+        bot._send_daily_report(
+            chat_id=-5153224852,
+            trigger_label="Báo cáo tự động buổi tối",
+            report_date=date(2026, 6, 4),
+            notify_success=True,
+            include_task_summary=True,
+        )
+    )
+
+    assert bot._bot.messages[0]["text"] == "BASE\n\nTASK SUMMARY"
+    assert captured_dates == [date(2026, 6, 4)]
 
 
 def test_daily_report_target_chat_ids_include_source_personal_and_group() -> None:
