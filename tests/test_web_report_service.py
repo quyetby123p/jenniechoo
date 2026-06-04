@@ -8,10 +8,12 @@ from app.web_report_service import WebReportService
 
 
 class _FakePancakeClient:
-    def __init__(self, orders: list[dict], aggs: dict | None = None):
+    def __init__(self, orders: list[dict], aggs: dict | None = None, details: dict[str, dict] | None = None):
         self._orders = orders
         self._aggs = aggs or {}
+        self._details = details or {}
         self.fetch_count = 0
+        self.detail_calls: list[str] = []
 
     def fetch_all_orders_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
         self.fetch_count += 1
@@ -23,6 +25,10 @@ class _FakePancakeClient:
             "orders": self._orders,
             "aggs": self._aggs,
         }
+
+    def get_order_detail(self, order_id: str):  # noqa: ANN001
+        self.detail_calls.append(str(order_id))
+        return self._details.get(str(order_id), {})
 
 
 class _FakeMetaClient:
@@ -723,6 +729,62 @@ def test_pending_reconcile_requires_cashflow_missing_and_pancake_status_unmapped
     assert pending_refs == {"JCT-PENDING", "JCT-RETURN-PENDING"}
 
 
+def test_pending_reconcile_uses_current_pancake_status_for_stale_reconcile_runs(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+    config_root.mkdir(parents=True, exist_ok=True)
+    status_map_path = config_root / "custom_status_map.json"
+    dump_json(
+        status_map_path,
+        {
+            "pending_reconcile_mode": "td_success_not_in_cashflow",
+            "pending_reconcile_td_success_statuses": ["RETURNED"],
+            "pending_reconcile_td_to_pancake_status_codes": {"RETURNED": [3, 4, 5]},
+            "brand_rules": [],
+        },
+    )
+    settings = _dummy_settings(tmp_path, web_report_status_map_path=str(status_map_path))
+    run_path = settings.reconcile_cod_runs_dir / "run_2026-06-01_20260601T030000Z.json"
+    dump_json(
+        run_path,
+        {
+            "settlement_date": "2026-06-01",
+            "generated_at": "2026-06-01T03:00:00+00:00",
+            "records": [
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "RETURNED",
+                    "td_sheet_cod_minor": 0,
+                    "td_cod_minor": 445_000,
+                    "pancake_order_id": "270229017331761",
+                    "pancake_display_id": "JCT289",
+                    # Stale status from an older reconcile run.
+                    "pancake_status": 2,
+                }
+            ],
+        },
+    )
+    fake_pancake = _FakePancakeClient(
+        [],
+        details={
+            "270229017331761": {
+                "id": "270229017331761",
+                "display_id": "JCT289",
+                "status": 4,
+            }
+        },
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=fake_pancake,
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 0
+    assert fake_pancake.detail_calls == ["270229017331761"]
+
+
 def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) -> None:
     config_root = tmp_path / "config"
     config_root.mkdir(parents=True, exist_ok=True)
@@ -940,5 +1002,5 @@ def test_status_value_metrics_include_shipping_returning_and_reconcile(tmp_path:
     assert metrics["returning_value_minor"] == 180_000
     assert metrics["reconcile_received_orders"] == 2
     assert metrics["reconcile_received_value_minor"] == 570_000
-    assert metrics["pending_reconcile_orders"] == 0
-    assert metrics["pending_reconcile_value_minor"] == 0
+    assert metrics["pending_reconcile_orders"] == 1
+    assert metrics["pending_reconcile_value_minor"] == 220_000

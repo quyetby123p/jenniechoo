@@ -89,6 +89,7 @@ class WebReportService:
         size_totals: dict[str, int] = {}
         missing_products: set[str] = set()
         order_value_minor_by_ref: dict[str, int] = {}
+        pancake_status_code_by_ref: dict[str, int] = {}
 
         waiting_orders: list[dict[str, Any]] = []
         returning_orders: list[dict[str, Any]] = []
@@ -106,6 +107,11 @@ class WebReportService:
                 status_code=order_status_code,
                 status_code_labels=status_code_labels,
             )
+            if order_status_code is not None:
+                for ref in self._extract_order_identity_refs(order, fallback_ref=order_ref):
+                    normalized_ref_key = self._normalize_text(ref)
+                    if normalized_ref_key:
+                        pancake_status_code_by_ref[normalized_ref_key] = order_status_code
             order_total_minor = self._extract_order_total_minor(order)
             order_value_total_minor += order_total_minor
             normalized_order_ref = self._normalize_text(order_ref)
@@ -287,6 +293,7 @@ class WebReportService:
             start_date=start_date,
             end_date=end_date,
             status_cfg=status_cfg,
+            pancake_status_code_by_ref=pancake_status_code_by_ref,
         )
         pending_reconcile = reconcile_summary.get("pending_rows", [])
         reconcile_received = reconcile_summary.get("received_rows", [])
@@ -523,6 +530,7 @@ class WebReportService:
         start_date: date,
         end_date: date,
         status_cfg: dict[str, Any],
+        pancake_status_code_by_ref: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         pending_states = self._to_text_set(
             status_cfg.get("pending_reconcile_match_results", ["not_found", "ambiguous", "unmapped_status"])
@@ -548,6 +556,8 @@ class WebReportService:
         received_rows: list[dict[str, Any]] = []
         pending_refs: set[str] = set()
         received_refs: set[str] = set()
+        pancake_detail_status_cache: dict[str, int | None] = {}
+        current_pancake_status_by_ref = pancake_status_code_by_ref if isinstance(pancake_status_code_by_ref, dict) else {}
 
         for settlement_date in self._iter_dates(start_date, end_date):
             run_payload = self._load_latest_reconcile_run_for_date(settlement_date)
@@ -577,6 +587,8 @@ class WebReportService:
                     pending_mode=pending_mode,
                     pending_td_success_statuses=pending_td_success_statuses,
                     pending_td_to_pancake_status_codes=pending_td_to_pancake_status_codes,
+                    pancake_status_code_by_ref=current_pancake_status_by_ref,
+                    pancake_detail_status_cache=pancake_detail_status_cache,
                 )
                 if is_pending:
                     pending_rows.append(row)
@@ -623,6 +635,8 @@ class WebReportService:
         pending_mode: str,
         pending_td_success_statuses: set[str],
         pending_td_to_pancake_status_codes: dict[str, set[int]],
+        pancake_status_code_by_ref: dict[str, int],
+        pancake_detail_status_cache: dict[str, int | None],
     ) -> bool:
         if pending_mode == "td_success_not_in_cashflow":
             if not self._has_pancake_mapping(record, match_result=match_result):
@@ -639,6 +653,8 @@ class WebReportService:
                 record,
                 td_status=td_status,
                 td_to_pancake_status_codes=pending_td_to_pancake_status_codes,
+                pancake_status_code_by_ref=pancake_status_code_by_ref,
+                pancake_detail_status_cache=pancake_detail_status_cache,
             ):
                 return False
             return True
@@ -663,14 +679,60 @@ class WebReportService:
         *,
         td_status: str,
         td_to_pancake_status_codes: dict[str, set[int]],
+        pancake_status_code_by_ref: dict[str, int],
+        pancake_detail_status_cache: dict[str, int | None],
     ) -> bool:
         expected_status_codes = td_to_pancake_status_codes.get(td_status, set())
         if not expected_status_codes:
             return False
-        pancake_status_code = self._to_optional_int(record.get("pancake_status"))
+        pancake_status_code = self._resolve_current_pancake_status_code(
+            record,
+            pancake_status_code_by_ref=pancake_status_code_by_ref,
+            pancake_detail_status_cache=pancake_detail_status_cache,
+        )
+        if pancake_status_code is None:
+            pancake_status_code = self._to_optional_int(record.get("pancake_status"))
         if pancake_status_code is None:
             return False
         return pancake_status_code in expected_status_codes
+
+    def _resolve_current_pancake_status_code(
+        self,
+        record: dict[str, Any],
+        *,
+        pancake_status_code_by_ref: dict[str, int],
+        pancake_detail_status_cache: dict[str, int | None],
+    ) -> int | None:
+        for ref in self._extract_record_pancake_identity_refs(record):
+            normalized_ref = self._normalize_text(ref)
+            if normalized_ref in pancake_status_code_by_ref:
+                return pancake_status_code_by_ref[normalized_ref]
+
+        order_id = str(record.get("pancake_order_id", "")).strip()
+        normalized_order_id = self._normalize_text(order_id)
+        if not normalized_order_id:
+            return None
+        if normalized_order_id not in pancake_detail_status_cache:
+            pancake_detail_status_cache[normalized_order_id] = self._fetch_current_pancake_order_status(order_id)
+        status_code = pancake_detail_status_cache.get(normalized_order_id)
+        if status_code is not None:
+            for ref in self._extract_record_pancake_identity_refs(record):
+                normalized_ref = self._normalize_text(ref)
+                if normalized_ref:
+                    pancake_status_code_by_ref[normalized_ref] = status_code
+        return status_code
+
+    def _fetch_current_pancake_order_status(self, order_id: str) -> int | None:
+        if not hasattr(self.pancake, "get_order_detail"):
+            return None
+        try:
+            order = self.pancake.get_order_detail(order_id)  # type: ignore[attr-defined]
+        except Exception as exc:  # pragma: no cover - defensive for live API hiccups.
+            self.logger.warning("Không lấy được trạng thái Pancake hiện tại cho order_id=%s: %s", order_id, exc)
+            return None
+        if not isinstance(order, dict):
+            return None
+        return self._extract_status_code(order)
 
     def _normalize_td_to_pancake_status_map(self, value: Any) -> dict[str, set[int]]:
         default_map: dict[str, set[int]] = {
@@ -706,6 +768,14 @@ class WebReportService:
         pancake_display_id = str(record.get("pancake_display_id", "")).strip()
         pancake_order_id = str(record.get("pancake_order_id", "")).strip()
         return bool(pancake_display_id or pancake_order_id)
+
+    def _extract_record_pancake_identity_refs(self, record: dict[str, Any]) -> list[str]:
+        return self._dedupe_text_refs(
+            [
+                record.get("pancake_display_id"),
+                record.get("pancake_order_id"),
+            ]
+        )
 
     def _build_reconcile_row(self, record: dict[str, Any], match_result: str) -> dict[str, Any]:
         ref = str(record.get("pancake_display_id", "")).strip() or str(record.get("pancake_order_id", "")).strip()
@@ -835,6 +905,33 @@ class WebReportService:
             if text:
                 return text
         return ""
+
+    def _extract_order_identity_refs(self, order: dict[str, Any], *, fallback_ref: str = "") -> list[str]:
+        return self._dedupe_text_refs(
+            [
+                fallback_ref,
+                order.get("display_id"),
+                order.get("code"),
+                order.get("order_code"),
+                order.get("order_id"),
+                order.get("id"),
+            ]
+        )
+
+    @staticmethod
+    def _dedupe_text_refs(values: list[Any]) -> list[str]:
+        refs: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = str(value or "").strip()
+            if not text:
+                continue
+            normalized = WebReportService._normalize_text(text)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            refs.append(text)
+        return refs
 
     def _extract_status_code(self, order: dict[str, Any]) -> int | None:
         raw = order.get("status")
