@@ -2661,7 +2661,10 @@ class TelegramAdsBot:
         if not self._bot or not self.reconcile:
             return False
         try:
-            report = await asyncio.to_thread(self.reconcile.generate_report, None)
+            report = await asyncio.to_thread(self.reconcile.generate_report_if_settlement_exists, None)
+            if report is None:
+                self.logger.info("Bo qua bao cao tien ve tu dong vi hom nay khong co ky doi soat Thai Duong")
+                return True
             summary = await asyncio.to_thread(self.reconcile.summarize_cash_in_from_report, report)
             text = self._build_reconcile_cash_in_message(summary=summary, trigger_label=trigger_label)
         except Exception as exc:  # noqa: BLE001

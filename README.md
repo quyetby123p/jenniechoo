@@ -191,7 +191,7 @@ Script tren can GitHub CLI (`gh`) va `gh auth login` truoc khi chay.
 - Moi 30 phut: local sync truoc; cloud backup tai phut `:05/:35` cho batch `Pancake -> Thai Duong`.
 - 08:00 (Asia/Ho_Chi_Minh): local gui daily report ngay hom qua; cloud backup luc 08:05.
 - 09:00: local kiem tra token Meta/Thai Duong; cloud backup luc 09:05.
-- 15:00 thu 2 va thu 6: local gui bao cao tien ve Thai Duong; cloud backup luc 15:05.
+- 15:00 thu 2 va thu 6: local gui bao cao tien ve Thai Duong neu ngay do co ky doi soat that; cloud backup luc 15:05.
 - 15:00 thu 7: local gui tong ket tien ve theo tuan; cloud backup luc 15:05.
 - 21:00: local gui daily report ngay hom nay; cloud backup luc 21:05.
 - Workflow co cache `state/` + storage runtime lien quan de giu cursor/lich su giua cac lan chay.
