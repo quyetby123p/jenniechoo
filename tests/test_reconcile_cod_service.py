@@ -986,6 +986,67 @@ def test_reconcile_cod_weekly_cash_in_summary_t2_t6_and_vnd_fallback(tmp_path: P
     assert days[1]["vnd_converted_count"] == 1
 
 
+def test_reconcile_cod_cash_in_report_skips_day_without_settlement(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_reconcile_configs(settings, mapped_status=2)
+    thai_duong = _FakeThaiDuongClient(
+        history_rows=[{"settlement_date": "2026-06-01", "conclusion": 1000, "conclusionVND": 810000}],
+        detail_rows=[
+            {
+                "settlement_date": "2026-06-01",
+                "awb": "TH-A",
+                "status_text": "Giao hàng thành công",
+                "phone": "0809000111",
+                "customer_name": "Khach A",
+                "cod": "1000",
+            }
+        ],
+    )
+    pancake = _FakePancakeClient(orders=[])
+    service = ReconcileCodService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=pancake,  # type: ignore[arg-type]
+        thai_duong_client=thai_duong,  # type: ignore[arg-type]
+    )
+
+    report = service.generate_report_if_settlement_exists(date(2026, 6, 5))
+
+    assert report is None
+    assert thai_duong.requested_settlement_dates == []
+
+
+def test_reconcile_cod_cash_in_report_uses_exact_settlement_day(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_reconcile_configs(settings, mapped_status=2)
+    thai_duong = _FakeThaiDuongClient(
+        history_rows=[{"settlement_date": "2026-06-01", "conclusion": 1000, "conclusionVND": 810000}],
+        detail_rows=[
+            {
+                "settlement_date": "2026-06-01",
+                "awb": "TH-A",
+                "status_text": "Giao hàng thành công",
+                "phone": "0809000111",
+                "customer_name": "Khach A",
+                "cod": "1000",
+            }
+        ],
+    )
+    pancake = _FakePancakeClient(orders=[])
+    service = ReconcileCodService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=pancake,  # type: ignore[arg-type]
+        thai_duong_client=thai_duong,  # type: ignore[arg-type]
+    )
+
+    report = service.generate_report_if_settlement_exists(date(2026, 6, 1))
+
+    assert isinstance(report, dict)
+    assert report["settlement_date"] == "2026-06-01"
+    assert thai_duong.requested_settlement_dates == [date(2026, 6, 1)]
+
+
 def test_reconcile_cod_summarize_cash_in_from_report_uses_conclusion_totals(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path, report_thb_to_vnd_rate=815.0)
     _write_reconcile_configs(settings, mapped_status=2)

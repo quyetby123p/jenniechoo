@@ -117,6 +117,19 @@ class ReconcileCodService:
         report["run_path"] = str(run_path)
         return report
 
+    def generate_report_if_settlement_exists(self, settlement_date: date | None = None) -> dict[str, Any] | None:
+        target_date = settlement_date or datetime.now(self._resolve_timezone()).date()
+        match_cfg = self._load_match_config()
+        history_rows, _history_source = self.thai_duong.fetch_settlement_history(
+            target_date,
+            target_date + timedelta(days=1),
+        )
+        settlement = self._pick_settlement_entry(history_rows, target_date, match_cfg)
+        if not settlement:
+            self.logger.info("Khong co ky doi soat COD Thai Duong ngay %s; bo qua bao cao tien ve.", target_date)
+            return None
+        return self.generate_report(target_date)
+
     def build_message(self, report: dict[str, Any], trigger_label: str = "") -> str:
         summary = report.get("summary", {}) if isinstance(report.get("summary"), dict) else {}
         conclusion_totals = report.get("conclusion_totals", {}) if isinstance(report.get("conclusion_totals"), dict) else {}

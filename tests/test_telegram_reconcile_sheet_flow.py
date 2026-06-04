@@ -315,3 +315,27 @@ def test_reconcile_auto_apply_reports_failed_order_codes(tmp_path: Path) -> None
     texts = [str(item.get("text", "")) for item in bot._bot.messages]  # type: ignore[union-attr]
     assert any("Mã đơn lỗi cần xử lý:" in text for text in texts)
     assert any("JCT315" in text for text in texts)
+
+
+def test_reconcile_cash_in_auto_skips_when_no_settlement_today(tmp_path: Path) -> None:
+    report = {
+        "settlement_date": "2026-06-01",
+        "records": [],
+    }
+    sheet = _FakeReconcileSheetService()
+    bot, _storage = _build_bot(tmp_path, report, sheet)
+    bot.reconcile = SimpleNamespace(
+        generate_report_if_settlement_exists=lambda _date: None,
+        summarize_cash_in_from_report=lambda _report: {},
+    )
+
+    ok = asyncio.run(
+        bot._send_reconcile_cod_cash_in_report(
+            chat_id=1,
+            trigger_label="Báo cáo tiền về tự động Thái Dương",
+        )
+    )
+
+    assert ok is True
+    assert bot._bot is not None
+    assert bot._bot.messages == []
