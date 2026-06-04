@@ -176,7 +176,7 @@ async function dispatchTelegramUpdate(update, env) {
   );
 }
 
-function scheduledInputsFromCron(cron) {
+function scheduledInputsFromCron(cron, scheduledTime) {
   switch (String(cron || "").trim()) {
     case "*/30 * * * *":
       return {
@@ -195,16 +195,19 @@ function scheduledInputsFromCron(cron) {
         task: "token-health",
         source: "cloudflare-cron",
       };
-    case "0 8 * * 1,5":
+    case "0 8 * * 1,5,6": {
+      const dayOfWeek = new Date(scheduledTime || Date.now()).getUTCDay();
+      if (dayOfWeek === 6) {
+        return {
+          task: "reconcile-weekly",
+          source: "cloudflare-cron",
+        };
+      }
       return {
         task: "reconcile-cash-in",
         source: "cloudflare-cron",
       };
-    case "0 8 * * 6":
-      return {
-        task: "reconcile-weekly",
-        source: "cloudflare-cron",
-      };
+    }
     case "0 14 * * *":
       return {
         task: "daily-report",
@@ -273,7 +276,7 @@ export default {
   },
 
   async scheduled(event, env) {
-    const inputs = scheduledInputsFromCron(event.cron);
+    const inputs = scheduledInputsFromCron(event.cron, event.scheduledTime);
     if (!inputs) {
       console.log(`No GitHub task mapped for cron: ${event.cron}`);
       return;
