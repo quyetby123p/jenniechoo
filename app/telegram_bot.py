@@ -5,7 +5,10 @@ from contextlib import suppress
 import copy
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
+import json
 import logging
+import math
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -44,6 +47,9 @@ from app.settings import Settings
 from app.storage_service import StorageService
 from app.thai_duong_cod_client import ThaiDuongCodClient
 from app.utils import dump_json, fingerprint, load_json, normalize_facebook_url, now_utc_iso
+
+
+_DISABLED_LOCAL_SCHEDULE_CLAIM = object()
 
 
 class TelegramAdsBot:
@@ -1920,6 +1926,68 @@ class TelegramAdsBot:
         bucket_at = now_local.replace(minute=minute, second=0, microsecond=0)
         return bucket_at.strftime("%Y-%m-%dT%H:%M")
 
+    def _local_schedule_key(
+        self,
+        *,
+        task: str,
+        slot: str | None = None,
+        run_date: date | None = None,
+        bucket: str | None = None,
+    ) -> str:
+        parts = [str(task).strip()]
+        if slot:
+            parts.append(str(slot).strip())
+        if run_date:
+            parts.append(run_date.isoformat())
+        if bucket:
+            parts.append(str(bucket).strip())
+        return ":".join(part for part in parts if part)
+
+    def _local_schedule_mark_path(self, key: str) -> Path:
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", key).strip("_") or "schedule"
+        return self.settings.state_root / "local_schedule_marks" / f"{safe_name}.json"
+
+    def _try_claim_local_schedule(
+        self,
+        *,
+        task: str,
+        slot: str | None = None,
+        run_date: date | None = None,
+        bucket: str | None = None,
+    ) -> Path | object | None:
+        if not self.cloud_schedule_guard.is_configured():
+            return _DISABLED_LOCAL_SCHEDULE_CLAIM
+        key = self._local_schedule_key(task=task, slot=slot, run_date=run_date, bucket=bucket)
+        path = self._local_schedule_mark_path(key)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            self.logger.info("Bo qua local scheduled task %s vi slot da duoc process khac claim.", key)
+            return None
+        payload = {
+            "key": key,
+            "task": task,
+            "slot": slot or "",
+            "run_date": run_date.isoformat() if run_date else "",
+            "bucket": bucket or "",
+            "claimed_at": now_utc_iso(),
+            "pid": os.getpid(),
+        }
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+        return path
+
+    def _release_local_schedule_claim(self, claim_path: Path | object | None) -> None:
+        if not claim_path:
+            return
+        if claim_path is _DISABLED_LOCAL_SCHEDULE_CLAIM:
+            return
+        if not isinstance(claim_path, Path):
+            return
+        with suppress(FileNotFoundError):
+            claim_path.unlink()
+
     async def _token_health_monitor_loop(self) -> None:
         self.logger.info(
             "Bat token healthcheck scheduler: %02d:%02d (%s)",
@@ -1937,6 +2005,10 @@ class TelegramAdsBot:
             wait_seconds = self._seconds_until_next_token_check()
             self.logger.info("Token healthcheck lan tiep theo sau %s giay", wait_seconds)
             await asyncio.sleep(wait_seconds)
+            run_date = datetime.now(self._resolve_timezone()).date()
+            claim = self._try_claim_local_schedule(task="token-health", run_date=run_date)
+            if not claim:
+                continue
             await self._send_token_health_report(
                 chat_id=self.settings.telegram_allowed_user_id,
                 trigger_label=(
@@ -1947,7 +2019,7 @@ class TelegramAdsBot:
             )
             await self._mark_cloud_schedule_completed(
                 task="token-health",
-                run_date=datetime.now(self._resolve_timezone()).date(),
+                run_date=run_date,
             )
 
     async def _daily_report_monitor_loop(self) -> None:
@@ -1964,6 +2036,17 @@ class TelegramAdsBot:
             wait_seconds, slot = self._seconds_until_next_daily_report_schedule()
             self.logger.info("Daily report lan tiep theo sau %s giay (%s)", wait_seconds, slot)
             await asyncio.sleep(wait_seconds)
+            run_date = datetime.now(self._resolve_timezone()).date()
+            if self._daily_report_slot_already_sent(slot, run_date):
+                self.logger.info(
+                    "Bo qua daily report slot %s ngay %s vi da gui truoc do.",
+                    slot,
+                    run_date.isoformat(),
+                )
+                continue
+            claim = self._try_claim_local_schedule(task="daily-report", slot=slot, run_date=run_date)
+            if not claim:
+                continue
             if slot == "morning":
                 trigger_label = (
                     "Báo cáo tự động buổi sáng "
@@ -1973,7 +2056,6 @@ class TelegramAdsBot:
                 trigger_label = "Báo cáo tự động buổi tối (21:00)"
             report_payload: dict[str, Any] | None = None
             all_delivered = True
-            run_date = datetime.now(self._resolve_timezone()).date()
             for chat_id in notify_chat_ids:
                 report_payload = await self._send_daily_report(
                     chat_id=chat_id,
@@ -1992,6 +2074,7 @@ class TelegramAdsBot:
                     run_date=run_date,
                 )
             else:
+                self._release_local_schedule_claim(claim)
                 self._mark_daily_report_slot_failed(slot, run_date=run_date)
                 self.logger.warning(
                     "Daily report slot %s that bai mot phan/hoan toan, se thu gui lai khi bot khoi dong lai va co mang.",
@@ -2036,25 +2119,33 @@ class TelegramAdsBot:
             await asyncio.sleep(wait_seconds)
             run_date = datetime.now(self._resolve_timezone()).date()
             if "cash_in" in slots:
-                sent = await self._send_reconcile_cod_cash_in_report(
-                    chat_id=notify_chat_id,
-                    trigger_label=(
-                        "Báo cáo tiền về tự động Thái Dương "
-                        f"({self.settings.reconcile_cod_hour:02d}:{self.settings.reconcile_cod_minute:02d})"
-                    ),
-                )
-                if sent:
-                    await self._mark_cloud_schedule_completed(task="reconcile-cash-in", run_date=run_date)
+                claim = self._try_claim_local_schedule(task="reconcile-cash-in", run_date=run_date)
+                if claim:
+                    sent = await self._send_reconcile_cod_cash_in_report(
+                        chat_id=notify_chat_id,
+                        trigger_label=(
+                            "Báo cáo tiền về tự động Thái Dương "
+                            f"({self.settings.reconcile_cod_hour:02d}:{self.settings.reconcile_cod_minute:02d})"
+                        ),
+                    )
+                    if sent:
+                        await self._mark_cloud_schedule_completed(task="reconcile-cash-in", run_date=run_date)
+                    else:
+                        self._release_local_schedule_claim(claim)
             if "weekly_summary" in slots:
-                sent = await self._send_reconcile_cod_weekly_summary_report(
-                    chat_id=notify_chat_id,
-                    trigger_label=(
-                        "Tổng tiền nhận tuần tự động Thái Dương "
-                        f"({self.settings.reconcile_cod_hour:02d}:{self.settings.reconcile_cod_minute:02d})"
-                    ),
-                )
-                if sent:
-                    await self._mark_cloud_schedule_completed(task="reconcile-weekly", run_date=run_date)
+                claim = self._try_claim_local_schedule(task="reconcile-weekly", run_date=run_date)
+                if claim:
+                    sent = await self._send_reconcile_cod_weekly_summary_report(
+                        chat_id=notify_chat_id,
+                        trigger_label=(
+                            "Tổng tiền nhận tuần tự động Thái Dương "
+                            f"({self.settings.reconcile_cod_hour:02d}:{self.settings.reconcile_cod_minute:02d})"
+                        ),
+                    )
+                    if sent:
+                        await self._mark_cloud_schedule_completed(task="reconcile-weekly", run_date=run_date)
+                    else:
+                        self._release_local_schedule_claim(claim)
 
     async def _pancake_td_sync_monitor_loop(self) -> None:
         if not self.pancake_td_sync:
@@ -2232,6 +2323,9 @@ class TelegramAdsBot:
         report_payload: dict[str, Any] | None = None
         all_delivered = True
         run_date = now_local.date()
+        claim = self._try_claim_local_schedule(task="daily-report", slot="morning", run_date=run_date)
+        if not claim:
+            return
         for chat_id in notify_chat_ids:
             report_payload = await self._send_daily_report(
                 chat_id=chat_id,
@@ -2251,6 +2345,7 @@ class TelegramAdsBot:
             )
             self.logger.info("Da gui bu daily report buoi sang sau khoi dong lai bot.")
         else:
+            self._release_local_schedule_claim(claim)
             self._mark_daily_report_slot_failed("morning", run_date=run_date)
             self.logger.warning("Gui bu daily report buoi sang that bai, se thu lai sau khi khoi dong bot.")
 
@@ -2273,6 +2368,9 @@ class TelegramAdsBot:
             )
             report_payload: dict[str, Any] | None = None
             all_delivered = True
+            claim = self._try_claim_local_schedule(task="daily-report", slot=slot, run_date=pending_run_date)
+            if not claim:
+                continue
             for chat_id in notify_chat_ids:
                 report_payload = await self._send_daily_report(
                     chat_id=chat_id,
@@ -2292,6 +2390,7 @@ class TelegramAdsBot:
                 )
                 self.logger.info("Da gui lai daily report slot %s bi pending (%s).", slot, pending_run_date.isoformat())
             else:
+                self._release_local_schedule_claim(claim)
                 self._mark_daily_report_slot_failed(slot, run_date=pending_run_date)
                 self.logger.warning("Gui lai daily report slot %s pending that bai.", slot)
 
