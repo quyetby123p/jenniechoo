@@ -44,6 +44,22 @@ class _FakeMetaClient:
         return {"spend_vnd": self.spend_vnd}
 
 
+class _FakeThaiDuongClient:
+    def __init__(self, rows: list[dict]):
+        self._rows = rows
+        self.calls: list[dict] = []
+
+    def fetch_orders_for_sync(self, endpoint_cfg: dict, *, search_text: str = "", extra_filters: dict | None = None):
+        self.calls.append(
+            {
+                "endpoint_cfg": endpoint_cfg,
+                "search_text": search_text,
+                "extra_filters": extra_filters or {},
+            }
+        )
+        return self._rows
+
+
 def _dummy_settings(tmp_path: Path, **overrides) -> Settings:
     base = Settings(
         project_root=tmp_path,
@@ -645,9 +661,10 @@ def test_pending_reconcile_requires_cashflow_missing_and_pancake_status_unmapped
         status_map_path,
         {
             "pending_reconcile_mode": "td_success_not_in_cashflow",
-            "pending_reconcile_td_success_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
+            "pending_reconcile_td_success_statuses": ["SUCCESS", "BEING_RETURNED"],
+            "pending_reconcile_pancake_status_codes": [2],
             "pending_reconcile_td_to_pancake_status_codes": {
-                "SUCCESS": [2, 3],
+                "SUCCESS": [3],
                 "BEING_RETURNED": [3, 4, 5],
                 "RETURNED": [3, 4, 5],
             },
@@ -667,9 +684,26 @@ def test_pending_reconcile_requires_cashflow_missing_and_pancake_status_unmapped
                     "td_status": "SUCCESS",
                     "td_sheet_cod_minor": 0,
                     "td_cod_minor": 350_000,
-                    "pancake_display_id": "JCT-PENDING",
-                    "pancake_status": 11,
+                    "pancake_display_id": "JCT-SUCCESS-PENDING",
+                    "pancake_status": 2,
                     "reason": "Chưa lên dòng tiền và Pancake chưa đổi trạng thái.",
+                },
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "BEING_RETURNED",
+                    "td_sheet_cod_minor": 0,
+                    "td_cod_minor": 240_000,
+                    "pancake_display_id": "JCT-RETURNING-PENDING",
+                    "pancake_status": 2,
+                    "reason": "Đơn đang hoàn nhưng Pancake vẫn đang gửi.",
+                },
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "SUCCESS",
+                    "td_sheet_cod_minor": 0,
+                    "td_cod_minor": 180_000,
+                    "pancake_display_id": "JCT-NOT-SHIPPING",
+                    "pancake_status": 11,
                 },
                 {
                     "match_result": "matched_unique",
@@ -692,9 +726,8 @@ def test_pending_reconcile_requires_cashflow_missing_and_pancake_status_unmapped
                     "td_status": "RETURNED",
                     "td_sheet_cod_minor": 0,
                     "td_cod_minor": 240_000,
-                    "pancake_display_id": "JCT-RETURN-PENDING",
+                    "pancake_display_id": "JCT-RETURNED-SKIPPED",
                     "pancake_status": 2,
-                    "reason": "Đơn hoàn chưa được map đúng trạng thái Pancake.",
                 },
                 {
                     "match_result": "matched_unique",
@@ -726,7 +759,7 @@ def test_pending_reconcile_requires_cashflow_missing_and_pancake_status_unmapped
 
     assert snapshot["metrics"]["pending_reconcile_orders"] == 2
     assert snapshot["metrics"]["pending_reconcile_value_minor"] == 590_000
-    assert pending_refs == {"JCT-PENDING", "JCT-RETURN-PENDING"}
+    assert pending_refs == {"JCT-SUCCESS-PENDING", "JCT-RETURNING-PENDING"}
 
 
 def test_pending_reconcile_uses_current_pancake_status_for_stale_reconcile_runs(tmp_path: Path) -> None:
@@ -735,12 +768,13 @@ def test_pending_reconcile_uses_current_pancake_status_for_stale_reconcile_runs(
     status_map_path = config_root / "custom_status_map.json"
     dump_json(
         status_map_path,
-        {
-            "pending_reconcile_mode": "td_success_not_in_cashflow",
-            "pending_reconcile_td_success_statuses": ["RETURNED"],
-            "pending_reconcile_td_to_pancake_status_codes": {"RETURNED": [3, 4, 5]},
-            "brand_rules": [],
-        },
+            {
+                "pending_reconcile_mode": "td_success_not_in_cashflow",
+                "pending_reconcile_td_success_statuses": ["RETURNED"],
+                "pending_reconcile_pancake_status_codes": [2],
+                "pending_reconcile_td_to_pancake_status_codes": {"RETURNED": [3, 4, 5]},
+                "brand_rules": [],
+            },
     )
     settings = _dummy_settings(tmp_path, web_report_status_map_path=str(status_map_path))
     run_path = settings.reconcile_cod_runs_dir / "run_2026-06-01_20260601T030000Z.json"
@@ -785,18 +819,147 @@ def test_pending_reconcile_uses_current_pancake_status_for_stale_reconcile_runs(
     assert fake_pancake.detail_calls == ["270229017331761"]
 
 
+def test_pending_reconcile_uses_thai_duong_order_list_and_pancake_shipping_status(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    dump_json(
+        settings.pancake_td_sync_config_path,
+        {
+            "thai_duong": {
+                "order_lookup_endpoint": {
+                    "method": "POST",
+                    "path": "/api/v1/orders/list",
+                    "result_path": "data.data",
+                },
+                "order_lookup_filters": {"partnerCode": "THA356"},
+            }
+        },
+    )
+    run_path = settings.reconcile_cod_runs_dir / "run_2026-06-02_20260602T030000Z.json"
+    dump_json(
+        run_path,
+        {
+            "settlement_date": "2026-06-02",
+            "generated_at": "2026-06-02T03:00:00+00:00",
+            "records": [
+                {
+                    "match_result": "matched_unique",
+                    "td_status": "SUCCESS",
+                    "td_awb": "AWB-CASHFLOW",
+                    "pancake_order_id": "p_cashflow",
+                    "td_sheet_cod_minor": 350_000,
+                }
+            ],
+        },
+    )
+    fake_td = _FakeThaiDuongClient(
+        [
+            {
+                "orderUID": "THA356_PENDING_SUCCESS",
+                "pancakeOrderId": "p_success",
+                "shippingOrderCode": "AWB-PENDING-SUCCESS",
+                "shippingOrderStatus": "SUCCESS",
+                "createdAt": "2026-06-01T09:00:00+07:00",
+                "buyerName": "Customer Success",
+                "cod": 3500,
+                "codPaymentDate": None,
+                "codStatus": "COD_MONNEY_COLLECTED",
+            },
+            {
+                "orderUID": "THA356_PENDING_RETURN",
+                "pancakeOrderId": "p_return",
+                "shippingOrderCode": "AWB-PENDING-RETURN",
+                "shippingOrderStatus": "RETURNED",
+                "createdAt": "2026-06-01T10:00:00+07:00",
+                "buyerName": "Customer Return",
+                "cod": 2400,
+                "codPaymentDate": None,
+                "codStatus": "COD_MONNEY_COLLECTED",
+            },
+            {
+                "orderUID": "THA356_ALREADY_IN_CASHFLOW",
+                "pancakeOrderId": "p_cashflow",
+                "shippingOrderCode": "AWB-CASHFLOW",
+                "shippingOrderStatus": "SUCCESS",
+                "createdAt": "2026-06-01T11:00:00+07:00",
+                "cod": 3500,
+            },
+            {
+                "orderUID": "THA356_PANCAKE_RECEIVED",
+                "pancakeOrderId": "p_received",
+                "shippingOrderCode": "AWB-RECEIVED",
+                "shippingOrderStatus": "SUCCESS",
+                "createdAt": "2026-06-01T12:00:00+07:00",
+                "cod": 1800,
+            },
+            {
+                "orderUID": "THA356_PAID_TO_SENDER",
+                "pancakeOrderId": "p_paid",
+                "shippingOrderCode": "AWB-PAID",
+                "shippingOrderStatus": "SUCCESS",
+                "createdAt": "2026-06-01T13:00:00+07:00",
+                "cod": 1800,
+                "codStatus": "PAID_TO_SENDER",
+            },
+            {
+                "orderUID": "THA356_STILL_SHIPPING_TD",
+                "pancakeOrderId": "p_td_shipping",
+                "shippingOrderCode": "AWB-TD-SHIPPING",
+                "shippingOrderStatus": "SHIPPING",
+                "createdAt": "2026-06-01T14:00:00+07:00",
+                "cod": 1800,
+            },
+            {
+                "orderUID": "THA356_OUTSIDE_PERIOD",
+                "pancakeOrderId": "p_outside",
+                "shippingOrderCode": "AWB-OUTSIDE",
+                "shippingOrderStatus": "SUCCESS",
+                "createdAt": "2026-06-02T09:00:00+07:00",
+                "cod": 1800,
+            },
+        ]
+    )
+    fake_pancake = _FakePancakeClient(
+        [],
+        details={
+            "p_success": {"id": "p_success", "status": 2},
+            "p_return": {"id": "p_return", "status": 2},
+            "p_cashflow": {"id": "p_cashflow", "status": 2},
+            "p_received": {"id": "p_received", "status": 3},
+            "p_paid": {"id": "p_paid", "status": 2},
+            "p_td_shipping": {"id": "p_td_shipping", "status": 2},
+            "p_outside": {"id": "p_outside", "status": 2},
+        },
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=fake_pancake,
+        thai_duong_client=fake_td,  # type: ignore[arg-type]
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+    rows = snapshot["status_lists"]["pending-reconcile"]
+
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 2
+    assert snapshot["metrics"]["pending_reconcile_value_minor"] == 590_000
+    assert {row["display_ref"] for row in rows} == {"THA356_PENDING_SUCCESS", "THA356_PENDING_RETURN"}
+    assert fake_td.calls[0]["extra_filters"] == {"partnerCode": "THA356"}
+    assert fake_pancake.detail_calls == ["p_success", "p_return", "p_received"]
+
+
 def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) -> None:
     config_root = tmp_path / "config"
     config_root.mkdir(parents=True, exist_ok=True)
     status_map_path = config_root / "custom_status_map.json"
     dump_json(
         status_map_path,
-        {
-            "pending_reconcile_mode": "td_success_not_in_cashflow",
-            "pending_reconcile_td_success_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
-            "reconcile_received_mode": "td_status_only",
-            "reconcile_received_td_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
-            "brand_rules": [],
+            {
+                "pending_reconcile_mode": "td_success_not_in_cashflow",
+                "pending_reconcile_td_success_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
+                "pending_reconcile_pancake_status_codes": [2],
+                "reconcile_received_mode": "td_status_only",
+                "reconcile_received_td_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
+                "brand_rules": [],
         },
     )
     settings = _dummy_settings(
@@ -871,9 +1034,9 @@ def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) 
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot["metrics"]["reconcile_received_orders"] == 7
-    assert snapshot["metrics"]["pending_reconcile_orders"] == 0
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 1
     pending_refs = {row["pancake_order_ref"] for row in snapshot["status_lists"]["pending-reconcile"]}
-    assert pending_refs == set()
+    assert pending_refs == {"JCT1002"}
 
 
 def test_pending_reconcile_skips_legacy_rows_without_cashflow_signal(tmp_path: Path) -> None:
@@ -882,13 +1045,14 @@ def test_pending_reconcile_skips_legacy_rows_without_cashflow_signal(tmp_path: P
     status_map_path = config_root / "custom_status_map.json"
     dump_json(
         status_map_path,
-        {
-            "pending_reconcile_mode": "td_success_not_in_cashflow",
-            "pending_reconcile_td_success_statuses": ["SUCCESS"],
-            "pending_reconcile_td_to_pancake_status_codes": {"SUCCESS": [2, 3]},
-            "reconcile_received_mode": "td_status_only",
-            "reconcile_received_td_statuses": ["SUCCESS"],
-            "brand_rules": [],
+            {
+                "pending_reconcile_mode": "td_success_not_in_cashflow",
+                "pending_reconcile_td_success_statuses": ["SUCCESS"],
+                "pending_reconcile_pancake_status_codes": [2],
+                "pending_reconcile_td_to_pancake_status_codes": {"SUCCESS": [3]},
+                "reconcile_received_mode": "td_status_only",
+                "reconcile_received_td_statuses": ["SUCCESS"],
+                "brand_rules": [],
         },
     )
     settings = _dummy_settings(
@@ -929,13 +1093,14 @@ def test_status_value_metrics_include_shipping_returning_and_reconcile(tmp_path:
     status_map_path = config_root / "custom_status_map.json"
     dump_json(
         status_map_path,
-        {
-            "pending_reconcile_mode": "td_success_not_in_cashflow",
-            "pending_reconcile_td_success_statuses": ["SUCCESS"],
-            "pending_reconcile_td_to_pancake_status_codes": {"SUCCESS": [2, 3]},
-            "reconcile_received_mode": "td_status_only",
-            "reconcile_received_td_statuses": ["SUCCESS"],
-            "brand_rules": [],
+            {
+                "pending_reconcile_mode": "td_success_not_in_cashflow",
+                "pending_reconcile_td_success_statuses": ["SUCCESS"],
+                "pending_reconcile_pancake_status_codes": [2],
+                "pending_reconcile_td_to_pancake_status_codes": {"SUCCESS": [3]},
+                "reconcile_received_mode": "td_status_only",
+                "reconcile_received_td_statuses": ["SUCCESS"],
+                "brand_rules": [],
         },
     )
     settings = _dummy_settings(
@@ -1003,4 +1168,4 @@ def test_status_value_metrics_include_shipping_returning_and_reconcile(tmp_path:
     assert metrics["reconcile_received_orders"] == 2
     assert metrics["reconcile_received_value_minor"] == 570_000
     assert metrics["pending_reconcile_orders"] == 1
-    assert metrics["pending_reconcile_value_minor"] == 220_000
+    assert metrics["pending_reconcile_value_minor"] == 350_000

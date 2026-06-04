@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from app.meta_ads_client import MetaAdsClient
 from app.pancake_pos_client import PancakePosClient
 from app.settings import Settings
+from app.thai_duong_cod_client import ThaiDuongCodClient
 from app.utils import load_json, now_utc_iso
 
 
@@ -24,13 +25,16 @@ class WebReportService:
         logger: logging.Logger,
         pancake_client: PancakePosClient,
         meta_client: MetaAdsClient | None = None,
+        thai_duong_client: ThaiDuongCodClient | None = None,
     ) -> None:
         self.settings = settings
         self.logger = logger
         self.pancake = pancake_client
         self.meta = meta_client
+        self.thai_duong = thai_duong_client
         self._cache_lock = Lock()
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._cashflow_refs_cache: tuple[float, set[str]] | None = None
 
     def get_snapshot(self, start_date: date, end_date: date | None = None) -> dict[str, Any]:
         period_start, period_end = self._normalize_period(start_date, end_date)
@@ -295,7 +299,18 @@ class WebReportService:
             status_cfg=status_cfg,
             pancake_status_code_by_ref=pancake_status_code_by_ref,
         )
-        pending_reconcile = reconcile_summary.get("pending_rows", [])
+        thai_duong_order_pending_reconcile = self._load_thai_duong_order_pending_reconcile_rows(
+            start_date=start_date,
+            end_date=end_date,
+            status_cfg=status_cfg,
+            pancake_status_code_by_ref=pancake_status_code_by_ref,
+            order_value_minor_by_ref=order_value_minor_by_ref,
+            tz=tz,
+        )
+        if thai_duong_order_pending_reconcile is None:
+            pending_reconcile = reconcile_summary.get("pending_rows", [])
+        else:
+            pending_reconcile = thai_duong_order_pending_reconcile
         reconcile_received = reconcile_summary.get("received_rows", [])
         pending_reconcile_orders = self._count_unique_reconcile_order_refs(pending_reconcile)
         reconcile_received_orders = self._count_unique_reconcile_order_refs(reconcile_received)
@@ -493,6 +508,376 @@ class WebReportService:
             self.logger.warning("Khong lay duoc chi phi Ads cho web report: %s", exc)
             return 0
 
+    def _load_thai_duong_order_pending_reconcile_rows(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        status_cfg: dict[str, Any],
+        pancake_status_code_by_ref: dict[str, int],
+        order_value_minor_by_ref: dict[str, int],
+        tz: timezone | ZoneInfo,
+    ) -> list[dict[str, Any]] | None:
+        if self.thai_duong is None or not hasattr(self.thai_duong, "fetch_orders_for_sync"):
+            return None
+
+        sync_cfg = self._load_pancake_td_sync_config()
+        td_cfg = sync_cfg.get("thai_duong", {}) if isinstance(sync_cfg.get("thai_duong"), dict) else {}
+        endpoint_cfg = td_cfg.get("order_lookup_endpoint", {}) if isinstance(td_cfg, dict) else {}
+        if not isinstance(endpoint_cfg, dict) or not endpoint_cfg:
+            return None
+
+        try:
+            rows = self.thai_duong.fetch_orders_for_sync(  # type: ignore[attr-defined]
+                endpoint_cfg,
+                search_text="",
+                extra_filters=self._thai_duong_lookup_filters(td_cfg),
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Khong lay duoc danh sach don Thai Duong cho web report: %s", exc)
+            return None
+        if not isinstance(rows, list):
+            return []
+
+        eligible_td_statuses = self._to_text_set(
+            status_cfg.get(
+                "pending_reconcile_td_order_shipping_statuses",
+                ["SUCCESS", "BEING_RETURNED", "RETURNED"],
+            )
+        )
+        if not eligible_td_statuses:
+            eligible_td_statuses = self._to_text_set(["SUCCESS", "BEING_RETURNED", "RETURNED"])
+        pending_pancake_status_codes = self._to_int_set(status_cfg.get("pending_reconcile_pancake_status_codes", [2]))
+        cashflow_paid_statuses = self._to_text_set(
+            status_cfg.get("pending_reconcile_cashflow_paid_statuses", ["PAID_TO_SENDER"])
+        )
+        cashflow_refs = self._load_reconcile_cashflow_refs()
+        pancake_detail_status_cache: dict[str, int | None] = {}
+        pending_rows: list[dict[str, Any]] = []
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            created_dt = self._extract_thai_duong_order_datetime(row, tz=tz)
+            if created_dt is None or not (start_date <= created_dt.date() <= end_date):
+                continue
+
+            td_status = self._normalize_text(self._extract_first_text(row, self._thai_duong_shipping_status_fields()))
+            if td_status not in eligible_td_statuses:
+                continue
+
+            if self._thai_duong_order_has_cashflow_ref(row, cashflow_refs=cashflow_refs):
+                continue
+            if self._is_thai_duong_order_cashflow_updated(row, paid_statuses=cashflow_paid_statuses):
+                continue
+
+            pancake_order_id = self._extract_first_text(
+                row,
+                ("pancakeOrderId", "pancake_order_id", "pancakeOrderID", "pancakeId", "pancake_id"),
+            )
+            if not pancake_order_id:
+                continue
+            pancake_status_code = self._resolve_thai_duong_order_pancake_status_code(
+                pancake_order_id,
+                pancake_status_code_by_ref=pancake_status_code_by_ref,
+                pancake_detail_status_cache=pancake_detail_status_cache,
+            )
+            if not self._is_pending_reconcile_pancake_status(
+                pancake_status_code,
+                pending_pancake_status_codes=pending_pancake_status_codes,
+            ):
+                continue
+
+            td_cod_minor = self._extract_thai_duong_order_cod_minor(
+                row,
+                order_value_minor_by_ref=order_value_minor_by_ref,
+                pancake_order_id=pancake_order_id,
+            )
+            td_awb = self._extract_first_text(row, ("shippingOrderCode", "awb", "trackingCode", "tracking_code"))
+            order_uid = self._extract_first_text(row, ("orderUID", "orderUid", "order_uid", "code", "id"))
+            customer_name = self._extract_first_text(row, ("buyerName", "customerName", "name", "receiverName"))
+            reconcile_ref = order_uid or td_awb or pancake_order_id
+            pending_rows.append(
+                {
+                    "pancake_order_ref": pancake_order_id,
+                    "reconcile_ref": reconcile_ref,
+                    "display_ref": order_uid or pancake_order_id,
+                    "match_result": "thai_duong_order_pending_cashflow",
+                    "reason": "Thái Dương đã giao/đang hoàn, Pancake vẫn Đã gửi hàng và chưa có trong Dòng tiền.",
+                    "td_awb": td_awb,
+                    "td_status": self._extract_first_text(row, self._thai_duong_shipping_status_fields()),
+                    "customer_name": customer_name,
+                    "settlement_date": "",
+                    "created_at": self._format_dt(created_dt, tz=tz),
+                    "created_ts": self._to_ts(created_dt),
+                    "td_cod_minor": td_cod_minor,
+                    "td_cod_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(td_cod_minor)),
+                    "td_cod_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(td_cod_minor))),
+                }
+            )
+
+        return self._dedupe_reconcile_rows(
+            sorted(
+                pending_rows,
+                key=lambda item: (
+                    self._to_int(item.get("created_ts")),
+                    str(item.get("display_ref", "")),
+                ),
+                reverse=True,
+            )
+        )
+
+    def _load_pancake_td_sync_config(self) -> dict[str, Any]:
+        payload = self._safe_read_json(self.settings.pancake_td_sync_config_path)
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _thai_duong_lookup_filters(td_cfg: dict[str, Any]) -> dict[str, Any]:
+        filters = td_cfg.get("order_lookup_filters", {}) if isinstance(td_cfg, dict) else {}
+        return filters if isinstance(filters, dict) else {}
+
+    @staticmethod
+    def _thai_duong_shipping_status_fields() -> tuple[str, ...]:
+        return (
+            "shippingOrderStatus",
+            "shipping_order_status",
+            "deliveryStatus",
+            "delivery_status",
+            "status",
+        )
+
+    def _extract_thai_duong_order_datetime(self, row: dict[str, Any], *, tz: timezone | ZoneInfo) -> datetime | None:
+        for field in (
+            "createdAt",
+            "created_at",
+            "createdDate",
+            "created_date",
+            "orderDate",
+            "order_date",
+            "insertedAt",
+            "sendOrderDate",
+        ):
+            dt = self._parse_datetime(row.get(field))
+            if dt is not None:
+                return dt.astimezone(tz)
+        return None
+
+    @staticmethod
+    def _extract_first_text(row: dict[str, Any], fields: tuple[str, ...]) -> str:
+        for field in fields:
+            value = row.get(field)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
+
+    def _resolve_thai_duong_order_pancake_status_code(
+        self,
+        pancake_order_id: str,
+        *,
+        pancake_status_code_by_ref: dict[str, int],
+        pancake_detail_status_cache: dict[str, int | None],
+    ) -> int | None:
+        normalized_order_id = self._normalize_text(pancake_order_id)
+        if normalized_order_id in pancake_status_code_by_ref:
+            return pancake_status_code_by_ref[normalized_order_id]
+        if normalized_order_id not in pancake_detail_status_cache:
+            pancake_detail_status_cache[normalized_order_id] = self._fetch_current_pancake_order_status(pancake_order_id)
+        status_code = pancake_detail_status_cache.get(normalized_order_id)
+        if status_code is not None:
+            pancake_status_code_by_ref[normalized_order_id] = status_code
+        return status_code
+
+    def _is_thai_duong_order_cashflow_updated(self, row: dict[str, Any], *, paid_statuses: set[str]) -> bool:
+        payment_date = self._extract_first_text(
+            row,
+            (
+                "codPaymentDate",
+                "paymentCodDate",
+                "cod_payment_date",
+                "settlementDate",
+                "settlement_date",
+            ),
+        )
+        if payment_date:
+            return True
+        cod_status = self._normalize_text(
+            self._extract_first_text(row, ("codStatus", "cod_status", "paymentStatus", "payment_status"))
+        )
+        return bool(cod_status and cod_status in paid_statuses)
+
+    def _thai_duong_order_has_cashflow_ref(self, row: dict[str, Any], *, cashflow_refs: set[str]) -> bool:
+        if not cashflow_refs:
+            return False
+        refs = self._dedupe_text_refs(
+            [
+                row.get("shippingOrderCode"),
+                row.get("awb"),
+                row.get("trackingCode"),
+                row.get("orderUID"),
+                row.get("orderUid"),
+                row.get("pancakeOrderId"),
+            ]
+        )
+        return any(self._normalize_text(ref) in cashflow_refs for ref in refs)
+
+    def _load_reconcile_cashflow_refs(self) -> set[str]:
+        now_ts = time.time()
+        with self._cache_lock:
+            cached = self._cashflow_refs_cache
+            if cached is not None:
+                cached_ts, cached_refs = cached
+                if now_ts - cached_ts < float(self.settings.web_report_refresh_seconds):
+                    return set(cached_refs)
+
+        refs: set[str] = set()
+        run_dir = self.settings.reconcile_cod_runs_dir
+        if run_dir.exists():
+            for path in sorted(run_dir.glob("run_*.json"), reverse=True):
+                payload = self._safe_read_json(path)
+                if not isinstance(payload, dict):
+                    continue
+                records = payload.get("records", [])
+                if isinstance(records, list):
+                    for record in records:
+                        if isinstance(record, dict):
+                            refs.update(self._extract_reconcile_record_refs(record))
+        refs.update(self._fetch_live_reconcile_cashflow_refs())
+        with self._cache_lock:
+            self._cashflow_refs_cache = (time.time(), set(refs))
+        return refs
+
+    def _extract_reconcile_record_refs(self, record: dict[str, Any]) -> set[str]:
+        refs: set[str] = set()
+        for ref in self._extract_record_pancake_identity_refs(record):
+            normalized = self._normalize_text(ref)
+            if normalized:
+                refs.add(normalized)
+        for field in (
+            "td_awb",
+            "fingerprint",
+            "td_order_uid",
+            "thai_duong_order_uid",
+            "shippingOrderCode",
+            "shipping_order_code",
+            "awb",
+            "trackingCode",
+            "tracking_code",
+            "Mã vận đơn",
+            "ma_van_don",
+            "orderUID",
+            "orderUid",
+            "order_uid",
+            "pancakeOrderId",
+            "pancake_order_id",
+        ):
+            normalized = self._normalize_text(str(record.get(field, "")).strip())
+            if normalized:
+                refs.add(normalized)
+        return refs
+
+    def _fetch_live_reconcile_cashflow_refs(self) -> set[str]:
+        if self.thai_duong is None:
+            return set()
+        if not hasattr(self.thai_duong, "fetch_settlement_history") or not hasattr(
+            self.thai_duong,
+            "fetch_settlement_details",
+        ):
+            return set()
+
+        tz = self._resolve_timezone()
+        start_date = date(2026, 2, 1)
+        end_date = datetime.now(tz).date()
+        try:
+            history, _source = self.thai_duong.fetch_settlement_history(start_date, end_date)  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Khong lay duoc history Dong tien Thai Duong cho web report: %s", exc)
+            return set()
+        if not isinstance(history, list):
+            return set()
+
+        refs: set[str] = set()
+        for settlement in history:
+            if not isinstance(settlement, dict):
+                continue
+            settlement_date = self._extract_settlement_date(settlement)
+            if settlement_date is None:
+                continue
+            try:
+                rows, _detail_source = self.thai_duong.fetch_settlement_details(  # type: ignore[attr-defined]
+                    settlement_date,
+                    settlement,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(
+                    "Khong lay duoc chi tiet Dong tien Thai Duong ngay %s: %s",
+                    settlement_date.isoformat(),
+                    exc,
+                )
+                continue
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if isinstance(row, dict):
+                    refs.update(self._extract_reconcile_record_refs(row))
+        return refs
+
+    def _extract_settlement_date(self, settlement: dict[str, Any]) -> date | None:
+        for field in (
+            "settlement_date",
+            "settlementDate",
+            "paymentDate",
+            "payment_date",
+            "payDate",
+            "paidDate",
+            "codPaymentDate",
+            "date",
+            "createdAt",
+            "created_at",
+        ):
+            dt = self._parse_datetime(settlement.get(field))
+            if dt is not None:
+                return dt.date()
+        return None
+
+    def _extract_thai_duong_order_cod_minor(
+        self,
+        row: dict[str, Any],
+        *,
+        order_value_minor_by_ref: dict[str, int],
+        pancake_order_id: str,
+    ) -> int:
+        for field in ("cod", "codAmount", "cod_amount", "totalAmount", "amount", "orderTotal"):
+            value = row.get(field)
+            if value is None:
+                continue
+            parsed = self._to_optional_float(value)
+            if parsed is not None:
+                factor = max(1, int(self.settings.report_thb_minor_unit_factor))
+                return max(0, int(round(parsed * factor)))
+        normalized_ref = self._normalize_text(pancake_order_id)
+        return max(0, self._to_int(order_value_minor_by_ref.get(normalized_ref)))
+
+    @staticmethod
+    def _dedupe_reconcile_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            row_key = WebReportService._normalize_text(
+                str(row.get("reconcile_ref") or row.get("pancake_order_ref") or row.get("td_awb") or "").strip()
+            )
+            if not row_key:
+                row_key = f"row-{len(result)}"
+            if row_key in seen:
+                continue
+            seen.add(row_key)
+            result.append(row)
+        return result
+
     @staticmethod
     def _iter_dates(start_date: date, end_date: date):
         cursor = start_date
@@ -541,6 +926,7 @@ class WebReportService:
         pending_td_success_statuses = self._to_text_set(
             status_cfg.get("pending_reconcile_td_success_statuses", ["success"])
         )
+        pending_pancake_status_codes = self._to_int_set(status_cfg.get("pending_reconcile_pancake_status_codes", [2]))
         pending_td_to_pancake_status_codes = self._normalize_td_to_pancake_status_map(
             status_cfg.get("pending_reconcile_td_to_pancake_status_codes")
         )
@@ -586,6 +972,7 @@ class WebReportService:
                     pending_states=pending_states,
                     pending_mode=pending_mode,
                     pending_td_success_statuses=pending_td_success_statuses,
+                    pending_pancake_status_codes=pending_pancake_status_codes,
                     pending_td_to_pancake_status_codes=pending_td_to_pancake_status_codes,
                     pancake_status_code_by_ref=current_pancake_status_by_ref,
                     pancake_detail_status_cache=pancake_detail_status_cache,
@@ -634,6 +1021,7 @@ class WebReportService:
         pending_states: set[str],
         pending_mode: str,
         pending_td_success_statuses: set[str],
+        pending_pancake_status_codes: set[int],
         pending_td_to_pancake_status_codes: dict[str, set[int]],
         pancake_status_code_by_ref: dict[str, int],
         pancake_detail_status_cache: dict[str, int | None],
@@ -649,12 +1037,20 @@ class WebReportService:
                 return False
             if self._is_cashflow_updated(record, td_status=td_status):
                 return False
-            if self._is_td_pancake_status_aligned(
+            pancake_status_code = self._resolve_reconcile_pancake_status_code(
                 record,
-                td_status=td_status,
-                td_to_pancake_status_codes=pending_td_to_pancake_status_codes,
                 pancake_status_code_by_ref=pancake_status_code_by_ref,
                 pancake_detail_status_cache=pancake_detail_status_cache,
+            )
+            if not self._is_pending_reconcile_pancake_status(
+                pancake_status_code,
+                pending_pancake_status_codes=pending_pancake_status_codes,
+            ):
+                return False
+            if self._is_td_pancake_status_code_aligned(
+                pancake_status_code,
+                td_status=td_status,
+                td_to_pancake_status_codes=pending_td_to_pancake_status_codes,
             ):
                 return False
             return True
@@ -673,18 +1069,13 @@ class WebReportService:
             return False
         return self._to_int(value, fallback=0) > 0
 
-    def _is_td_pancake_status_aligned(
+    def _resolve_reconcile_pancake_status_code(
         self,
         record: dict[str, Any],
         *,
-        td_status: str,
-        td_to_pancake_status_codes: dict[str, set[int]],
         pancake_status_code_by_ref: dict[str, int],
         pancake_detail_status_cache: dict[str, int | None],
-    ) -> bool:
-        expected_status_codes = td_to_pancake_status_codes.get(td_status, set())
-        if not expected_status_codes:
-            return False
+    ) -> int | None:
         pancake_status_code = self._resolve_current_pancake_status_code(
             record,
             pancake_status_code_by_ref=pancake_status_code_by_ref,
@@ -692,7 +1083,29 @@ class WebReportService:
         )
         if pancake_status_code is None:
             pancake_status_code = self._to_optional_int(record.get("pancake_status"))
+        return pancake_status_code
+
+    @staticmethod
+    def _is_pending_reconcile_pancake_status(
+        pancake_status_code: int | None,
+        *,
+        pending_pancake_status_codes: set[int],
+    ) -> bool:
         if pancake_status_code is None:
+            return False
+        if not pending_pancake_status_codes:
+            return True
+        return pancake_status_code in pending_pancake_status_codes
+
+    def _is_td_pancake_status_code_aligned(
+        self,
+        pancake_status_code: int | None,
+        *,
+        td_status: str,
+        td_to_pancake_status_codes: dict[str, set[int]],
+    ) -> bool:
+        expected_status_codes = td_to_pancake_status_codes.get(td_status, set())
+        if not expected_status_codes or pancake_status_code is None:
             return False
         return pancake_status_code in expected_status_codes
 
@@ -736,7 +1149,7 @@ class WebReportService:
 
     def _normalize_td_to_pancake_status_map(self, value: Any) -> dict[str, set[int]]:
         default_map: dict[str, set[int]] = {
-            self._normalize_text("SUCCESS"): {2, 3},
+            self._normalize_text("SUCCESS"): {3},
             self._normalize_text("BEING_RETURNED"): {3, 4, 5},
             self._normalize_text("RETURNED"): {3, 4, 5},
         }
@@ -1212,9 +1625,12 @@ class WebReportService:
             "shipping_status_codes": [2],
             "shipping_status_labels": ["đã gửi hàng", "dang giao", "shipping"],
             "pending_reconcile_mode": "match_result",
-            "pending_reconcile_td_success_statuses": ["success"],
+            "pending_reconcile_td_success_statuses": ["success", "being_returned", "returned"],
+            "pending_reconcile_td_order_shipping_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
+            "pending_reconcile_pancake_status_codes": [2],
+            "pending_reconcile_cashflow_paid_statuses": ["PAID_TO_SENDER"],
             "pending_reconcile_td_to_pancake_status_codes": {
-                "SUCCESS": [2, 3],
+                "SUCCESS": [3],
                 "BEING_RETURNED": [3, 4, 5],
                 "RETURNED": [3, 4, 5],
             },
@@ -1254,6 +1670,17 @@ class WebReportService:
             if isinstance(value, bool):
                 return None
             return int(float(str(value).replace(",", "").strip()))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _to_optional_float(value: Any) -> float | None:
+        try:
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                return None
+            return float(str(value).replace(",", "").strip())
         except (TypeError, ValueError):
             return None
 

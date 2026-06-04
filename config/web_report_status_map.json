@@ -38,8 +38,19 @@
     "BEING_RETURNED",
     "RETURNED"
   ],
+  "pending_reconcile_td_order_shipping_statuses": [
+    "SUCCESS",
+    "BEING_RETURNED",
+    "RETURNED"
+  ],
+  "pending_reconcile_pancake_status_codes": [
+    2
+  ],
+  "pending_reconcile_cashflow_paid_statuses": [
+    "PAID_TO_SENDER"
+  ],
   "pending_reconcile_td_to_pancake_status_codes": {
-    "SUCCESS": [2, 3],
+    "SUCCESS": [3],
     "BEING_RETURNED": [3, 4, 5],
     "RETURNED": [3, 4, 5]
   },

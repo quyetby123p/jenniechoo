@@ -84,6 +84,20 @@ class ThaiDuongCodClient:
         rows = self._fetch_endpoint_rows(endpoint_cfg=endpoint_cfg, search_text="")
         return [item for item in rows if isinstance(item, dict)]
 
+    def fetch_orders_for_sync(
+        self,
+        endpoint_cfg: dict[str, Any],
+        *,
+        search_text: str = "",
+        extra_filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = self._fetch_endpoint_rows(
+            endpoint_cfg=endpoint_cfg,
+            search_text=str(search_text or "").strip(),
+            filter_values=extra_filters if isinstance(extra_filters, dict) else {},
+        )
+        return [item for item in rows if isinstance(item, dict)]
+
     def find_orders_by_reference_for_sync(
         self,
         *,

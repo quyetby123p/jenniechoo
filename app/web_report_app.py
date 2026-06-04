@@ -13,6 +13,7 @@ from app.logger import configure_logger
 from app.meta_ads_client import MetaAdsClient
 from app.pancake_pos_client import PancakePosClient
 from app.settings import Settings, load_settings
+from app.thai_duong_cod_client import ThaiDuongCodClient
 from app.web_report_service import WebReportService
 
 
@@ -41,6 +42,7 @@ def create_app(
         logger=current_logger,
         pancake_client=PancakePosClient(settings=current_settings, logger=current_logger),
         meta_client=MetaAdsClient(settings=current_settings, logger=current_logger),
+        thai_duong_client=ThaiDuongCodClient(settings=current_settings, logger=current_logger),
     )
 
     app = Flask(
