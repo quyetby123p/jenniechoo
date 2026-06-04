@@ -5,3 +5,13 @@ workers_dev = true
 
 [observability]
 enabled = true
+
+[triggers]
+crons = [
+  "*/30 * * * *",      # Pancake -> Thai Duong batch sync.
+  "0 1 * * *",         # 08:00 Asia/Ho_Chi_Minh morning daily report.
+  "0 2 * * *",         # 09:00 Asia/Ho_Chi_Minh token health.
+  "0 8 * * 1,5",       # 15:00 Asia/Ho_Chi_Minh Monday/Friday cash-in report.
+  "0 8 * * 6",         # 15:00 Asia/Ho_Chi_Minh Saturday weekly cash-in summary.
+  "0 14 * * *",        # 21:00 Asia/Ho_Chi_Minh evening daily report.
+]

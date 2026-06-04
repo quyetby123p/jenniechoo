@@ -155,8 +155,9 @@ File map status/brand: `config/web_report_status_map.json`.
 
 Phuong an free:
 - Render free chi chay `fb-ops-web-report` (web report).
-- GitHub Actions chay cac job dinh ky thay cho worker realtime.
-- Telegram polling realtime (`len camp` ngay khi nhan tin) van can may local hoac worker/VM chay 24/7.
+- Cloudflare Worker chay webhook Telegram va cron dung gio.
+- GitHub Actions chi la executor Python duoc Cloudflare goi bang `workflow_dispatch`.
+- Telegram polling realtime (`len camp` ngay khi nhan tin) khong can may local neu da bat Cloudflare Worker webhook, nhung se cham hon worker/VM tra phi vi phai doi GitHub Actions khoi dong job.
 
 1. Kiem tra nhanh truoc khi push:
 
@@ -184,7 +185,7 @@ Phuong an free:
 
 Script tren can GitHub CLI (`gh`) va `gh auth login` truoc khi chay.
 
-5. GitHub Actions tu chay theo lich trong `.github/workflows/free-scheduled-tasks.yml`:
+5. Cloudflare Worker cron tu dispatch GitHub Actions theo lich:
 - Moi 30 phut: chay 1 batch `Pancake -> Thai Duong` neu `PANCAKE_TD_SYNC_ENABLED=1`.
 - 08:00 (Asia/Ho_Chi_Minh): gui daily report ngay hom qua.
 - 09:00: kiem tra token Meta/Thai Duong.
@@ -192,6 +193,7 @@ Script tren can GitHub CLI (`gh`) va `gh auth login` truoc khi chay.
 - 15:00 thu 7: gui tong ket tien ve theo tuan.
 - 21:00: gui daily report ngay hom nay.
 - Workflow co cache `state/` + storage runtime lien quan de giu cursor/lich su giua cac lan chay.
+- GitHub native `on.schedule` da tat de tranh delayed run cua GitHub gui bao cao sai khung gio.
 
 Co the chay thu cong tren GitHub:
 - Vao `Actions` -> `free scheduled tasks` -> `Run workflow`.
@@ -225,7 +227,7 @@ Sau khi deploy, script se:
 - set Cloudflare Worker secrets;
 - deploy worker `fb-ads-telegram-dispatcher`;
 - set Telegram webhook den `/telegram/webhook`;
-- worker se dispatch update sang GitHub Actions `free-scheduled-tasks.yml`.
+- worker se dispatch update Telegram va cron schedule sang GitHub Actions `free-scheduled-tasks.yml`.
 
 Tuy chon:
 - Muon bo qua test nhanh khi push: them `-SkipTests`.
@@ -235,8 +237,8 @@ Tuy chon:
 
 Ghi chu:
 - `render-sync-stack.ps1` van ton tai cho phuong an Render worker tra phi, nhung khong dung trong phuong an free.
-- GitHub Actions theo lich khong thay the Telegram polling realtime neu dung mot minh.
-- Them Cloudflare Worker webhook thi Telegram co the nhan lenh khi may local tat, nhung van co do tre do GitHub Actions khoi dong job.
+- Cloudflare Worker webhook/cron giu phan online mien phi khi may local tat.
+- GitHub Actions van co do tre khoi dong job, nhung khong con dung native GitHub schedule cho cac moc gio nghiep vu.
 
 ## Cu phap Telegram
 

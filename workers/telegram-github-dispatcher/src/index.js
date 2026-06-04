@@ -128,7 +128,7 @@ function base64Utf8(value) {
   return btoa(binary);
 }
 
-async function dispatchGitHub(update, env) {
+function githubDispatchConfig(env) {
   const repo = String(env.GITHUB_REPO || "").trim();
   const workflowFile = String(env.GITHUB_WORKFLOW_FILE || "free-scheduled-tasks.yml").trim();
   const ref = String(env.GITHUB_REF || "main").trim();
@@ -136,8 +136,11 @@ async function dispatchGitHub(update, env) {
   if (!repo || !workflowFile || !ref || !token) {
     throw new Error("Missing GitHub dispatcher configuration.");
   }
+  return { repo, workflowFile, ref, token };
+}
 
-  const updateB64 = base64Utf8(JSON.stringify(update));
+async function dispatchGitHubInputs(inputs, env) {
+  const { repo, workflowFile, ref, token } = githubDispatchConfig(env);
   const response = await fetch(
     `https://api.github.com/repos/${repo}/actions/workflows/${workflowFile}/dispatches`,
     {
@@ -151,17 +154,65 @@ async function dispatchGitHub(update, env) {
       },
       body: JSON.stringify({
         ref,
-        inputs: {
-          task: "telegram-update",
-          update_b64: updateB64,
-          source: "cloudflare-worker",
-        },
+        inputs,
       }),
     },
   );
   if (response.status !== 204) {
     const body = await response.text();
     throw new Error(`GitHub dispatch failed: ${response.status} ${body.slice(0, 500)}`);
+  }
+}
+
+async function dispatchTelegramUpdate(update, env) {
+  const updateB64 = base64Utf8(JSON.stringify(update));
+  await dispatchGitHubInputs(
+    {
+      task: "telegram-update",
+      update_b64: updateB64,
+      source: "cloudflare-worker",
+    },
+    env,
+  );
+}
+
+function scheduledInputsFromCron(cron) {
+  switch (String(cron || "").trim()) {
+    case "*/30 * * * *":
+      return {
+        task: "pancake-td-sync",
+        pancake_notify: "auto",
+        source: "cloudflare-cron",
+      };
+    case "0 1 * * *":
+      return {
+        task: "daily-report",
+        slot: "morning",
+        source: "cloudflare-cron",
+      };
+    case "0 2 * * *":
+      return {
+        task: "token-health",
+        source: "cloudflare-cron",
+      };
+    case "0 8 * * 1,5":
+      return {
+        task: "reconcile-cash-in",
+        source: "cloudflare-cron",
+      };
+    case "0 8 * * 6":
+      return {
+        task: "reconcile-weekly",
+        source: "cloudflare-cron",
+      };
+    case "0 14 * * *":
+      return {
+        task: "daily-report",
+        slot: "evening",
+        source: "cloudflare-cron",
+      };
+    default:
+      return null;
   }
 }
 
@@ -212,12 +263,22 @@ export default {
     }
 
     try {
-      await dispatchGitHub(update, env);
+      await dispatchTelegramUpdate(update, env);
       ctx.waitUntil(sendAck(update, env));
       return jsonResponse({ ok: true, dispatched: true });
     } catch (error) {
       console.error(error);
       return jsonResponse({ ok: false, error: "dispatch_failed" }, 500);
     }
+  },
+
+  async scheduled(event, env) {
+    const inputs = scheduledInputsFromCron(event.cron);
+    if (!inputs) {
+      console.log(`No GitHub task mapped for cron: ${event.cron}`);
+      return;
+    }
+    await dispatchGitHubInputs(inputs, env);
+    console.log(`Dispatched GitHub task ${inputs.task} from cron ${event.cron}`);
   },
 };

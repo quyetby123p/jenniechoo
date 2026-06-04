@@ -1,14 +1,6 @@
 name: free scheduled tasks
 
 on:
-  schedule:
-    # GitHub cron is UTC. Asia/Ho_Chi_Minh = UTC+7.
-    - cron: "*/30 * * * *"      # Pancake -> Thai Duong batch sync.
-    - cron: "0 1 * * *"         # 08:00 ICT morning daily report.
-    - cron: "0 2 * * *"         # 09:00 ICT token health.
-    - cron: "0 8 * * 1,5"       # 15:00 ICT Monday/Friday Thai Duong cash-in report.
-    - cron: "0 8 * * 6"         # 15:00 ICT Saturday weekly cash-in summary.
-    - cron: "0 14 * * *"        # 21:00 ICT evening daily report.
   workflow_dispatch:
     inputs:
       task:
@@ -160,42 +152,16 @@ jobs:
         id: task
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "task=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
-            echo "slot=${{ inputs.slot }}" >> "$GITHUB_OUTPUT"
-            echo "date=${{ inputs.date }}" >> "$GITHUB_OUTPUT"
-            echo "pancake_notify=${{ inputs.pancake_notify }}" >> "$GITHUB_OUTPUT"
-            echo "source=${{ inputs.source }}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "task=skip" >> "$GITHUB_OUTPUT"
+            echo "Unsupported event '${{ github.event_name }}'; native GitHub schedule is disabled."
             exit 0
           fi
-
-          case "${{ github.event.schedule }}" in
-            "*/30 * * * *")
-              echo "task=pancake-td-sync" >> "$GITHUB_OUTPUT"
-              echo "pancake_notify=auto" >> "$GITHUB_OUTPUT"
-              ;;
-            "0 1 * * *")
-              echo "task=daily-report" >> "$GITHUB_OUTPUT"
-              echo "slot=morning" >> "$GITHUB_OUTPUT"
-              ;;
-            "0 2 * * *")
-              echo "task=token-health" >> "$GITHUB_OUTPUT"
-              ;;
-            "0 8 * * 1,5")
-              echo "task=reconcile-cash-in" >> "$GITHUB_OUTPUT"
-              ;;
-            "0 8 * * 6")
-              echo "task=reconcile-weekly" >> "$GITHUB_OUTPUT"
-              ;;
-            "0 14 * * *")
-              echo "task=daily-report" >> "$GITHUB_OUTPUT"
-              echo "slot=evening" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "Unknown schedule: ${{ github.event.schedule }}"
-              exit 1
-              ;;
-          esac
+          echo "task=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
+          echo "slot=${{ inputs.slot }}" >> "$GITHUB_OUTPUT"
+          echo "date=${{ inputs.date }}" >> "$GITHUB_OUTPUT"
+          echo "pancake_notify=${{ inputs.pancake_notify }}" >> "$GITHUB_OUTPUT"
+          echo "source=${{ inputs.source }}" >> "$GITHUB_OUTPUT"
 
       - name: Check minimum secrets
         shell: bash
@@ -222,6 +188,10 @@ jobs:
         shell: bash
         run: |
           task="${{ steps.task.outputs.task }}"
+          if [ "$task" = "skip" ]; then
+            echo "Skipping unsupported non-dispatch event."
+            exit 0
+          fi
           args=("$task")
           if [ "$task" = "daily-report" ]; then
             args+=("--slot" "${{ steps.task.outputs.slot || 'morning' }}")
