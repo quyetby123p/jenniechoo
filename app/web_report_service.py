@@ -67,10 +67,6 @@ class WebReportService:
         returning_labels = self._to_text_set(status_cfg.get("returning_status_labels", ["đang hoàn", "hoàn"]))
         shipping_codes = self._to_int_set(status_cfg.get("shipping_status_codes", [2]))
         shipping_labels = self._to_text_set(status_cfg.get("shipping_status_labels", ["đã gửi hàng", "dang giao"]))
-        pending_order_codes = self._to_int_set(status_cfg.get("pending_reconcile_order_status_codes", [3, 4, 5]))
-        pending_order_labels = self._to_text_set(
-            status_cfg.get("pending_reconcile_order_status_labels", ["đã nhận", "đang hoàn", "đã hoàn"])
-        )
         status_code_labels = self._build_status_code_label_map(status_cfg)
         brand_rules = status_cfg.get("brand_rules", [])
 
@@ -97,7 +93,6 @@ class WebReportService:
         waiting_orders: list[dict[str, Any]] = []
         returning_orders: list[dict[str, Any]] = []
         shipping_orders: list[dict[str, Any]] = []
-        pending_reconcile_candidates: list[dict[str, Any]] = []
         brands: dict[str, dict[str, Any]] = {}
 
         for order in orders:
@@ -179,26 +174,6 @@ class WebReportService:
                         "order_total_text": self._fmt_currency(order_total_minor),
                     }
                 )
-            if self._is_pending_reconcile_order_status(
-                code=order_status_code,
-                label=order_status_label,
-                pending_codes=pending_order_codes,
-                pending_labels=pending_order_labels,
-            ):
-                pending_reconcile_candidates.append(
-                    self._build_pending_reconcile_order_row(
-                        order=order,
-                        order_ref=order_ref,
-                        brand_name=brand_name,
-                        brand_slug=brand_slug,
-                        status_code=order_status_code,
-                        status_label=order_status_label,
-                        created_dt=order_created_dt,
-                        order_total_minor=order_total_minor,
-                        tz=tz,
-                    )
-                )
-
             brand_bucket = brands.setdefault(
                 brand_slug,
                 {
@@ -313,11 +288,8 @@ class WebReportService:
             end_date=end_date,
             status_cfg=status_cfg,
         )
+        pending_reconcile = reconcile_summary.get("pending_rows", [])
         reconcile_received = reconcile_summary.get("received_rows", [])
-        pending_reconcile = self._filter_unreconciled_order_rows(
-            pending_reconcile_candidates,
-            reconcile_received=reconcile_received,
-        )
         pending_reconcile_orders = self._count_unique_reconcile_order_refs(pending_reconcile)
         reconcile_received_orders = self._count_unique_reconcile_order_refs(reconcile_received)
         pending_reconcile_value_minor = self._sum_reconcile_rows_value_minor(
@@ -683,9 +655,6 @@ class WebReportService:
         value = record.get("td_sheet_cod_minor")
         if value is None:
             return False
-        normalized_status = td_status or self._normalize_text(str(record.get("td_status", "")).strip())
-        if normalized_status in {self._normalize_text("BEING_RETURNED"), self._normalize_text("RETURNED")}:
-            return True
         return self._to_int(value, fallback=0) > 0
 
     def _is_td_pancake_status_aligned(
@@ -969,25 +938,6 @@ class WebReportService:
             return True
         return False
 
-    def _is_pending_reconcile_order_status(
-        self,
-        *,
-        code: int | None,
-        label: str,
-        pending_codes: set[int],
-        pending_labels: set[str],
-    ) -> bool:
-        if code is not None and code in pending_codes:
-            return True
-        normalized_label = self._normalize_text(label)
-        if normalized_label and normalized_label in pending_labels:
-            return True
-        if "da nhan" in normalized_label or "giao hang thanh cong" in normalized_label:
-            return True
-        if "dang hoan" in normalized_label or "da hoan" in normalized_label:
-            return True
-        return False
-
     def _is_closed_status(
         self,
         *,
@@ -1111,168 +1061,6 @@ class WebReportService:
             return max(0, self._to_int(raw))
         return 0
 
-    def _build_pending_reconcile_order_row(
-        self,
-        *,
-        order: dict[str, Any],
-        order_ref: str,
-        brand_name: str,
-        brand_slug: str,
-        status_code: int | None,
-        status_label: str,
-        created_dt: datetime | None,
-        order_total_minor: int,
-        tz: timezone | ZoneInfo,
-    ) -> dict[str, Any]:
-        awb = self._extract_order_awb(order)
-        match_keys = self._order_reconcile_match_keys(order_ref=order_ref, awb=awb)
-        return {
-            "pancake_order_ref": order_ref,
-            "reconcile_ref": order_ref or awb,
-            "display_ref": order_ref or awb,
-            "match_result": "not_reconciled",
-            "reason": "Đơn đã giao/hoàn nhưng chưa có trong dữ liệu đối soát COD.",
-            "td_awb": awb,
-            "td_status": status_label or (str(status_code) if status_code is not None else ""),
-            "customer_name": self._extract_order_customer_name(order),
-            "settlement_date": "",
-            "brand_name": brand_name,
-            "brand_slug": brand_slug,
-            "status_code": status_code,
-            "status_label": status_label,
-            "created_at": self._format_dt(created_dt, tz=tz),
-            "created_ts": self._to_ts(created_dt),
-            "order_total_minor": order_total_minor,
-            "order_total_text": self._fmt_currency(order_total_minor),
-            "td_cod_minor": order_total_minor,
-            "td_cod_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(order_total_minor)),
-            "td_cod_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(order_total_minor))),
-            "reconcile_match_keys": sorted(match_keys),
-        }
-
-    def _filter_unreconciled_order_rows(
-        self,
-        rows: list[dict[str, Any]],
-        *,
-        reconcile_received: Any,
-    ) -> list[dict[str, Any]]:
-        reconciled_keys = self._build_reconciled_match_keys(reconcile_received)
-        result: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            row_keys = self._row_reconcile_match_keys(row)
-            if row_keys & reconciled_keys:
-                continue
-            row_key = self._reconcile_row_key(row)
-            if row_key and row_key in seen:
-                continue
-            if row_key:
-                seen.add(row_key)
-            result.append(row)
-        result.sort(key=lambda item: self._to_int(item.get("created_ts")), reverse=True)
-        return result
-
-    def _build_reconciled_match_keys(self, rows: Any) -> set[str]:
-        keys: set[str] = set()
-        if not isinstance(rows, list):
-            return keys
-        for row in rows:
-            if isinstance(row, dict):
-                keys.update(self._row_reconcile_match_keys(row))
-        return keys
-
-    def _row_reconcile_match_keys(self, row: dict[str, Any]) -> set[str]:
-        keys: set[str] = set()
-        explicit_keys = row.get("reconcile_match_keys")
-        if isinstance(explicit_keys, list):
-            for item in explicit_keys:
-                normalized = self._normalize_text(str(item).strip())
-                if normalized:
-                    keys.add(normalized)
-        keys.update(
-            self._order_reconcile_match_keys(
-                order_ref=str(row.get("pancake_order_ref", "")).strip(),
-                awb=str(row.get("td_awb", "")).strip(),
-            )
-        )
-        return keys
-
-    def _order_reconcile_match_keys(self, *, order_ref: str, awb: str) -> set[str]:
-        keys: set[str] = set()
-        for value in (order_ref, awb):
-            keys.update(self._reconcile_ref_aliases(value))
-        return keys
-
-    def _reconcile_ref_aliases(self, value: Any) -> set[str]:
-        normalized = self._normalize_text(str(value or "").strip())
-        if not normalized:
-            return set()
-        aliases = {normalized}
-        if normalized.startswith("jct") and normalized[3:].isdigit():
-            aliases.add(normalized[3:])
-        elif normalized.isdigit():
-            aliases.add(f"jct{normalized}")
-        return aliases
-
-    def _extract_order_awb(self, order: dict[str, Any]) -> str:
-        candidates: list[Any] = [
-            order.get("tracking_number"),
-            order.get("tracking_code"),
-            order.get("shipping_code"),
-            order.get("bill_code"),
-            order.get("awb"),
-        ]
-        for container_key in ("third_party_infomation", "third_party_information", "additional_info"):
-            container = order.get(container_key)
-            if isinstance(container, dict):
-                candidates.extend(
-                    [
-                        container.get("tracking_number"),
-                        container.get("tracking_code"),
-                        container.get("bill_code"),
-                        container.get("awb"),
-                    ]
-                )
-        shipments = order.get("shipments")
-        if isinstance(shipments, list):
-            for shipment in shipments:
-                if not isinstance(shipment, dict):
-                    continue
-                candidates.extend(
-                    [
-                        shipment.get("tracking_number"),
-                        shipment.get("tracking_code"),
-                        shipment.get("bill_code"),
-                        shipment.get("awb"),
-                    ]
-                )
-        for candidate in candidates:
-            text = str(candidate or "").strip()
-            if text:
-                return text
-        return ""
-
-    def _extract_order_customer_name(self, order: dict[str, Any]) -> str:
-        candidates: list[Any] = [
-            order.get("bill_full_name"),
-            order.get("full_name"),
-            order.get("customer_name"),
-            order.get("receiver_name"),
-        ]
-        shipping_address = order.get("shipping_address")
-        if isinstance(shipping_address, dict):
-            candidates.extend([shipping_address.get("full_name"), shipping_address.get("name")])
-        customer = order.get("customer")
-        if isinstance(customer, dict):
-            candidates.extend([customer.get("name"), customer.get("full_name")])
-        for candidate in candidates:
-            text = str(candidate or "").strip()
-            if text:
-                return text
-        return ""
-
     def _extract_order_datetime(self, order: dict[str, Any], *, tz: timezone | ZoneInfo) -> datetime | None:
         ts_candidates = (
             order.get("inserted_at"),
@@ -1326,8 +1114,6 @@ class WebReportService:
             "returning_status_labels": ["đang hoàn", "đã hoàn", "being_returned", "returned"],
             "shipping_status_codes": [2],
             "shipping_status_labels": ["đã gửi hàng", "dang giao", "shipping"],
-            "pending_reconcile_order_status_codes": [3, 4, 5],
-            "pending_reconcile_order_status_labels": ["đã nhận", "đang hoàn", "đã hoàn"],
             "pending_reconcile_mode": "match_result",
             "pending_reconcile_td_success_statuses": ["success"],
             "pending_reconcile_td_to_pancake_status_codes": {

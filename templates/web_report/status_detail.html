@@ -138,27 +138,29 @@
         <thead>
           <tr>
             <th>Mã đơn / AWB</th>
+            <th>Match result</th>
             <th>Khách hàng</th>
             <th>AWB</th>
-            <th>Trạng thái Pancake</th>
-            <th>Giá trị đơn</th>
+            <th>Trạng thái TD</th>
+            <th>COD</th>
             <th>Lý do</th>
-            <th>Thời gian tạo</th>
+            <th>Ngày đối soát</th>
           </tr>
         </thead>
         <tbody>
         {% for row in rows %}
           <tr>
             <td data-label="Mã đơn / AWB"><strong>{{ row.display_ref or row.pancake_order_ref or row.td_awb }}</strong></td>
+            <td data-label="Match result">{{ row.match_result }}</td>
             <td data-label="Khách hàng">{{ row.customer_name }}</td>
             <td data-label="AWB">{{ row.td_awb }}</td>
-            <td data-label="Trạng thái Pancake">{{ row.status_label or row.td_status }}</td>
-            <td data-label="Giá trị đơn">{{ row.order_total_text or (row.td_cod_thb_text ~ " THB") }}</td>
+            <td data-label="Trạng thái TD">{{ row.td_status }}</td>
+            <td data-label="COD">{{ row.td_cod_thb_text }} THB</td>
             <td data-label="Lý do">{{ row.reason }}</td>
-            <td data-label="Thời gian tạo">{{ row.created_at or row.settlement_date }}</td>
+            <td data-label="Ngày đối soát">{{ row.settlement_date }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="text-muted" data-label="">Không có đơn chờ đối soát.</td></tr>
+          <tr><td colspan="8" class="text-muted" data-label="">Không có đơn chờ đối soát.</td></tr>
         {% endfor %}
         </tbody>
       </table>
