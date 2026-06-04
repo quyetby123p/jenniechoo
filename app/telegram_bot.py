@@ -2037,13 +2037,6 @@ class TelegramAdsBot:
             self.logger.info("Daily report lan tiep theo sau %s giay (%s)", wait_seconds, slot)
             await asyncio.sleep(wait_seconds)
             run_date = datetime.now(self._resolve_timezone()).date()
-            if self._daily_report_slot_already_sent(slot, run_date):
-                self.logger.info(
-                    "Bo qua daily report slot %s ngay %s vi da gui truoc do.",
-                    slot,
-                    run_date.isoformat(),
-                )
-                continue
             claim = self._try_claim_local_schedule(task="daily-report", slot=slot, run_date=run_date)
             if not claim:
                 continue
