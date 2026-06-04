@@ -8,9 +8,9 @@ enabled = true
 
 [triggers]
 crons = [
-  "*/30 * * * *",      # Pancake -> Thai Duong batch sync.
-  "0 1 * * *",         # 08:00 Asia/Ho_Chi_Minh morning daily report.
-  "0 2 * * *",         # 09:00 Asia/Ho_Chi_Minh token health.
-  "0 8 * * 1,5,6",     # 15:00 Asia/Ho_Chi_Minh Mon/Fri cash-in, Sat weekly summary.
-  "0 14 * * *",        # 21:00 Asia/Ho_Chi_Minh evening daily report.
+  "5,35 * * * *",      # Backup +5m for 30-minute Pancake -> Thai Duong sync buckets.
+  "5 1 * * *",         # Backup 08:05 Asia/Ho_Chi_Minh morning daily report.
+  "5 2 * * *",         # Backup 09:05 Asia/Ho_Chi_Minh token health.
+  "5 8 * * 1,5,6",     # Backup 15:05 Asia/Ho_Chi_Minh Mon/Fri cash-in, Sat weekly summary.
+  "5 14 * * *",        # Backup 21:05 Asia/Ho_Chi_Minh evening daily report.
 ]

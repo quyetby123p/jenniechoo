@@ -163,6 +163,7 @@ try {
     Set-WranglerSecret -Name "GITHUB_WORKFLOW_FILE" -Value $WorkflowFile -ConfigPath $configPath
     Set-WranglerSecret -Name "GITHUB_REF" -Value $GitRef -ConfigPath $configPath
     Set-WranglerSecret -Name "CLOUD_DISPATCH_ACK_ENABLED" -Value "1" -ConfigPath $configPath
+    Set-WranglerSecret -Name "SCHEDULE_GUARD_SECRET" -Value $WebhookSecret -ConfigPath $configPath
 
     if (-not $SkipDeploy) {
         Write-Host "Deploying Cloudflare Worker..."
@@ -188,6 +189,12 @@ if ([string]::IsNullOrWhiteSpace($WorkerUrl)) {
     Write-Host "Rerun with -WorkerUrl https://<worker>.<subdomain>.workers.dev to set Telegram webhook."
     exit 0
 }
+
+$scheduleMarkUrl = $WorkerUrl.TrimEnd("/") + "/schedule/mark"
+Set-EnvFileValue -Path $envPath -Name "CLOUD_SCHEDULE_GUARD_MARK_URL" -Value $scheduleMarkUrl
+Set-EnvFileValue -Path $envPath -Name "CLOUD_SCHEDULE_GUARD_SECRET" -Value $WebhookSecret
+Set-EnvFileValue -Path $envPath -Name "CLOUD_SCHEDULE_GUARD_ENABLED" -Value "1"
+Write-Host ("Saved local schedule guard endpoint: {0}" -f $scheduleMarkUrl)
 
 if (-not $SkipSetWebhook) {
     $webhookUrl = $WorkerUrl.TrimEnd("/") + "/telegram/webhook"
