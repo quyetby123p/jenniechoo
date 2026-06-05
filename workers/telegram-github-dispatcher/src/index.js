@@ -82,9 +82,12 @@ function looksRelevantDirectText(text) {
   );
 }
 
-function shouldDispatch(update, env) {
+function shouldDispatch(update, env, botName = "main") {
+  const isBot3 = String(botName || "").trim().toLowerCase() === "bot3";
   const actorId = actorIdFromUpdate(update);
-  const allowedUserId = String(env.TELEGRAM_ALLOWED_USER_ID || "").trim();
+  const allowedUserId = String(
+    isBot3 ? env.BOT3_ALLOWED_USER_ID || env.TELEGRAM_ALLOWED_USER_ID || "" : env.TELEGRAM_ALLOWED_USER_ID || "",
+  ).trim();
   if (allowedUserId && actorId && actorId !== allowedUserId) {
     return false;
   }
@@ -109,14 +112,19 @@ function shouldDispatch(update, env) {
   }
 
   if (chatType === "private") {
+    if (isBot3) {
+      return true;
+    }
     return looksRelevantDirectText(text);
   }
 
-  const allowedGroupChatIds = csvSet(env.ALLOWED_GROUP_CHAT_IDS);
+  const allowedGroupChatIds = csvSet(
+    isBot3 ? env.BOT3_ALLOWED_GROUP_CHAT_IDS || env.BOT3_TASK_GROUP_CHAT_ID || "" : env.ALLOWED_GROUP_CHAT_IDS,
+  );
   if (!allowedGroupChatIds.has(chatId)) {
     return false;
   }
-  return text.startsWith("/") || hasBotMention(text, env.BOT_USERNAME);
+  return text.startsWith("/") || hasBotMention(text, isBot3 ? env.BOT3_USERNAME : env.BOT_USERNAME);
 }
 
 function base64Utf8(value) {
@@ -168,11 +176,12 @@ async function dispatchGitHubInputs(inputs, env) {
   }
 }
 
-async function dispatchTelegramUpdate(update, env) {
+async function dispatchTelegramUpdate(update, env, botName = "main") {
   const updateB64 = base64Utf8(JSON.stringify(update));
   await dispatchGitHubInputs(
     {
       task: "telegram-update",
+      bot: String(botName || "main").trim().toLowerCase() === "bot3" ? "bot3" : "main",
       update_b64: updateB64,
       source: "cloudflare-worker",
     },
@@ -221,7 +230,7 @@ function localHalfHourBucket(timestamp) {
 function scheduleMarkKey(parts) {
   const task = String(parts.task || "").trim();
   if (!task) return "";
-  if (task === "daily-report") {
+  if (task === "daily-report" || task === "bot3-daily-checkin") {
     const slot = String(parts.slot || "").trim();
     const runDate = String(parts.run_date || "").trim();
     return slot && runDate ? `${task}:${slot}:${runDate}` : "";
@@ -236,7 +245,7 @@ function scheduleMarkKey(parts) {
 
 function scheduleMarkPartsFromCloud(inputs, scheduledTime) {
   const task = String(inputs.task || "").trim();
-  if (task === "daily-report") {
+  if (task === "daily-report" || task === "bot3-daily-checkin") {
     return {
       task,
       slot: String(inputs.slot || "").trim(),
@@ -374,53 +383,71 @@ async function handleScheduleMark(request, env) {
 }
 
 function scheduledInputsFromCron(cron, scheduledTime) {
+  const parts = localDateParts(scheduledTime);
   switch (String(cron || "").trim()) {
-    case "5,35 * * * *":
-      return {
+    case "5,35 * * * *": {
+      const inputs = [{
         task: "pancake-td-sync",
         pancake_notify: "auto",
         source: "cloudflare-cron",
-      };
+      }];
+      if (parts.hour === 17 && parts.minute === 5) {
+        inputs.push({
+          task: "bot3-daily-checkin",
+          slot: "evening",
+          source: "cloudflare-cron",
+        });
+      }
+      return inputs;
+    }
     case "5 1 * * *":
-      return {
+      return [{
         task: "daily-report",
         slot: "morning",
         source: "cloudflare-cron",
-      };
+      }];
     case "5 2 * * *":
-      return {
-        task: "token-health",
-        source: "cloudflare-cron",
-      };
+      return [
+        {
+          task: "token-health",
+          source: "cloudflare-cron",
+        },
+        {
+          task: "bot3-daily-checkin",
+          slot: "morning",
+          source: "cloudflare-cron",
+        },
+      ];
     case "5 8 * * 1,5,6": {
       const dayOfWeek = new Date(scheduledTime || Date.now()).getUTCDay();
       if (dayOfWeek === 6) {
-        return {
+        return [{
           task: "reconcile-weekly",
           source: "cloudflare-cron",
-        };
+        }];
       }
-      return {
+      return [{
         task: "reconcile-cash-in",
         source: "cloudflare-cron",
-      };
+      }];
     }
     case "5 14 * * *":
-      return {
+      return [{
         task: "daily-report",
         slot: "evening",
         source: "cloudflare-cron",
-      };
+      }];
     default:
-      return null;
+      return [];
   }
 }
 
-async function sendAck(update, env) {
+async function sendAck(update, env, botName = "main") {
   if (String(env.CLOUD_DISPATCH_ACK_ENABLED || "0").trim() !== "1") {
     return;
   }
-  const token = String(env.TELEGRAM_BOT_TOKEN || "").trim();
+  const isBot3 = String(botName || "").trim().toLowerCase() === "bot3";
+  const token = String(isBot3 ? env.BOT3_TELEGRAM_TOKEN || "" : env.TELEGRAM_BOT_TOKEN || "").trim();
   if (!token) {
     return;
   }
@@ -459,11 +486,16 @@ export default {
     if (request.method === "POST" && url.pathname === "/schedule/mark") {
       return handleScheduleMark(request, env);
     }
-    if (request.method !== "POST" || url.pathname !== "/telegram/webhook") {
+    const botName = url.pathname === "/telegram/webhook/bot3" ? "bot3" : "main";
+    if (request.method !== "POST" || !["/telegram/webhook", "/telegram/webhook/bot3"].includes(url.pathname)) {
       return jsonResponse({ ok: false, error: "not_found" }, 404);
     }
 
-    const expectedSecret = String(env.TELEGRAM_WEBHOOK_SECRET || "").trim();
+    const expectedSecret = String(
+      botName === "bot3"
+        ? env.BOT3_TELEGRAM_WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
+        : env.TELEGRAM_WEBHOOK_SECRET || "",
+    ).trim();
     const providedSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
     if (!expectedSecret || providedSecret !== expectedSecret) {
       return jsonResponse({ ok: false, error: "forbidden" }, 403);
@@ -476,13 +508,13 @@ export default {
       return jsonResponse({ ok: false, error: "invalid_json" }, 400);
     }
 
-    if (!shouldDispatch(update, env)) {
+    if (!shouldDispatch(update, env, botName)) {
       return jsonResponse({ ok: true, dispatched: false });
     }
 
     try {
-      await dispatchTelegramUpdate(update, env);
-      ctx.waitUntil(sendAck(update, env));
+      await dispatchTelegramUpdate(update, env, botName);
+      ctx.waitUntil(sendAck(update, env, botName));
       return jsonResponse({ ok: true, dispatched: true });
     } catch (error) {
       console.error(error);
@@ -491,16 +523,18 @@ export default {
   },
 
   async scheduled(event, env) {
-    const inputs = scheduledInputsFromCron(event.cron, event.scheduledTime);
-    if (!inputs) {
+    const inputList = scheduledInputsFromCron(event.cron, event.scheduledTime);
+    if (!inputList.length) {
       console.log(`No GitHub task mapped for cron: ${event.cron}`);
       return;
     }
-    if (await hasLocalCompletionMark(inputs, event.scheduledTime, env)) {
-      console.log(`Skipped GitHub task ${inputs.task} from cron ${event.cron}; local completion mark exists.`);
-      return;
+    for (const inputs of inputList) {
+      if (await hasLocalCompletionMark(inputs, event.scheduledTime, env)) {
+        console.log(`Skipped GitHub task ${inputs.task} from cron ${event.cron}; local completion mark exists.`);
+        continue;
+      }
+      await dispatchGitHubInputs(inputs, env);
+      console.log(`Dispatched GitHub task ${inputs.task} from cron ${event.cron}`);
     }
-    await dispatchGitHubInputs(inputs, env);
-    console.log(`Dispatched GitHub task ${inputs.task} from cron ${event.cron}`);
   },
 };

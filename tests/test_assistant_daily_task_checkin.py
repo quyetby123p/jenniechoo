@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import date, datetime
 import logging
 from pathlib import Path
 
@@ -140,6 +140,8 @@ def test_daily_task_prompt_writes_drafts_and_state(tmp_path: Path) -> None:
     storage = AssistantStorageService(settings=settings, logger=_fake_logger())
     tasks = AssistantTaskService(settings=settings, logger=_fake_logger())
     bot = _build_bot(settings=settings, storage=storage, tasks=tasks)
+    guard = _FakeCloudGuard()
+    bot.cloud_schedule_guard = guard  # type: ignore[assignment]
     sent: list[tuple[int, str]] = []
 
     async def fake_send(chat_id: int, text: str, reply_markup=None) -> None:  # noqa: ANN001
@@ -154,6 +156,7 @@ def test_daily_task_prompt_writes_drafts_and_state(tmp_path: Path) -> None:
     assert sent and "hôm nay anh có công việc gì" in sent[0][1]
     assert storage.load_task_draft(user_id=1)["mode"] == "daily_task_morning"
     assert storage.load_daily_task_checkin_state()["days"]["2026-06-04"]["morning_sent"] is True
+    assert guard.calls == [("bot3-daily-checkin", "morning", date(2026, 6, 4))]
 
 
 def _build_bot(
@@ -179,6 +182,23 @@ def _build_bot(
 class _FakeScheduler:
     def now_local(self) -> datetime:
         return datetime(2026, 6, 4, 10, 0, 0)
+
+
+class _FakeCloudGuard:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None, date | str | None]] = []
+
+    def mark_completed(
+        self,
+        *,
+        task: str,
+        slot: str | None = None,
+        run_date: date | str | None = None,
+        bucket: str | None = None,  # noqa: ARG002
+        source: str = "local",  # noqa: ARG002
+    ) -> bool:
+        self.calls.append((task, slot, run_date))
+        return True
 
 
 def _fake_logger():  # noqa: ANN202
