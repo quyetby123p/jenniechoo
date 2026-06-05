@@ -124,6 +124,11 @@ $allowedUserId = [string]$envValues["TELEGRAM_ALLOWED_USER_ID"]
 if ([string]::IsNullOrWhiteSpace($telegramToken) -or [string]::IsNullOrWhiteSpace($allowedUserId)) {
     throw "TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_ID are required in $EnvFile."
 }
+$bot3TelegramToken = [string]$envValues["BOT3_TELEGRAM_TOKEN"]
+$bot3AllowedUserId = [string]$envValues["BOT3_ALLOWED_USER_ID"]
+if ([string]::IsNullOrWhiteSpace($bot3AllowedUserId)) {
+    $bot3AllowedUserId = $allowedUserId
+}
 if ([string]::IsNullOrWhiteSpace($WebhookSecret)) {
     $WebhookSecret = [string]$envValues["TELEGRAM_WEBHOOK_SECRET"]
 }
@@ -138,6 +143,14 @@ if (-not $botInfo.ok) {
     throw "Telegram getMe failed."
 }
 $botUsername = [string]$botInfo.result.username
+$bot3Username = ""
+if (-not [string]::IsNullOrWhiteSpace($bot3TelegramToken)) {
+    $bot3Info = Invoke-RestMethod -Method Get -Uri ("https://api.telegram.org/bot{0}/getMe" -f $bot3TelegramToken)
+    if (-not $bot3Info.ok) {
+        throw "Bot 3 Telegram getMe failed."
+    }
+    $bot3Username = [string]$bot3Info.result.username
+}
 
 $groupIds = New-Object System.Collections.Generic.List[string]
 foreach ($key in @("DAILY_REPORT_NOTIFY_CHAT_ID", "RECONCILE_COD_NOTIFY_CHAT_ID", "PANCAKE_TD_SYNC_NOTIFY_CHAT_ID")) {
@@ -147,6 +160,14 @@ foreach ($key in @("DAILY_REPORT_NOTIFY_CHAT_ID", "RECONCILE_COD_NOTIFY_CHAT_ID"
     }
 }
 $allowedGroupChatIds = (($groupIds | Select-Object -Unique) -join ",")
+$bot3GroupIds = New-Object System.Collections.Generic.List[string]
+foreach ($key in @("BOT3_TASK_GROUP_CHAT_ID")) {
+    $value = [string]$envValues[$key]
+    if (-not [string]::IsNullOrWhiteSpace($value) -and $value.Trim() -ne "0") {
+        $bot3GroupIds.Add($value.Trim())
+    }
+}
+$bot3AllowedGroupChatIds = (($bot3GroupIds | Select-Object -Unique) -join ",")
 
 $githubToken = Get-GitHubToken
 
@@ -158,6 +179,12 @@ try {
     Set-WranglerSecret -Name "TELEGRAM_ALLOWED_USER_ID" -Value $allowedUserId -ConfigPath $configPath
     Set-WranglerSecret -Name "BOT_USERNAME" -Value $botUsername -ConfigPath $configPath
     Set-WranglerSecret -Name "ALLOWED_GROUP_CHAT_IDS" -Value $allowedGroupChatIds -ConfigPath $configPath
+    Set-WranglerSecret -Name "BOT3_TELEGRAM_TOKEN" -Value $bot3TelegramToken -ConfigPath $configPath
+    Set-WranglerSecret -Name "BOT3_ALLOWED_USER_ID" -Value $bot3AllowedUserId -ConfigPath $configPath
+    Set-WranglerSecret -Name "BOT3_USERNAME" -Value $bot3Username -ConfigPath $configPath
+    Set-WranglerSecret -Name "BOT3_TASK_GROUP_CHAT_ID" -Value ([string]$envValues["BOT3_TASK_GROUP_CHAT_ID"]) -ConfigPath $configPath
+    Set-WranglerSecret -Name "BOT3_ALLOWED_GROUP_CHAT_IDS" -Value $bot3AllowedGroupChatIds -ConfigPath $configPath
+    Set-WranglerSecret -Name "BOT3_TELEGRAM_WEBHOOK_SECRET" -Value $WebhookSecret -ConfigPath $configPath
     Set-WranglerSecret -Name "GITHUB_TOKEN" -Value $githubToken -ConfigPath $configPath
     Set-WranglerSecret -Name "GITHUB_REPO" -Value $Repo -ConfigPath $configPath
     Set-WranglerSecret -Name "GITHUB_WORKFLOW_FILE" -Value $WorkflowFile -ConfigPath $configPath
@@ -210,6 +237,22 @@ if (-not $SkipSetWebhook) {
         throw "Telegram setWebhook failed: $($result | ConvertTo-Json -Compress)"
     }
     Write-Host "Telegram webhook configured."
+
+    if (-not [string]::IsNullOrWhiteSpace($bot3TelegramToken)) {
+        $bot3WebhookUrl = $WorkerUrl.TrimEnd("/") + "/telegram/webhook/bot3"
+        Write-Host ("Setting Bot 3 Telegram webhook: {0}" -f $bot3WebhookUrl)
+        $bot3Body = @{
+            url = $bot3WebhookUrl
+            secret_token = $WebhookSecret
+            allowed_updates = '["message","callback_query"]'
+            drop_pending_updates = "false"
+        }
+        $bot3Result = Invoke-RestMethod -Method Post -Uri ("https://api.telegram.org/bot{0}/setWebhook" -f $bot3TelegramToken) -Body $bot3Body
+        if (-not $bot3Result.ok) {
+            throw "Bot 3 Telegram setWebhook failed: $($bot3Result | ConvertTo-Json -Compress)"
+        }
+        Write-Host "Bot 3 Telegram webhook configured."
+    }
 }
 
 Write-Host "Cloudflare Telegram webhook setup completed."

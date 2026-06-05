@@ -7,9 +7,20 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 
+from app.assistant_approval_service import AssistantApprovalService
+from app.assistant_bot import TelegramAssistantBot
+from app.assistant_google_service import AssistantGoogleService
+from app.assistant_internal_ops_service import AssistantInternalOpsService
+from app.assistant_memory_service import AssistantMemoryService
+from app.assistant_openai_service import AssistantOpenAIService
+from app.assistant_scheduler_service import AssistantSchedulerService
+from app.assistant_settings import AssistantSettings, load_assistant_settings
+from app.assistant_storage_service import AssistantStorageService
+from app.assistant_task_service import AssistantTaskService
 from app.approval_service import ApprovalService
 from app.daily_report_service import DailyReportService
 from app.daily_task_summary_service import DailyTaskSummaryService
@@ -31,6 +42,14 @@ from app.thai_duong_cod_client import ThaiDuongCodClient
 class ScheduledRuntime:
     settings: Settings
     bot: TelegramAdsBot
+    telegram: Bot
+
+
+@dataclass
+class AssistantScheduledRuntime:
+    settings: AssistantSettings
+    bot: TelegramAssistantBot
+    storage: AssistantStorageService
     telegram: Bot
 
 
@@ -95,6 +114,44 @@ def build_runtime(project_root: Path | None = None) -> ScheduledRuntime:
     )
     bot._bot = telegram
     return ScheduledRuntime(settings=settings, bot=bot, telegram=telegram)
+
+
+def build_assistant_runtime(project_root: Path | None = None) -> AssistantScheduledRuntime:
+    if project_root is None:
+        project_root = Path(__file__).resolve().parents[1]
+
+    settings = load_assistant_settings(project_root=project_root)
+    logger = configure_logger(
+        settings.logs_root,
+        secrets=[
+            settings.telegram_bot_token,
+            settings.openai_api_key,
+            settings.google_oauth_client_secret,
+            settings.google_oauth_refresh_token,
+        ],
+    )
+    storage = AssistantStorageService(settings=settings, logger=logger)
+    memory = AssistantMemoryService(settings=settings, logger=logger)
+    google = AssistantGoogleService(settings=settings, logger=logger)
+    openai = AssistantOpenAIService(settings=settings, logger=logger)
+    internal_ops = AssistantInternalOpsService(project_root=project_root, logger=logger)
+    scheduler = AssistantSchedulerService(settings=settings, storage=storage)
+    tasks = AssistantTaskService(settings=settings, logger=logger)
+    telegram = Bot(token=settings.telegram_bot_token)
+    bot = TelegramAssistantBot(
+        settings=settings,
+        logger=logger,
+        storage=storage,
+        memory=memory,
+        google=google,
+        openai=openai,
+        internal_ops=internal_ops,
+        approval=AssistantApprovalService(),
+        scheduler=scheduler,
+        tasks=tasks,
+    )
+    bot._bot = telegram
+    return AssistantScheduledRuntime(settings=settings, bot=bot, storage=storage, telegram=telegram)
 
 
 def parse_date(value: str | None) -> date | None:
@@ -185,7 +242,71 @@ async def run_pancake_td_sync(runtime: ScheduledRuntime, *, max_batch: int | Non
     await runtime.telegram.send_message(chat_id=notify_chat_id, text=text)
 
 
+async def run_bot3_daily_checkin(runtime: AssistantScheduledRuntime, *, slot: str, run_date: date | None) -> None:
+    selected_slot = str(slot or "morning").strip().lower()
+    if selected_slot not in {"morning", "evening"}:
+        raise ValueError("--slot phai la morning hoac evening")
+    if not runtime.settings.tasks_enabled:
+        print("BOT3_TASKS_ENABLED=0, skip Bot 3 daily check-in.")
+        return
+    if not runtime.settings.daily_task_checkin_enabled:
+        print("BOT3_DAILY_TASK_CHECKIN_ENABLED=0, skip Bot 3 daily check-in.")
+        return
+
+    if run_date is None:
+        tzinfo = ZoneInfo(runtime.settings.timezone_name)
+        run_date = datetime.now(tzinfo).date()
+    if run_date.weekday() not in set(runtime.settings.daily_task_weekdays):
+        print(f"Bot 3 daily check-in skipped for non-workday: {run_date.isoformat()}")
+        return
+
+    day_key = run_date.isoformat()
+    state = runtime.storage.load_daily_task_checkin_state()
+    day_state = runtime.bot._get_daily_task_day_state(state, day_key)
+    if selected_slot == "morning":
+        if bool(day_state.get("morning_sent")):
+            print(f"Bot 3 morning check-in already sent for {day_key}.")
+            return
+        await runtime.bot._send_daily_task_morning_prompt(day_key=day_key, state=state, day_state=day_state)
+        print(f"Bot 3 morning check-in sent for {day_key}.")
+        return
+
+    task_uids = [str(item).strip() for item in day_state.get("task_uids", []) if str(item).strip()]
+    if bool(day_state.get("evening_sent")):
+        print(f"Bot 3 evening check-in already sent for {day_key}.")
+        return
+    if not bool(day_state.get("morning_answered")):
+        print(f"Bot 3 evening check-in skipped for {day_key}: morning not answered.")
+        return
+    if bool(day_state.get("no_tasks")):
+        print(f"Bot 3 evening check-in skipped for {day_key}: no tasks.")
+        return
+    if not task_uids:
+        print(f"Bot 3 evening check-in skipped for {day_key}: no task_uids.")
+        return
+    await runtime.bot._send_daily_task_evening_prompt(
+        day_key=day_key,
+        task_uids=task_uids,
+        state=state,
+        day_state=day_state,
+    )
+    print(f"Bot 3 evening check-in sent for {day_key}.")
+
+
 async def run_task(args: argparse.Namespace) -> int:
+    if str(args.task).strip() == "bot3-daily-checkin":
+        assistant_runtime = build_assistant_runtime()
+        try:
+            await run_bot3_daily_checkin(
+                assistant_runtime,
+                slot=args.slot,
+                run_date=parse_date(args.date),
+            )
+            print(f"Scheduled task completed: {args.task} at {datetime.now(timezone.utc).isoformat()}")
+            return 0
+        finally:
+            await assistant_runtime.telegram.session.close()
+
     runtime = build_runtime()
     try:
         task = str(args.task).strip()
@@ -231,6 +352,10 @@ def build_parser() -> argparse.ArgumentParser:
     pancake = subparsers.add_parser("pancake-td-sync", help="Run one Pancake -> Thai Duong sync batch.")
     pancake.add_argument("--max-batch", type=int, default=None)
     pancake.add_argument("--notify", choices=["auto", "always"], default="auto")
+
+    bot3_daily = subparsers.add_parser("bot3-daily-checkin", help="Send Bot 3 daily task check-in prompt.")
+    bot3_daily.add_argument("--slot", choices=["morning", "evening"], default="morning")
+    bot3_daily.add_argument("--date", default="", help="Optional check-in date in YYYY-MM-DD.")
     return parser
 
 

@@ -25,6 +25,7 @@ from aiogram.types import (
 
 from app.assistant_approval_service import AssistantApprovalService
 from app.assistant_command_parser import parse_assistant_command
+from app.cloud_schedule_guard import CloudScheduleGuardClient
 from app.assistant_memory_service import AssistantMemoryService
 from app.assistant_models import AssistantIntent, ParsedAssistantCommand
 from app.assistant_google_service import AssistantGoogleService
@@ -61,6 +62,7 @@ class TelegramAssistantBot:
         self.approval = approval
         self.scheduler = scheduler
         self.tasks = tasks
+        self.cloud_schedule_guard = CloudScheduleGuardClient.from_env(logger=logger)
         self.router = Router(name="assistant_router")
         self._bot: Bot | None = None
         self._agenda_task: asyncio.Task[None] | None = None
@@ -1461,6 +1463,7 @@ class TelegramAssistantBot:
         )
         day_state["morning_sent"] = True
         self._save_daily_task_day_state(state, day_key, day_state)
+        await self._mark_daily_task_checkin_cloud_completed(slot="morning", day_key=day_key)
 
     async def _send_daily_task_evening_prompt(
         self,
@@ -1497,6 +1500,19 @@ class TelegramAssistantBot:
         await self._bot_send_message(user_id, "\n".join(lines))
         day_state["evening_sent"] = True
         self._save_daily_task_day_state(state, day_key, day_state)
+        await self._mark_daily_task_checkin_cloud_completed(slot="evening", day_key=day_key)
+
+    async def _mark_daily_task_checkin_cloud_completed(self, *, slot: str, day_key: str) -> None:
+        try:
+            run_date = date.fromisoformat(str(day_key).strip())
+        except ValueError:
+            run_date = self.scheduler.now_local().date()
+        await asyncio.to_thread(
+            self.cloud_schedule_guard.mark_completed,
+            task="bot3-daily-checkin",
+            slot=slot,
+            run_date=run_date,
+        )
 
     async def _setup_bot_commands(self) -> None:
         if not self._bot:

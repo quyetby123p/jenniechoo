@@ -11,7 +11,7 @@ from typing import Any
 from aiogram import Dispatcher
 from aiogram.types import Update
 
-from app.scheduled_tasks import build_runtime
+from app.scheduled_tasks import build_assistant_runtime, build_runtime
 
 
 def _read_text_file(path: str) -> str:
@@ -48,12 +48,23 @@ def _decode_update_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 
 async def run_update(update_payload: dict[str, Any], *, validate_only: bool = False) -> int:
+    return await run_update_for_bot(update_payload, bot_name="main", validate_only=validate_only)
+
+
+async def run_update_for_bot(update_payload: dict[str, Any], *, bot_name: str, validate_only: bool = False) -> int:
     if validate_only:
         Update.model_validate(update_payload)
         print(f"Telegram update payload valid: {update_payload.get('update_id')}")
         return 0
 
-    runtime = build_runtime()
+    normalized_bot = str(bot_name or "main").strip().lower()
+    if normalized_bot == "bot3":
+        runtime = build_assistant_runtime()
+    elif normalized_bot == "main":
+        runtime = build_runtime()
+    else:
+        raise ValueError("--bot phai la main hoac bot3")
+
     dispatcher = Dispatcher()
     dispatcher.include_router(runtime.bot.router)
     try:
@@ -65,7 +76,7 @@ async def run_update(update_payload: dict[str, Any], *, validate_only: bool = Fa
 
         update = Update.model_validate(update_payload, context={"bot": runtime.telegram})
         await dispatcher.feed_update(runtime.telegram, update)
-        print(f"Telegram update processed: {update_payload.get('update_id')}")
+        print(f"Telegram update processed: {update_payload.get('update_id')} bot={normalized_bot}")
         return 0
     finally:
         await runtime.telegram.session.close()
@@ -77,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--update-json-file", default="", help="Path to Telegram update JSON.")
     parser.add_argument("--update-b64", default="", help="Base64-encoded Telegram update JSON.")
     parser.add_argument("--update-b64-file", default="", help="Path to base64-encoded Telegram update JSON.")
+    parser.add_argument("--bot", choices=["main", "bot3"], default="main", help="Bot router to process the update.")
     parser.add_argument("--validate-only", action="store_true", help="Only validate update payload shape.")
     return parser
 
@@ -86,7 +98,13 @@ def main() -> int:
     args = parser.parse_args()
     try:
         payload = _decode_update_payload(args)
-        return asyncio.run(run_update(payload, validate_only=bool(args.validate_only)))
+        return asyncio.run(
+            run_update_for_bot(
+                payload,
+                bot_name=str(args.bot or "main"),
+                validate_only=bool(args.validate_only),
+            )
+        )
     except KeyboardInterrupt:
         return 0
     except Exception as exc:  # noqa: BLE001

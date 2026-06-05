@@ -193,7 +193,8 @@ Script tren can GitHub CLI (`gh`) va `gh auth login` truoc khi chay.
 - Cloudflare Worker la backup +5 phut: neu khong thay marker local thi moi dispatch GitHub Actions.
 - Moi 30 phut: local sync truoc; cloud backup tai phut `:05/:35` cho batch `Pancake -> Thai Duong`.
 - 08:00 (Asia/Ho_Chi_Minh): local gui daily report ngay hom qua; cloud backup luc 08:05.
-- 09:00: local kiem tra token Meta/Thai Duong; cloud backup luc 09:05.
+- 09:00: local kiem tra token Meta/Thai Duong va Bot 3 hoi task trong ngay; cloud backup luc 09:05.
+- 17:00: Bot 3 hoi tien do task trong ngay; cloud backup luc 17:05.
 - 15:00 thu 2 va thu 6: local gui bao cao tien ve Thai Duong neu ngay do co ky doi soat that; cloud backup luc 15:05.
 - 15:00 thu 7: local gui tong ket tien ve theo tuan; cloud backup luc 15:05.
 - 21:00: local gui daily report ngay hom nay; cloud backup luc 21:05.
@@ -203,7 +204,7 @@ Script tren can GitHub CLI (`gh`) va `gh auth login` truoc khi chay.
 
 Co the chay thu cong tren GitHub:
 - Vao `Actions` -> `free scheduled tasks` -> `Run workflow`.
-- Chon task: `token-health`, `daily-report`, `reconcile-cash-in`, `reconcile-weekly`, `pancake-td-sync`.
+- Chon task: `token-health`, `daily-report`, `reconcile-cash-in`, `reconcile-weekly`, `pancake-td-sync`, `bot3-daily-checkin`.
 
 ### Telegram online mien phi khi tat may
 
@@ -233,6 +234,7 @@ Sau khi deploy, script se:
 - set Cloudflare Worker secrets;
 - deploy worker `fb-ads-telegram-dispatcher`;
 - set Telegram webhook den `/telegram/webhook`;
+- neu co `BOT3_TELEGRAM_TOKEN`, set them Bot 3 webhook den `/telegram/webhook/bot3`;
 - luu `CLOUD_SCHEDULE_GUARD_MARK_URL` va `CLOUD_SCHEDULE_GUARD_SECRET` vao `.env` local;
 - worker se dispatch update Telegram va cron schedule sang GitHub Actions `free-scheduled-tasks.yml`.
 
@@ -722,6 +724,11 @@ Can dien cac bien trong `.env`:
 - `BOT3_DAILY_TASK_EVENING_HOUR` / `BOT3_DAILY_TASK_EVENING_MINUTE` (mac dinh `17:00`)
 - `BOT3_DAILY_TASK_WEEKDAYS` (mac dinh `0,1,2,3,4,5` = T2-T7)
 - `BOT3_DAILY_TASK_MAX_ITEMS` (mac dinh `20`)
+- Cloud backup khi may local tat:
+- GitHub Actions task `bot3-daily-checkin` gui prompt backup luc 09:05/17:05 neu Worker khong thay local marker.
+- Worker route Bot 3 webhook qua `/telegram/webhook/bot3`; script deploy se set webhook nay neu `.env` co `BOT3_TELEGRAM_TOKEN`.
+- Script sync GitHub secrets se dua cac bien `BOT3_*` len Actions de cloud co token/config Bot 3.
+- GitHub Actions cache them `storage/assistant_bot` de giu `tasks.db` va draft check-in giua cac lan cloud chay.
 
 ### Kiem tra config Bot 3
 
@@ -891,7 +898,7 @@ Zalo webhook co the day payload raw (nested) vao `POST /ingest/zalo`, bot se tu 
   - Moc `08:00` se noi them 2 khoi tong hop `3 ngay gan nhat` va `7 ngay gan nhat`.
   - Moc `21:00` khong them `3d/7d`, nhung se noi them khoi `Task cong viec cuoi ngay` neu `DAILY_REPORT_TASK_SUMMARY_ENABLED=1`.
   - Ban gui ve personal va report thu cong van giu cau truc cu.
-- Bot khong gui daily report ngay luc khoi dong.
+- Bot khong gui daily report ngay luc khoi dong va khong gui bu slot da lo/pending khi khoi dong lai; bot se cho moc dung gio tiep theo.
 - Quyen trong group:
   - Tat ca thanh vien trong group `DAILY_REPORT_NOTIFY_CHAT_ID` deu co the goi lenh report/doi soat, **nhung bat buoc phai tag dung bot** trong tin nhan (vi du: `/report@ten_bot`, `/reconcile@ten_bot cod`, `@ten_bot bao cao hom nay`).
   - Trong group nay, bot chi xu ly report/doi soat; tin nhan khac se im lang (khong bao loi parse link).

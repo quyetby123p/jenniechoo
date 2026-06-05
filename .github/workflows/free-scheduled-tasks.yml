@@ -15,6 +15,7 @@ on:
           - reconcile-weekly
           - pancake-td-sync
           - telegram-update
+          - bot3-daily-checkin
       slot:
         description: "Daily report slot"
         required: false
@@ -43,6 +44,14 @@ on:
         description: "Optional dispatch source label"
         required: false
         default: ""
+      bot:
+        description: "Telegram bot to process webhook updates"
+        required: false
+        default: "main"
+        type: choice
+        options:
+          - main
+          - bot3
 
 concurrency:
   group: free-scheduled-tasks
@@ -121,6 +130,30 @@ jobs:
       THAI_DUONG_CUSTOMER_CODE: ${{ secrets.THAI_DUONG_CUSTOMER_CODE }}
       THAI_DUONG_AUTH_REFRESH_TOKEN: ${{ secrets.THAI_DUONG_AUTH_REFRESH_TOKEN }}
       THAI_DUONG_AUTO_AUTH_STATE_PATH: ${{ secrets.THAI_DUONG_AUTO_AUTH_STATE_PATH }}
+      BOT3_TELEGRAM_TOKEN: ${{ secrets.BOT3_TELEGRAM_TOKEN }}
+      BOT3_ALLOWED_USER_ID: ${{ secrets.BOT3_ALLOWED_USER_ID || secrets.TELEGRAM_ALLOWED_USER_ID }}
+      BOT3_TIMEZONE: ${{ secrets.BOT3_TIMEZONE || 'Asia/Ho_Chi_Minh' }}
+      BOT3_TASKS_ENABLED: ${{ secrets.BOT3_TASKS_ENABLED || '1' }}
+      BOT3_TASK_GROUP_CHAT_ID: ${{ secrets.BOT3_TASK_GROUP_CHAT_ID }}
+      BOT3_MANAGER_USER_IDS: ${{ secrets.BOT3_MANAGER_USER_IDS }}
+      BOT3_TASK_DB_PATH: ${{ secrets.BOT3_TASK_DB_PATH || 'storage/assistant_bot/tasks.db' }}
+      BOT3_DAILY_TASK_CHECKIN_ENABLED: ${{ secrets.BOT3_DAILY_TASK_CHECKIN_ENABLED || '1' }}
+      BOT3_DAILY_TASK_MORNING_HOUR: ${{ secrets.BOT3_DAILY_TASK_MORNING_HOUR || '9' }}
+      BOT3_DAILY_TASK_MORNING_MINUTE: ${{ secrets.BOT3_DAILY_TASK_MORNING_MINUTE || '0' }}
+      BOT3_DAILY_TASK_EVENING_HOUR: ${{ secrets.BOT3_DAILY_TASK_EVENING_HOUR || '17' }}
+      BOT3_DAILY_TASK_EVENING_MINUTE: ${{ secrets.BOT3_DAILY_TASK_EVENING_MINUTE || '0' }}
+      BOT3_DAILY_TASK_WEEKDAYS: ${{ secrets.BOT3_DAILY_TASK_WEEKDAYS || '0,1,2,3,4,5' }}
+      BOT3_DAILY_TASK_MAX_ITEMS: ${{ secrets.BOT3_DAILY_TASK_MAX_ITEMS || '20' }}
+      BOT3_OPENAI_ENABLED: ${{ secrets.BOT3_OPENAI_ENABLED || '0' }}
+      BOT3_OPENAI_API_KEY: ${{ secrets.BOT3_OPENAI_API_KEY }}
+      BOT3_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.BOT3_GOOGLE_OAUTH_CLIENT_ID }}
+      BOT3_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.BOT3_GOOGLE_OAUTH_CLIENT_SECRET }}
+      BOT3_GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.BOT3_GOOGLE_OAUTH_REFRESH_TOKEN }}
+      BOT3_GOOGLE_OAUTH_TOKEN_URI: ${{ secrets.BOT3_GOOGLE_OAUTH_TOKEN_URI }}
+      BOT3_GOOGLE_CALENDAR_IDS: ${{ secrets.BOT3_GOOGLE_CALENDAR_IDS }}
+      BOT3_GMAIL_QUERY_DEFAULT: ${{ secrets.BOT3_GMAIL_QUERY_DEFAULT }}
+      BOT3_SHEETS_SPREADSHEET_ID: ${{ secrets.BOT3_SHEETS_SPREADSHEET_ID }}
+      BOT3_SHEETS_GID: ${{ secrets.BOT3_SHEETS_GID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -144,6 +177,7 @@ jobs:
             storage/thai_duong_auth
             storage/reports
             storage/reconcile_cod
+            storage/assistant_bot
           key: ops-state-${{ github.run_id }}
           restore-keys: |
             ops-state-
@@ -162,6 +196,7 @@ jobs:
           echo "date=${{ inputs.date }}" >> "$GITHUB_OUTPUT"
           echo "pancake_notify=${{ inputs.pancake_notify }}" >> "$GITHUB_OUTPUT"
           echo "source=${{ inputs.source }}" >> "$GITHUB_OUTPUT"
+          echo "bot=${{ inputs.bot }}" >> "$GITHUB_OUTPUT"
 
       - name: Check minimum secrets
         shell: bash
@@ -177,6 +212,15 @@ jobs:
           fi
           if [ -z "$PANCAKE_SHOP_ID" ]; then
             missing+=("PANCAKE_SHOP_ID")
+          fi
+          task="${{ steps.task.outputs.task }}"
+          bot="${{ steps.task.outputs.bot || 'main' }}"
+          if [ "$task" = "bot3-daily-checkin" ] || { [ "$task" = "telegram-update" ] && [ "$bot" = "bot3" ]; }; then
+            for key in BOT3_TELEGRAM_TOKEN BOT3_ALLOWED_USER_ID; do
+              if [ -z "${!key}" ]; then
+                missing+=("$key")
+              fi
+            done
           fi
           if [ "${#missing[@]}" -gt 0 ]; then
             printf 'Missing GitHub Actions secrets:\n'
@@ -199,12 +243,18 @@ jobs:
               args+=("--date" "${{ steps.task.outputs.date }}")
             fi
           fi
+          if [ "$task" = "bot3-daily-checkin" ]; then
+            args+=("--slot" "${{ steps.task.outputs.slot || 'morning' }}")
+            if [ -n "${{ steps.task.outputs.date }}" ]; then
+              args+=("--date" "${{ steps.task.outputs.date }}")
+            fi
+          fi
           if [ "$task" = "pancake-td-sync" ]; then
             args+=("--notify" "${{ steps.task.outputs.pancake_notify || 'auto' }}")
           fi
           if [ "$task" = "telegram-update" ]; then
             python -c 'import json, os, sys; event=json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8")); update_b64=(event.get("inputs") or {}).get("update_b64", ""); sys.exit("Missing update_b64 for telegram-update.") if not update_b64 else open("telegram_update.b64", "w", encoding="utf-8").write(update_b64)'
-            python -m app.telegram_update_runner --update-b64-file telegram_update.b64
+            python -m app.telegram_update_runner --bot "${{ steps.task.outputs.bot || 'main' }}" --update-b64-file telegram_update.b64
           else
             python -m app.scheduled_tasks "${args[@]}"
           fi
@@ -219,4 +269,5 @@ jobs:
             storage/thai_duong_auth
             storage/reports
             storage/reconcile_cod
+            storage/assistant_bot
           key: ops-state-${{ github.run_id }}
