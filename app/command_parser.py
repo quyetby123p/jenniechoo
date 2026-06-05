@@ -19,7 +19,7 @@ _EXISTING_MODE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _NEW_MODE_FLAG_PATTERN = re.compile(r"(?:lên\s*mới|len\s*moi)\s*[.!?]*\s*$", re.IGNORECASE)
-_MANUAL_SKU_PATTERN = re.compile(r"\bJC[0-9A-Z]+\b", re.IGNORECASE)
+_MANUAL_SKU_PATTERN = re.compile(r"(?<![0-9A-Z])JC[0-9A-Z]+(?![0-9A-Z])", re.IGNORECASE)
 _LEADING_ADS_PREFIX_PATTERN = re.compile(r"^\s*/ads\b", re.IGNORECASE)
 _BUDGET_PATTERNS = [
     re.compile(r"(?:budget)\s*[:=]?\s*<?\s*(?P<budget>[\d\.,\s]+)\s*>?", re.IGNORECASE),

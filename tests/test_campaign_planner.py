@@ -4,6 +4,7 @@ from app.campaign_planner import (
     build_campaign_plan,
     build_existing_campaign_plan,
     build_non_jc_hashtag_suffix,
+    extract_jc_codes,
     extract_non_jc_hashtags,
 )
 from app.models import AdsCommand, ResolvedPost
@@ -142,6 +143,11 @@ def test_extract_non_jc_hashtags_and_suffix() -> None:
     message = "Noi dung #JCV238 #congtruatocmay #Sale #sale #JCA158"
     assert extract_non_jc_hashtags(message) == ["congtruatocmay", "Sale"]
     assert build_non_jc_hashtag_suffix(message) == "|congtruatocmay_Sale"
+
+
+def test_extract_jc_codes_splits_underscore_group() -> None:
+    assert extract_jc_codes("#JCA250_JCA248_JCQ211") == ["JCA250", "JCA248", "JCQ211"]
+    assert extract_non_jc_hashtags("#JCA250_JCA248_JCQ211 #lamthao") == ["lamthao"]
 
 
 def test_build_existing_campaign_plan_success() -> None:

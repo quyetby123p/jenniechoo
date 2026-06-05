@@ -11,9 +11,9 @@ _AUDIENCE_LAYOUT = [
     ("du_lich_saved_audience_id", "Du lịch", "DL"),
     ("tiec_saved_audience_id", "Tiệc", "TIEC"),
 ]
-_JC_CODE_PATTERN = re.compile(r"#(?P<code>JC[0-9A-Z]+)\b", re.IGNORECASE)
+_JC_CODE_PATTERN = re.compile(r"#?(?<![0-9A-Z])(?P<code>JC[0-9A-Z]+)(?![0-9A-Z])", re.IGNORECASE)
 _HASHTAG_PATTERN = re.compile(r"#(?P<tag>\w+)", re.UNICODE)
-_JC_CODE_ONLY_PATTERN = re.compile(r"^JC[0-9A-Z]+$", re.IGNORECASE)
+_JC_CODE_ONLY_PATTERN = re.compile(r"^JC[0-9A-Z]+(?:[_\-/,\s]+JC[0-9A-Z]+)*$", re.IGNORECASE)
 
 
 def extract_jc_codes(message_text: str) -> list[str]:

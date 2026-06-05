@@ -48,6 +48,16 @@ def test_parse_ads_command_existing_mode_with_manual_sku() -> None:
     assert cmd.budget_daily_vnd == 0
 
 
+def test_parse_ads_command_existing_mode_splits_underscore_sku_group() -> None:
+    cmd = parse_ads_command(
+        "https://www.facebook.com/permalink.php?story_fbid=123&id=456 JCA250_JCA248_JCQ211 lên cũ"
+    )
+    assert cmd.use_existing_campaign is True
+    assert cmd.manual_sku_keywords == ["JCA250", "JCA248", "JCQ211"]
+    assert cmd.existing_campaign_hint == ""
+    assert cmd.budget_daily_vnd == 0
+
+
 def test_parse_ads_command_existing_mode_without_manual_sku() -> None:
     cmd = parse_ads_command(
         "https://www.facebook.com/permalink.php?story_fbid=123&id=456 lên cũ"
