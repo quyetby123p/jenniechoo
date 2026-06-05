@@ -407,14 +407,35 @@ class TelegramAdsBot:
             return
         await self._create_draft_and_send_review(message.chat.id, command, post_fingerprint, version)
 
+    async def _answer_callback_safely(
+        self,
+        query: CallbackQuery,
+        text: str = "",
+        *,
+        show_alert: bool = False,
+    ) -> bool:
+        try:
+            await query.answer(text, show_alert=show_alert)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            error_text = str(exc).lower()
+            if (
+                "query is too old" in error_text
+                or "response timeout expired" in error_text
+                or "query id is invalid" in error_text
+            ):
+                self.logger.warning("Bo qua callback answer qua han: %s", exc)
+                return False
+            raise
+
     async def handle_callback(self, query: CallbackQuery) -> None:
         if not self._is_authorized(query.from_user.id if query.from_user else None):
-            await query.answer("Không có quyền.", show_alert=True)
+            await self._answer_callback_safely(query, "Không có quyền.", show_alert=True)
             return
 
         action = self.approval.parse_callback(query.data)
         if not action:
-            await query.answer()
+            await self._answer_callback_safely(query)
             return
 
         if action.action == "duplicate_confirm":
@@ -448,15 +469,15 @@ class TelegramAdsBot:
             await self._on_reconcile_sheet_cancel(query, action.value)
             return
 
-        await query.answer()
+        await self._answer_callback_safely(query)
 
     async def _on_duplicate_confirm(self, query: CallbackQuery, request_id: str) -> None:
         request = await asyncio.to_thread(self.storage.get_pending_request, request_id)
         if not request:
-            await query.answer("Yêu cầu đã hết hạn hoặc đã được xử lý.", show_alert=True)
+            await self._answer_callback_safely(query, "Yêu cầu đã hết hạn hoặc đã được xử lý.", show_alert=True)
             return
         if str(request.get("request_type", "")).strip() not in {"", "duplicate_confirm"}:
-            await query.answer("Yêu cầu không hợp lệ.", show_alert=True)
+            await self._answer_callback_safely(query, "Yêu cầu không hợp lệ.", show_alert=True)
             return
 
         command = AdsCommand(
@@ -469,7 +490,7 @@ class TelegramAdsBot:
         post_fingerprint = str(request["post_fingerprint"])
         version = int(request["version"])
 
-        await query.answer("Đang tạo nháp v2...")
+        await self._answer_callback_safely(query, "Đang tạo nháp v2...")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
         target_chat_id = query.message.chat.id if query.message else query.from_user.id
@@ -492,26 +513,26 @@ class TelegramAdsBot:
 
     async def _on_duplicate_cancel(self, query: CallbackQuery, request_id: str) -> None:
         await asyncio.to_thread(self.storage.delete_pending_request, request_id)
-        await query.answer("Đã hủy yêu cầu tạo phiên bản mới.")
+        await self._answer_callback_safely(query, "Đã hủy yêu cầu tạo phiên bản mới.")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
             await query.message.answer("Đã hủy tạo campaign mới cho link trùng.")
 
     async def _on_campaign_pick(self, query: CallbackQuery, request_id: str, index: int | None) -> None:
         if index is None:
-            await query.answer("Lựa chọn không hợp lệ.", show_alert=True)
+            await self._answer_callback_safely(query, "Lựa chọn không hợp lệ.", show_alert=True)
             return
         request = await asyncio.to_thread(self.storage.get_pending_request, request_id)
         if not request:
-            await query.answer("Yêu cầu đã hết hạn hoặc đã được xử lý.", show_alert=True)
+            await self._answer_callback_safely(query, "Yêu cầu đã hết hạn hoặc đã được xử lý.", show_alert=True)
             return
         if str(request.get("request_type", "")).strip() != "existing_campaign_select":
-            await query.answer("Yêu cầu không hợp lệ.", show_alert=True)
+            await self._answer_callback_safely(query, "Yêu cầu không hợp lệ.", show_alert=True)
             return
 
         candidates = request.get("campaign_candidates", [])
         if not isinstance(candidates, list) or index < 0 or index >= len(candidates):
-            await query.answer("Chiến dịch đã thay đổi, anh chạy lại lệnh giúp em.", show_alert=True)
+            await self._answer_callback_safely(query, "Chiến dịch đã thay đổi, anh chạy lại lệnh giúp em.", show_alert=True)
             return
 
         selected_raw = candidates[index] if isinstance(candidates[index], dict) else {}
@@ -521,7 +542,7 @@ class TelegramAdsBot:
             "updated_time": str(selected_raw.get("updated_time", "")).strip(),
         }
         if not selected_campaign["id"]:
-            await query.answer("Chiến dịch đã thay đổi, anh chạy lại lệnh giúp em.", show_alert=True)
+            await self._answer_callback_safely(query, "Chiến dịch đã thay đổi, anh chạy lại lệnh giúp em.", show_alert=True)
             return
 
         command = AdsCommand(
@@ -535,7 +556,7 @@ class TelegramAdsBot:
         version = int(request["version"])
         keywords = [str(item) for item in request.get("campaign_match_keywords", [])]
 
-        await query.answer("Đang tạo nháp vào campaign cũ...")
+        await self._answer_callback_safely(query, "Đang tạo nháp vào campaign cũ...")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
         await self._create_existing_campaign_draft_and_send_review(
@@ -550,7 +571,7 @@ class TelegramAdsBot:
 
     async def _on_campaign_cancel(self, query: CallbackQuery, request_id: str) -> None:
         await asyncio.to_thread(self.storage.delete_pending_request, request_id)
-        await query.answer("Đã hủy chọn campaign cũ.")
+        await self._answer_callback_safely(query, "Đã hủy chọn campaign cũ.")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
             await query.message.answer("Đã hủy yêu cầu lên campaign cũ.")
@@ -558,20 +579,20 @@ class TelegramAdsBot:
     async def _on_reconcile_apply(self, query: CallbackQuery, request_id: str) -> None:
         request = await asyncio.to_thread(self.storage.get_pending_request, request_id)
         if not request:
-            await query.answer("Yêu cầu đã hết hạn hoặc đã được xử lý.", show_alert=True)
+            await self._answer_callback_safely(query, "Yêu cầu đã hết hạn hoặc đã được xử lý.", show_alert=True)
             return
         if str(request.get("request_type", "")).strip() != "reconcile_cod_apply":
-            await query.answer("Yêu cầu không hợp lệ.", show_alert=True)
+            await self._answer_callback_safely(query, "Yêu cầu không hợp lệ.", show_alert=True)
             return
         if not self.reconcile:
-            await query.answer("Luồng đối soát COD chưa sẵn sàng.", show_alert=True)
+            await self._answer_callback_safely(query, "Luồng đối soát COD chưa sẵn sàng.", show_alert=True)
             return
         run_id = str(request.get("run_id", "")).strip()
         if not run_id:
-            await query.answer("Thiếu run_id đối soát.", show_alert=True)
+            await self._answer_callback_safely(query, "Thiếu run_id đối soát.", show_alert=True)
             return
 
-        await query.answer("Đang cập nhật trạng thái Pancake theo batch...")
+        await self._answer_callback_safely(query, "Đang cập nhật trạng thái Pancake theo batch...")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
 
@@ -595,7 +616,7 @@ class TelegramAdsBot:
 
     async def _on_reconcile_cancel(self, query: CallbackQuery, request_id: str) -> None:
         await asyncio.to_thread(self.storage.delete_pending_request, request_id)
-        await query.answer("Đã hủy duyệt cập nhật COD.")
+        await self._answer_callback_safely(query, "Đã hủy duyệt cập nhật COD.")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
             await query.message.answer("Đã hủy cập nhật trạng thái Pancake từ batch đối soát COD.")
@@ -603,26 +624,26 @@ class TelegramAdsBot:
     async def _on_reconcile_sheet_apply(self, query: CallbackQuery, request_id: str) -> None:
         request = await asyncio.to_thread(self.storage.get_pending_request, request_id)
         if not request:
-            await query.answer("Yêu cầu đã hết hạn hoặc đã được xử lý.", show_alert=True)
+            await self._answer_callback_safely(query, "Yêu cầu đã hết hạn hoặc đã được xử lý.", show_alert=True)
             return
         if str(request.get("request_type", "")).strip() != "reconcile_cod_sheet_sync":
-            await query.answer("Yêu cầu không hợp lệ.", show_alert=True)
+            await self._answer_callback_safely(query, "Yêu cầu không hợp lệ.", show_alert=True)
             return
         if not self.reconcile_sheet:
-            await query.answer("Luồng ghi Google Sheet chưa sẵn sàng.", show_alert=True)
+            await self._answer_callback_safely(query, "Luồng ghi Google Sheet chưa sẵn sàng.", show_alert=True)
             return
 
         run_id = str(request.get("run_id", "")).strip()
         if not run_id:
-            await query.answer("Thiếu run_id đối soát.", show_alert=True)
+            await self._answer_callback_safely(query, "Thiếu run_id đối soát.", show_alert=True)
             return
         run_path = self.settings.reconcile_cod_runs_dir / f"{run_id}.json"
         if not run_path.exists():
-            await query.answer("Không tìm thấy run đối soát để ghi Sheet.", show_alert=True)
+            await self._answer_callback_safely(query, "Không tìm thấy run đối soát để ghi Sheet.", show_alert=True)
             await asyncio.to_thread(self.storage.delete_pending_request, request_id)
             return
 
-        await query.answer("Đang ghi dữ liệu đối soát lên Google Sheet...")
+        await self._answer_callback_safely(query, "Đang ghi dữ liệu đối soát lên Google Sheet...")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
 
@@ -661,7 +682,7 @@ class TelegramAdsBot:
 
     async def _on_reconcile_sheet_cancel(self, query: CallbackQuery, request_id: str) -> None:
         await asyncio.to_thread(self.storage.delete_pending_request, request_id)
-        await query.answer("Đã hủy ghi Google Sheet.")
+        await self._answer_callback_safely(query, "Đã hủy ghi Google Sheet.")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
             await query.message.answer("Đã hủy ghi kết quả đối soát COD lên Google Sheet.")
@@ -669,15 +690,15 @@ class TelegramAdsBot:
     async def _on_approve(self, query: CallbackQuery, job_id: str) -> None:
         job_entry = await asyncio.to_thread(self.storage.find_job, job_id)
         if not job_entry:
-            await query.answer("Không tìm thấy job.", show_alert=True)
+            await self._answer_callback_safely(query, "Không tìm thấy job.", show_alert=True)
             return
         status, job = job_entry
         if status != "pending":
-            await query.answer(f"Job đã ở trạng thái {status}.", show_alert=True)
+            await self._answer_callback_safely(query, f"Job đã ở trạng thái {status}.", show_alert=True)
             return
 
         publish_scope = str(job.get("publish_scope", "tree")).strip().lower()
-        await query.answer("Đang publish campaign...")
+        await self._answer_callback_safely(query, "Đang publish campaign...")
         try:
             if publish_scope == "ads_only":
                 await asyncio.to_thread(
@@ -732,18 +753,18 @@ class TelegramAdsBot:
     async def _on_reject(self, query: CallbackQuery, job_id: str) -> None:
         job_entry = await asyncio.to_thread(self.storage.find_job, job_id)
         if not job_entry:
-            await query.answer("Không tìm thấy job.", show_alert=True)
+            await self._answer_callback_safely(query, "Không tìm thấy job.", show_alert=True)
             return
         status, job = job_entry
         if status != "pending":
-            await query.answer(f"Job đã ở trạng thái {status}.", show_alert=True)
+            await self._answer_callback_safely(query, f"Job đã ở trạng thái {status}.", show_alert=True)
             return
 
         publish_scope = str(job.get("publish_scope", "tree")).strip().lower()
         campaign_value = str(job.get("campaign_id", "")).strip()
         rollback_campaign_id = campaign_value if (publish_scope != "ads_only" and campaign_value) else None
         rollback_adset_ids = [str(item) for item in job.get("adset_ids", [])] if publish_scope != "ads_only" else []
-        await query.answer("Đang hủy và rollback...")
+        await self._answer_callback_safely(query, "Đang hủy và rollback...")
         await asyncio.to_thread(
             self.rollback.rollback,
             rollback_campaign_id,

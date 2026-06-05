@@ -610,6 +610,43 @@ def test_approve_existing_mode_publishes_ads_only() -> None:
     assert meta.publish_tree_calls == []
 
 
+def test_approve_existing_mode_ignores_expired_callback_answer() -> None:
+    class ExpiredCallbackQuery(FakeQuery):
+        async def answer(self, text: str = "", show_alert: bool = False) -> None:  # noqa: ARG002
+            raise RuntimeError(
+                "Telegram server says - Bad Request: query is too old and response timeout expired "
+                "or query ID is invalid"
+            )
+
+    meta = FakeMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    storage.jobs["job_1"] = (
+        "pending",
+        {
+            "job_id": "job_1",
+            "status": "pending",
+            "campaign_mode": "existing",
+            "publish_scope": "ads_only",
+            "campaign_id": "camp_1",
+            "adset_ids": [],
+            "ad_ids": ["ad_1", "ad_2"],
+            "creative_ids": ["cr_1", "cr_2"],
+            "ads_manager_url": "https://adsmanager.facebook.com",
+        },
+    )
+
+    query = ExpiredCallbackQuery()
+    asyncio.run(bot._on_approve(query, "job_1"))
+
+    assert meta.publish_ads_calls == [["ad_1", "ad_2"]]
+    assert storage.jobs["job_1"][0] == "published"
+    assert query.message.answers
+    assert "Publish ads vào campaign cũ thành công" in query.message.answers[-1]
+
+
 def test_reject_existing_mode_rolls_back_ads_and_creatives_only() -> None:
     meta = FakeMeta()
     storage = FakeStorage()
