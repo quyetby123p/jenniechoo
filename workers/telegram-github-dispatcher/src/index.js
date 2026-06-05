@@ -421,8 +421,23 @@ async function sendAck(update, env) {
     return;
   }
   const token = String(env.TELEGRAM_BOT_TOKEN || "").trim();
+  if (!token) {
+    return;
+  }
+  const callbackId = String((update.callback_query && update.callback_query.id) || "").trim();
+  if (callbackId) {
+    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        callback_query_id: callbackId,
+        text: "Cloud đang xử lý, anh chờ em một chút.",
+        show_alert: false,
+      }),
+    });
+  }
   const chatId = chatIdFromUpdate(update);
-  if (!token || !chatId || chatTypeFromUpdate(update) !== "private") {
+  if (!chatId || chatTypeFromUpdate(update) !== "private") {
     return;
   }
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
