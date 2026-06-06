@@ -39,11 +39,12 @@
     "method": "PUT",
     "path": "/shops/{shop_id}/orders/{order_id}",
     "status_field": "status",
+    "verify_after_update": true,
     "extra_payload": {}
   },
   "pre_update_transition": {
     "enabled": true,
-    "from_statuses": [1, 13],
+    "from_statuses": [1, 11, 13],
     "intermediate_status": 2,
     "retry_if_error_contains": [
       "chưa có thông tin sản phẩm",

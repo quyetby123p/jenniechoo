@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from app.reconcile_cod_service import ReconcileCodService
 from app.settings import Settings
 from app.utils import dump_json
@@ -104,6 +106,8 @@ def _write_reconcile_configs(settings: Settings, *, mapped_status: int | None = 
             "detail_settlement_date_paths": ["settlement_date"],
             "send_date_paths": ["send_date"],
             "awb_paths": ["awb"],
+            "pancake_order_id_paths": ["pancake_order_id"],
+            "order_reference_paths": ["order_uid"],
             "status_paths": ["status_text"],
             "phone_paths": ["phone"],
             "customer_name_paths": ["customer_name"],
@@ -117,6 +121,7 @@ def _write_reconcile_configs(settings: Settings, *, mapped_status: int | None = 
         },
         "pancake": {
             "awb_paths": ["third_party_id"],
+            "order_reference_paths": ["note_print"],
             "phone_paths": ["bill_phone_number"],
             "customer_name_paths": ["bill_full_name"],
             "amount_paths": ["total_price"],
@@ -190,6 +195,60 @@ def test_reconcile_cod_match_unique_by_awb(tmp_path: Path) -> None:
     assert Path(str(report["csv_path"])).exists()
 
 
+def test_reconcile_cod_prefers_linked_pancake_order_id_from_thai_duong(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_reconcile_configs(settings, mapped_status=3)
+    thai_duong = _FakeThaiDuongClient(
+        history_rows=[{"settlement_date": "2026-06-05"}],
+        detail_rows=[
+            {
+                "settlement_date": "2026-06-05",
+                "awb": "TH-DUPLICATE",
+                "pancake_order_id": "order-linked",
+                "status_text": "Giao hàng thành công",
+                "phone": "0952616398",
+                "customer_name": "Maam Sricha",
+                "cod": "7600",
+            }
+        ],
+    )
+    pancake = _FakePancakeClient(
+        orders=[
+            {
+                "id": "order-linked",
+                "display_id": "JCT354",
+                "third_party_id": "OTHER-AWB",
+                "bill_phone_number": "0952616398",
+                "bill_full_name": "Maam Sricha",
+                "total_price": 760000,
+                "status": 11,
+            },
+            {
+                "id": "order-by-awb",
+                "display_id": "OLD",
+                "third_party_id": "THDUPLICATE",
+                "bill_phone_number": "0000000000",
+                "bill_full_name": "Other",
+                "total_price": 760000,
+                "status": 2,
+            },
+        ]
+    )
+    service = ReconcileCodService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=pancake,  # type: ignore[arg-type]
+        thai_duong_client=thai_duong,  # type: ignore[arg-type]
+    )
+
+    report = service.generate_report(date(2026, 6, 5))
+
+    record = report["records"][0]
+    assert record["match_tier"] == "pancake_order_id"
+    assert record["pancake_order_id"] == "order-linked"
+    assert record["pancake_display_id"] == "JCT354"
+
+
 def test_reconcile_cod_apply_updates_is_idempotent(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path, reconcile_cod_update_enabled=True)
     _write_reconcile_configs(settings, mapped_status=2)
@@ -238,7 +297,11 @@ def test_reconcile_cod_apply_updates_is_idempotent(tmp_path: Path) -> None:
     assert len(pancake.update_calls) == 1
 
 
-def test_reconcile_cod_apply_updates_auto_transition_from_printing_then_retry(tmp_path: Path) -> None:
+@pytest.mark.parametrize("source_status", [11, 13])
+def test_reconcile_cod_apply_updates_auto_transition_from_pre_shipping_then_retry(
+    tmp_path: Path,
+    source_status: int,
+) -> None:
     settings = _dummy_settings(tmp_path, reconcile_cod_update_enabled=True)
     _write_reconcile_configs(settings, mapped_status=3)
     thai_duong = _FakeThaiDuongClient(
@@ -263,15 +326,9 @@ def test_reconcile_cod_apply_updates_auto_transition_from_printing_then_retry(tm
                 "bill_phone_number": "0809199218",
                 "bill_full_name": "May Foster Thirakon",
                 "total_price": 280000,
-                "status": 13,
+                "status": source_status,
             }
-        ],
-        fail_once={
-            (
-                "360300986571957",
-                3,
-            ): RuntimeError('Pancake API lỗi (422): {"message":"[status]: Chưa có thông tin sản phẩm","success":false}'),
-        },
+        ]
     )
     service = ReconcileCodService(
         settings=settings,
@@ -288,7 +345,58 @@ def test_reconcile_cod_apply_updates_auto_transition_from_printing_then_retry(tm
     assert apply_summary["failed"] == 0
     assert apply_summary["transitioned"] == 1
     assert apply_summary["failed_orders"] == []
-    assert [call[1] for call in pancake.update_calls] == [3, 2, 3]
+    assert [call[1] for call in pancake.update_calls] == [2, 3]
+
+
+def test_reconcile_cod_reports_pre_shipping_transition_block_with_error_code(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path, reconcile_cod_update_enabled=True)
+    _write_reconcile_configs(settings, mapped_status=3)
+    thai_duong = _FakeThaiDuongClient(
+        history_rows=[{"settlement_date": "2026-06-05"}],
+        detail_rows=[
+            {
+                "settlement_date": "2026-06-05",
+                "awb": "TH20078SY6V70G",
+                "pancake_order_id": "180157102421209",
+                "status_text": "Giao hàng thành công",
+                "phone": "0952616398",
+                "customer_name": "Maam Sricha",
+                "cod": "0",
+            }
+        ],
+    )
+    pancake = _FakePancakeClient(
+        orders=[
+            {
+                "id": "180157102421209",
+                "display_id": "JCT354",
+                "bill_phone_number": "0952616398",
+                "bill_full_name": "Maam Sricha",
+                "total_price": 760000,
+                "status": 11,
+            }
+        ],
+        fail_once={
+            ("180157102421209", 2): RuntimeError(
+                'Pancake API lỗi (422): {"message":"[status]: Chưa có thông tin sản phẩm"}'
+            )
+        },
+    )
+    service = ReconcileCodService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=pancake,  # type: ignore[arg-type]
+        thai_duong_client=thai_duong,  # type: ignore[arg-type]
+    )
+
+    report = service.generate_report(date(2026, 6, 5))
+    apply_summary = service.apply_updates(str(report["run_id"]))
+
+    assert apply_summary["updated"] == 0
+    assert apply_summary["failed"] == 1
+    assert apply_summary["failed_orders"][0]["display_id"] == "JCT354"
+    assert apply_summary["failed_orders"][0]["error_code"] == "PANCAKE_PRE_SHIPPING_BLOCKED"
+    assert [call[1] for call in pancake.update_calls] == [2]
 
 
 def test_reconcile_cod_auto_pick_latest_unprocessed_settlement_date(tmp_path: Path) -> None:
@@ -433,6 +541,64 @@ def test_reconcile_cod_ambiguous_after_identity_fallback(tmp_path: Path) -> None
     record = report["records"][0]
     assert record["match_tier"] == "identity"
     assert record["match_result"] == "ambiguous"
+
+
+def test_reconcile_cod_matches_zero_cod_exchange_by_thai_duong_order_reference(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_reconcile_configs(settings, mapped_status=3)
+    thai_duong = _FakeThaiDuongClient(
+        history_rows=[{"settlement_date": "2026-06-05"}],
+        detail_rows=[
+            {
+                "settlement_date": "2026-06-05",
+                "awb": "TH01018SY6V62A0",
+                "order_uid": "THA356_20260528_1",
+                "status_text": "Giao hàng thành công",
+                "phone": "0616198611",
+                "customer_name": "Solera Cheng",
+                "cod": 0,
+            }
+        ],
+    )
+    pancake = _FakePancakeClient(
+        orders=[
+            {
+                "id": "10858395445",
+                "display_id": "JCT338",
+                "bill_phone_number": "0616198611",
+                "bill_full_name": "Solera Cheng",
+                "total_price": 340000,
+                "cod": 0,
+                "note_print": " GUI-30/05,MVD-THA356_20260528_1",
+                "status": 2,
+            },
+            {
+                "id": "360300985848588",
+                "display_id": "JCT305",
+                "bill_phone_number": "0616198611",
+                "bill_full_name": "Solera Cheng",
+                "total_price": 340000,
+                "cod": 340000,
+                "note_print": " GUI-9/05,MVD-THA356_20260508_1",
+                "status": 4,
+            },
+        ]
+    )
+    service = ReconcileCodService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=pancake,  # type: ignore[arg-type]
+        thai_duong_client=thai_duong,  # type: ignore[arg-type]
+    )
+
+    report = service.generate_report(date(2026, 6, 5))
+
+    assert report["summary"]["matched_unique"] == 1
+    record = report["records"][0]
+    assert record["td_cod_minor"] == 0
+    assert record["match_tier"] == "order_reference"
+    assert record["pancake_order_id"] == "10858395445"
+    assert record["pancake_display_id"] == "JCT338"
 
 
 def test_reconcile_cod_summary_counts_and_audit_columns(tmp_path: Path) -> None:

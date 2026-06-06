@@ -223,6 +223,7 @@ class PancakePosClient:
         method = str(cfg.get("method", "POST")).strip().upper() or "POST"
         path_template = str(cfg.get("path", "/shops/{shop_id}/orders/{order_id}")).strip()
         status_field = str(cfg.get("status_field", "status")).strip() or "status"
+        verify_after_update = self._to_bool(cfg.get("verify_after_update"), default=False)
         extra_payload = cfg.get("extra_payload", {})
         payload: dict[str, Any] = {}
         if isinstance(extra_payload, dict):
@@ -238,7 +239,19 @@ class PancakePosClient:
         except KeyError as exc:
             raise ValidationError(f"Cấu hình update endpoint Pancake thiếu placeholder: {exc}") from exc
 
-        return self._request(method, path, data=payload)
+        result = self._request(method, path, data=payload)
+        if verify_after_update:
+            latest_order = self.get_order_detail(
+                normalized_order_id,
+                path_template=path_template,
+            )
+            latest_status = self._to_int(self._get_nested_value(latest_order, status_field), fallback=-1)
+            if latest_status != int(status):
+                raise PancakeApiError(
+                    f"Pancake không lưu trạng thái mong muốn cho order_id={normalized_order_id}: "
+                    f"expected={int(status)}, actual={latest_status}."
+                )
+        return result
 
     def get_order_detail(
         self,

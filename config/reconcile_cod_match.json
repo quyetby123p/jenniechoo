@@ -24,6 +24,14 @@
       "tracking_code",
       "tracking_number"
     ],
+    "pancake_order_id_paths": [
+      "pancakeOrderId",
+      "pancake_order_id"
+    ],
+    "order_reference_paths": [
+      "orderUID",
+      "order_uid"
+    ],
     "status_paths": [
       "shippingOrderStatus",
       "orderStatus",
@@ -110,6 +118,9 @@
       "additional_info.awb",
       "additional_info.tracking_number",
       "custom_id"
+    ],
+    "order_reference_paths": [
+      "note_print"
     ],
     "phone_paths": [
       "bill_phone_number",

@@ -377,20 +377,32 @@ class ReconcileCodService:
             if updated >= limit:
                 skipped += 1
                 continue
+            pre_transition_status = self._resolve_pre_transition_status(
+                record=record,
+                target_status=target_status,
+                transition_cfg=transition_cfg,
+            )
             try:
-                self.pancake.update_order_status(order_id, target_status, update_cfg=update_cfg)
+                if pre_transition_status is not None:
+                    self.pancake.update_order_status(order_id, pre_transition_status, update_cfg=update_cfg)
+                    self.pancake.update_order_status(order_id, target_status, update_cfg=update_cfg)
+                    transitioned += 1
+                else:
+                    self.pancake.update_order_status(order_id, target_status, update_cfg=update_cfg)
                 updated += 1
                 if key:
                     newly_applied.append(key)
             except Exception as exc:  # noqa: BLE001
-                recovered = self._try_apply_with_transition_fallback(
-                    order_id=order_id,
-                    target_status=target_status,
-                    record=record,
-                    error=exc,
-                    update_cfg=update_cfg,
-                    transition_cfg=transition_cfg,
-                )
+                recovered = False
+                if pre_transition_status is None:
+                    recovered = self._try_apply_with_transition_fallback(
+                        order_id=order_id,
+                        target_status=target_status,
+                        record=record,
+                        error=exc,
+                        update_cfg=update_cfg,
+                        transition_cfg=transition_cfg,
+                    )
                 if recovered:
                     transitioned += 1
                     updated += 1
@@ -401,10 +413,15 @@ class ReconcileCodService:
                 display_id = str(record.get("pancake_display_id", "")).strip()
                 current_status = self._to_optional_int(record.get("pancake_status"))
                 error_text = str(exc)
+                error_code = self._classify_update_error(
+                    current_status=current_status,
+                    target_status=target_status,
+                    error_text=error_text,
+                )
                 if display_id:
-                    errors.append(f"{order_id} ({display_id}): {error_text}")
+                    errors.append(f"{order_id} ({display_id}) [{error_code}]: {error_text}")
                 else:
-                    errors.append(f"{order_id}: {error_text}")
+                    errors.append(f"{order_id} [{error_code}]: {error_text}")
                 failed_orders.append(
                     {
                         "order_id": order_id,
@@ -412,6 +429,7 @@ class ReconcileCodService:
                         "awb": str(record.get("td_awb", "")).strip(),
                         "current_status": current_status,
                         "target_status": target_status,
+                        "error_code": error_code,
                         "error": error_text,
                     }
                 )
@@ -516,6 +534,8 @@ class ReconcileCodService:
         pc_amount_factor = max(1, self._to_int(pc_cfg.get("amount_minor_unit_factor"), fallback=1))
 
         awb_paths_td = self._as_list(td_cfg.get("awb_paths"))
+        linked_order_id_paths_td = self._as_list(td_cfg.get("pancake_order_id_paths"))
+        order_reference_paths_td = self._as_list(td_cfg.get("order_reference_paths"))
         status_paths_td = self._as_list(td_cfg.get("status_paths"))
         phone_paths_td = self._as_list(td_cfg.get("phone_paths"))
         name_paths_td = self._as_list(td_cfg.get("customer_name_paths"))
@@ -538,6 +558,7 @@ class ReconcileCodService:
         td_fee_factor = max(1, self._to_int(td_cfg.get("fee_minor_unit_factor"), fallback=td_amount_factor))
 
         awb_paths_pc = self._as_list(pc_cfg.get("awb_paths"))
+        order_reference_paths_pc = self._as_list(pc_cfg.get("order_reference_paths"))
         phone_paths_pc = self._as_list(pc_cfg.get("phone_paths"))
         name_paths_pc = self._as_list(pc_cfg.get("customer_name_paths"))
         amount_paths_pc = self._as_list(pc_cfg.get("amount_paths"))
@@ -547,6 +568,8 @@ class ReconcileCodService:
         id_paths_pc = self._as_list(pc_cfg.get("order_id_paths"))
 
         awb_index: dict[str, list[dict[str, Any]]] = {}
+        order_id_index: dict[str, list[dict[str, Any]]] = {}
+        order_reference_index: dict[str, list[dict[str, Any]]] = {}
         identity_index: dict[str, list[dict[str, Any]]] = {}
         identity_amount_index: dict[str, list[dict[str, Any]]] = {}
         identity_original_amount_index: dict[str, list[dict[str, Any]]] = {}
@@ -578,12 +601,17 @@ class ReconcileCodService:
                 "status": status_value,
             }
             pancake_meta[id(order)] = info
+            if order_id:
+                order_id_index.setdefault(order_id, []).append(order)
 
             for awb_raw in awb_values:
                 awb = self._normalize_awb(awb_raw)
                 if not awb:
                     continue
                 awb_index.setdefault(awb, []).append(order)
+            for reference_raw in self._extract_values(order, order_reference_paths_pc):
+                for reference in self._extract_order_reference_tokens(reference_raw):
+                    order_reference_index.setdefault(reference, []).append(order)
 
             phone_name_key = self._phone_name_key(phone_value, name_value)
             if phone_name_key:
@@ -600,15 +628,18 @@ class ReconcileCodService:
             if not isinstance(row, dict):
                 continue
             td_awb = self._normalize_awb(self._extract_first_value(row, awb_paths_td))
+            td_linked_order_id = str(self._extract_first_value(row, linked_order_id_paths_td) or "").strip()
+            td_order_reference_raw = self._extract_first_value(row, order_reference_paths_td)
+            td_order_references = self._extract_order_reference_tokens(td_order_reference_raw)
             td_status_raw = str(self._extract_first_value(row, status_paths_td)).strip()
             td_status_key = self._normalize_name(td_status_raw)
             td_phone = self._normalize_phone(self._extract_first_value(row, phone_paths_td))
             td_name = self._normalize_name(self._extract_first_value(row, name_paths_td))
-            td_amount_minor = self._to_minor_amount(
+            td_amount_minor = self._to_minor_amount_including_zero(
                 self._extract_first_value(row, amount_paths_td),
                 factor=td_amount_factor,
             )
-            td_sheet_cod_minor = self._to_minor_amount(
+            td_sheet_cod_minor = self._to_minor_amount_including_zero(
                 self._extract_first_value(row, sheet_cod_paths_td),
                 factor=td_amount_factor,
             )
@@ -680,15 +711,31 @@ class ReconcileCodService:
             amount_key = self._identity_amount_key(phone_name_key, td_amount_minor)
 
             awb_candidates = list(awb_index.get(td_awb, [])) if td_awb else []
+            linked_order_candidates = list(order_id_index.get(td_linked_order_id, [])) if td_linked_order_id else []
+            order_reference_candidates: list[dict[str, Any]] = []
+            seen_reference_candidates: set[int] = set()
+            for reference in td_order_references:
+                for order in order_reference_index.get(reference, []):
+                    order_identity = id(order)
+                    if order_identity in seen_reference_candidates:
+                        continue
+                    seen_reference_candidates.add(order_identity)
+                    order_reference_candidates.append(order)
             identity_candidates = list(identity_index.get(phone_name_key, [])) if phone_name_key else []
             identity_amount_candidates = list(identity_amount_index.get(amount_key, [])) if amount_key else []
             identity_original_amount_candidates = (
                 list(identity_original_amount_index.get(amount_key, [])) if amount_key else []
             )
             match_tier = ""
-            if len(awb_candidates) == 1:
+            if len(linked_order_candidates) == 1:
+                candidates = linked_order_candidates
+                match_tier = "pancake_order_id"
+            elif len(awb_candidates) == 1:
                 candidates = awb_candidates
                 match_tier = "awb"
+            elif len(order_reference_candidates) == 1:
+                candidates = order_reference_candidates
+                match_tier = "order_reference"
             else:
                 if len(identity_candidates) == 1:
                     candidates = identity_candidates
@@ -716,6 +763,8 @@ class ReconcileCodService:
                 "fingerprint": item_fingerprint,
                 "settlement_date": settlement_date.isoformat(),
                 "td_awb": td_awb,
+                "td_pancake_order_id": td_linked_order_id,
+                "td_order_reference": sorted(td_order_references)[0] if td_order_references else "",
                 "td_status": td_status_raw,
                 "td_phone": td_phone,
                 "td_customer_name": td_name,
@@ -757,6 +806,17 @@ class ReconcileCodService:
             }
 
             if not candidates:
+                if len(linked_order_candidates) > 1:
+                    record["match_result"] = "ambiguous"
+                    record["reason"] = "Khớp nhiều hơn 1 đơn Pancake theo ID liên kết từ Thái Dương."
+                    records.append(record)
+                    continue
+                if len(order_reference_candidates) > 1:
+                    record["match_result"] = "ambiguous"
+                    record["match_tier"] = "order_reference"
+                    record["reason"] = "Khớp nhiều hơn 1 đơn Pancake theo mã đơn Thái Dương trong ghi chú in."
+                    records.append(record)
+                    continue
                 if len(identity_candidates) > 1:
                     record["match_result"] = "ambiguous"
                     record["reason"] = "Trùng phone+tên nhưng không chốt được theo giá trị đơn."
@@ -775,7 +835,11 @@ class ReconcileCodService:
             if len(candidates) > 1:
                 record["match_result"] = "ambiguous"
                 tier_label = "AWB"
-                if match_tier == "identity":
+                if match_tier == "pancake_order_id":
+                    tier_label = "ID liên kết Thái Dương"
+                elif match_tier == "order_reference":
+                    tier_label = "mã đơn Thái Dương"
+                elif match_tier == "identity":
                     tier_label = "identity"
                 elif match_tier == "identity_original_amount":
                     tier_label = "identity+gia_tri_goc"
@@ -802,7 +866,11 @@ class ReconcileCodService:
                 continue
 
             record["match_result"] = "matched_unique"
-            if match_tier == "identity_original_amount":
+            if match_tier == "pancake_order_id":
+                record["reason"] = "Khớp chính xác theo Pancake order ID lưu trên Thái Dương và sẵn sàng cập nhật."
+            elif match_tier == "order_reference":
+                record["reason"] = "Khớp chính xác mã đơn Thái Dương trong ghi chú in Pancake và sẵn sàng cập nhật."
+            elif match_tier == "identity_original_amount":
                 record["reason"] = "Khớp fallback identity theo giá trị gốc đơn và sẵn sàng cập nhật."
             elif match_tier == "identity":
                 record["reason"] = "Khớp fallback identity và sẵn sàng cập nhật."
@@ -909,6 +977,8 @@ class ReconcileCodService:
             "fingerprint",
             "settlement_date",
             "td_awb",
+            "td_pancake_order_id",
+            "td_order_reference",
             "td_status",
             "td_phone",
             "td_customer_name",
@@ -1001,6 +1071,8 @@ class ReconcileCodService:
                 "detail_settlement_date_paths": ["Ngày đối soát", "settlement_date"],
                 "send_date_paths": ["Ngày gửi đơn", "send_date", "created_at"],
                 "awb_paths": ["Mã vận đơn", "awb", "tracking_code", "tracking_number"],
+                "pancake_order_id_paths": ["pancakeOrderId", "pancake_order_id"],
+                "order_reference_paths": ["orderUID", "order_uid"],
                 "status_paths": ["Trạng thái", "status", "delivery_status"],
                 "phone_paths": ["Số điện thoại", "phone", "bill_phone_number", "customer_phone"],
                 "customer_name_paths": ["Tên khách hàng", "customer_name", "receiver_name"],
@@ -1035,6 +1107,7 @@ class ReconcileCodService:
                     "additional_info.tracking_number",
                     "custom_id",
                 ],
+                "order_reference_paths": ["note_print"],
                 "phone_paths": [
                     "bill_phone_number",
                     "shipping_address.phone_number",
@@ -1185,6 +1258,35 @@ class ReconcileCodService:
             return None
         return int(round(numeric * max(1, factor)))
 
+    @staticmethod
+    def _to_minor_amount_including_zero(value: Any, factor: int) -> int | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        cleaned = text.replace(",", "").replace(" ", "")
+        cleaned = re.sub(r"[^\d\.-]", "", cleaned)
+        if not cleaned:
+            return None
+        try:
+            numeric = float(cleaned)
+        except ValueError:
+            return None
+        return int(round(numeric * max(1, factor)))
+
+    @classmethod
+    def _extract_order_reference_tokens(cls, value: Any) -> set[str]:
+        raw = str(value or "").strip()
+        if not raw:
+            return set()
+        tokens: set[str] = set()
+        for match in re.findall(r"[A-Za-z]{2,}\d+[_-]\d{6,8}[_-]\d+", raw):
+            normalized = cls._normalize_awb(match)
+            if normalized:
+                tokens.add(normalized)
+        return tokens
+
     def _extract_minor_amount_values(self, payload: dict[str, Any], paths: list[str], factor: int) -> set[int]:
         values: set[int] = set()
         if not paths:
@@ -1260,6 +1362,35 @@ class ReconcileCodService:
             )
             return False
 
+    def _resolve_pre_transition_status(
+        self,
+        *,
+        record: dict[str, Any],
+        target_status: int,
+        transition_cfg: dict[str, Any],
+    ) -> int | None:
+        enabled = transition_cfg.get("enabled", True)
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() not in {"0", "false", "off", "no"}
+        if not bool(enabled):
+            return None
+
+        current_status = self._to_optional_int(record.get("pancake_status"))
+        from_statuses = self._to_status_set(transition_cfg.get("from_statuses"))
+        if not from_statuses:
+            from_statuses = {1, 11, 13}
+        intermediate_status = self._to_optional_int(transition_cfg.get("intermediate_status"))
+        if intermediate_status is None:
+            intermediate_status = 2
+        if (
+            current_status is None
+            or current_status not in from_statuses
+            or intermediate_status == current_status
+            or intermediate_status == target_status
+        ):
+            return None
+        return intermediate_status
+
     def _can_apply_transition_fallback(
         self,
         *,
@@ -1276,7 +1407,7 @@ class ReconcileCodService:
         current_status = self._to_optional_int(record.get("pancake_status"))
         from_statuses = self._to_status_set(transition_cfg.get("from_statuses"))
         if not from_statuses:
-            from_statuses = {1, 13}
+            from_statuses = {1, 11, 13}
         if current_status is None or current_status not in from_statuses:
             return False
 
@@ -1288,6 +1419,29 @@ class ReconcileCodService:
             }
         error_text = self._normalize_compare_text(str(error))
         return any(keyword in error_text for keyword in error_keys)
+
+    @classmethod
+    def _classify_update_error(
+        cls,
+        *,
+        current_status: int | None,
+        target_status: int | None,
+        error_text: str,
+    ) -> str:
+        normalized_error = cls._normalize_compare_text(error_text)
+        pre_shipping_statuses = {1, 8, 9, 11, 12, 13, 17, 20}
+        transition_errors = (
+            "chua co thong tin san pham",
+            "trang thai khong hop le",
+            "khong luu trang thai mong muon",
+        )
+        if (
+            current_status in pre_shipping_statuses
+            and target_status in {3, 4}
+            and any(keyword in normalized_error for keyword in transition_errors)
+        ):
+            return "PANCAKE_PRE_SHIPPING_BLOCKED"
+        return "PANCAKE_UPDATE_FAILED"
 
     @staticmethod
     def _to_status_set(value: Any) -> set[int]:
