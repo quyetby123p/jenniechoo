@@ -293,6 +293,7 @@ def test_reconcile_auto_apply_reports_failed_order_codes(tmp_path: Path) -> None
                 "order_id": "360300986571957",
                 "display_id": "JCT315",
                 "awb": "TH35028N4TCP6B",
+                "error_code": "PANCAKE_PRE_SHIPPING_BLOCKED",
                 "error": 'Pancake API lỗi (422): {"message":"[status]: Chưa có thông tin sản phẩm"}',
             }
         ],
@@ -315,6 +316,7 @@ def test_reconcile_auto_apply_reports_failed_order_codes(tmp_path: Path) -> None
     texts = [str(item.get("text", "")) for item in bot._bot.messages]  # type: ignore[union-attr]
     assert any("Mã đơn lỗi cần xử lý:" in text for text in texts)
     assert any("JCT315" in text for text in texts)
+    assert any("PANCAKE_PRE_SHIPPING_BLOCKED" in text for text in texts)
 
 
 def test_reconcile_cash_in_auto_skips_when_no_settlement_today(tmp_path: Path) -> None:

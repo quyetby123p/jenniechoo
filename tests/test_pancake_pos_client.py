@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.exceptions import ValidationError
+from app.exceptions import PancakeApiError, ValidationError
 from app.pancake_pos_client import PancakePosClient
 from app.settings import Settings
 
@@ -149,6 +149,59 @@ def test_update_order_status_uses_default_endpoint(tmp_path: Path) -> None:
     payload = client.update_order_status("180157094927073", 2)
     assert payload["success"] is True
     assert calls == [("POST", "/shops/123/orders/180157094927073", {"status": 2})]
+
+
+def test_update_order_status_verifies_persisted_status(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))
+    calls: list[tuple[str, str, dict[str, object]]] = []
+
+    def fake_request(method: str, path: str, *, params=None, data=None):  # noqa: ANN001
+        del params
+        calls.append((method, path, data or {}))
+        if method == "GET":
+            return {"success": True, "order": {"id": 180157102421209, "status": 2}}
+        return {"success": True}
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    payload = client.update_order_status(
+        "180157102421209",
+        2,
+        update_cfg={
+            "method": "PUT",
+            "verify_after_update": True,
+        },
+    )
+
+    assert payload["success"] is True
+    assert calls == [
+        ("PUT", "/shops/123/orders/180157102421209", {"status": 2}),
+        ("GET", "/shops/123/orders/180157102421209", {}),
+    ]
+
+
+def test_update_order_status_rejects_success_response_when_status_did_not_change(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None):  # noqa: ANN001
+        del path, params, data
+        if method == "GET":
+            return {"success": True, "order": {"id": 180157102421209, "status": 11}}
+        return {"success": True}
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    with pytest.raises(PancakeApiError, match="expected=2, actual=11"):
+        client.update_order_status(
+            "180157102421209",
+            2,
+            update_cfg={
+                "method": "PUT",
+                "verify_after_update": True,
+            },
+        )
 
 
 def test_fetch_orders_by_timestamp_range_uses_internal_fetch(tmp_path: Path) -> None:

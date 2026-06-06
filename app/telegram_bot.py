@@ -3116,6 +3116,9 @@ class TelegramAdsBot:
                 detail = f"{label} (ID:{order_id})" if order_id and label != order_id else label
                 if awb:
                     detail = f"{detail} | AWB:{awb}"
+                error_code = str(item.get("error_code", "")).strip()
+                if error_code:
+                    detail = f"{detail} | Mã lỗi:{error_code}"
                 error_text = self._short_error(str(item.get("error", "")), max_len=140)
                 lines.append(f"- {detail} | {error_text}")
             if len(failed_orders) > 15:
