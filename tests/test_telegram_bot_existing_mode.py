@@ -611,6 +611,21 @@ def test_approve_existing_mode_publishes_ads_only() -> None:
     assert meta.publish_tree_calls == []
 
 
+def test_approve_missing_job_sends_regular_message() -> None:
+    meta = FakeMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    query = FakeQuery()
+    asyncio.run(bot._on_approve(query, "job_missing"))
+
+    assert meta.publish_ads_calls == []
+    assert query.message.answers == [
+        "Không tìm thấy dữ liệu job để publish. Anh chạy lại lệnh tạo nháp giúp em."
+    ]
+
+
 def test_approve_existing_mode_ignores_expired_callback_answer() -> None:
     class ExpiredCallbackQuery(FakeQuery):
         async def answer(self, text: str = "", show_alert: bool = False) -> None:  # noqa: ARG002

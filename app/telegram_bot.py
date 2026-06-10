@@ -694,6 +694,10 @@ class TelegramAdsBot:
         job_entry = await asyncio.to_thread(self.storage.find_job, job_id)
         if not job_entry:
             await self._answer_callback_safely(query, "Không tìm thấy job.", show_alert=True)
+            if query.message:
+                await query.message.answer(
+                    "Không tìm thấy dữ liệu job để publish. Anh chạy lại lệnh tạo nháp giúp em."
+                )
             return
         status, job = job_entry
         if status != "pending":
@@ -757,6 +761,10 @@ class TelegramAdsBot:
         job_entry = await asyncio.to_thread(self.storage.find_job, job_id)
         if not job_entry:
             await self._answer_callback_safely(query, "Không tìm thấy job.", show_alert=True)
+            if query.message:
+                await query.message.answer(
+                    "Không tìm thấy dữ liệu job để hủy. Anh kiểm tra Ads Manager giúp em."
+                )
             return
         status, job = job_entry
         if status != "pending":
