@@ -1202,6 +1202,8 @@ class TelegramAdsBot:
         resolved_post = None
         account_multi_destination_asset_feed_spec: dict[str, Any] | None = None
         account_multi_destination_asset_feed_spec_checked = False
+        instagram_post_access_diagnostics: dict[str, Any] | None = None
+        instagram_post_access_diagnostics_checked = False
 
         try:
             if not campaign_id:
@@ -1255,10 +1257,38 @@ class TelegramAdsBot:
                     account_multi_destination_asset_feed_spec = None
                 return account_multi_destination_asset_feed_spec
 
+            async def _get_instagram_post_access_diagnostics_cached() -> dict[str, Any]:
+                nonlocal instagram_post_access_diagnostics
+                nonlocal instagram_post_access_diagnostics_checked
+                if instagram_post_access_diagnostics_checked:
+                    return dict(instagram_post_access_diagnostics or {})
+                instagram_post_access_diagnostics_checked = True
+                diagnose_fn = getattr(self.meta, "diagnose_instagram_post_access", None)
+                if not callable(diagnose_fn) or not resolved_post:
+                    instagram_post_access_diagnostics = {}
+                    return {}
+                try:
+                    diagnostics = await asyncio.to_thread(
+                        diagnose_fn,
+                        resolved_post.object_story_id,
+                    )
+                    instagram_post_access_diagnostics = (
+                        dict(diagnostics) if isinstance(diagnostics, dict) else {}
+                    )
+                except Exception as diagnostics_exc:  # noqa: BLE001
+                    self.logger.warning(
+                        "Khong chan doan duoc quyen Instagram cho post %s: %s",
+                        resolved_post.object_story_id,
+                        diagnostics_exc,
+                    )
+                    instagram_post_access_diagnostics = {}
+                return dict(instagram_post_access_diagnostics or {})
+
             async def _try_duplicate_from_existing_ad(
                 adset_id: str,
                 slot: AudienceSlot,
                 trigger_error: str,
+                destination_type_override: str,
             ) -> str | None:
                 if not resolved_post:
                     return None
@@ -1310,7 +1340,31 @@ class TelegramAdsBot:
                         source_ad_id,
                         copy_exc,
                     )
-                    return None
+                    source_creative_id = str(matched_ad.get("creative_id", "")).strip()
+                    if not source_creative_id:
+                        return None
+                    self.logger.warning(
+                        "Thu fallback tao ad tu creative da duoc Meta duyet %s cho adset %s",
+                        source_creative_id,
+                        adset_id,
+                    )
+                    try:
+                        return await asyncio.to_thread(
+                            self.meta.create_ad,
+                            active_plan,
+                            slot,
+                            adset_id,
+                            source_creative_id,
+                            destination_type_override,
+                        )
+                    except MetaApiError as reuse_exc:
+                        self.logger.warning(
+                            "Fallback dung lai creative %s that bai cho adset %s: %s",
+                            source_creative_id,
+                            adset_id,
+                            reuse_exc,
+                        )
+                        return None
                 source_ad_name = str(matched_ad.get("name", "")).strip()
                 source_ref = source_ad_id if not source_ad_name else f"{source_ad_id} ({source_ad_name})"
                 self.logger.warning(
@@ -1492,6 +1546,7 @@ class TelegramAdsBot:
                                                 adset_id,
                                                 slot,
                                                 retry_error_text,
+                                                adset_destination_type,
                                             )
                                             if duplicated_ad_id:
                                                 ad_id = duplicated_ad_id
@@ -1507,6 +1562,7 @@ class TelegramAdsBot:
                                         adset_id,
                                         slot,
                                         str(ad_exc),
+                                        adset_destination_type,
                                     )
                                     if duplicated_ad_id:
                                         ad_id = duplicated_ad_id
@@ -1531,6 +1587,7 @@ class TelegramAdsBot:
                                 adset_id,
                                 slot,
                                 error_text,
+                                adset_destination_type,
                             )
                             if duplicated_ad_id:
                                 ad_id = duplicated_ad_id
@@ -1646,6 +1703,7 @@ class TelegramAdsBot:
                                         adset_id,
                                         slot,
                                         messenger_error_text,
+                                        "MESSENGER",
                                     )
                                     if duplicated_ad_id:
                                         ad_id = duplicated_ad_id
@@ -1653,6 +1711,37 @@ class TelegramAdsBot:
                                         raise
                                 else:
                                     raise
+                    elif self.meta.is_auto_destination_error(error_text):
+                        if ad_id:
+                            await asyncio.to_thread(self.rollback.rollback, None, [], [ad_id], [])
+                            ad_id = None
+                        if creative_id:
+                            await asyncio.to_thread(self.rollback.rollback, None, [], [], [creative_id])
+                            creative_id = None
+                        duplicated_ad_id = await _try_duplicate_from_existing_ad(
+                            adset_id,
+                            slot,
+                            error_text,
+                            adset_destination_type,
+                        )
+                        if duplicated_ad_id:
+                            ad_id = duplicated_ad_id
+                            destination_fallback_reason = error_text
+                        else:
+                            diagnostics = await _get_instagram_post_access_diagnostics_cached()
+                            if (
+                                diagnostics.get("is_instagram_origin")
+                                and not diagnostics.get("has_instagram_media_access")
+                            ):
+                                raise ValidationError(
+                                    "Meta API không có quyền đọc bài Instagram gốc của reel liên kết này.\n"
+                                    "Token cloud đang thiếu quyền `instagram_basic` hoặc tài khoản Instagram "
+                                    "chưa được gán cho token/ad account, nên Ads Manager UI lên được nhưng API bị chặn.\n"
+                                    "Em chưa tìm thấy ad thủ công nào dùng đúng bài này để tái sử dụng creative.\n"
+                                    "Anh tạo 1 ad PAUSED thủ công từ reel này trong campaign rồi chạy lại; "
+                                    "bot sẽ dùng creative đã được Meta duyệt để tạo ads cho các adset còn lại."
+                                ) from exc
+                            raise
                     elif (
                         adset_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
                         and self.meta.is_instagram_media_requirement_error(error_text)
@@ -1722,6 +1811,7 @@ class TelegramAdsBot:
                                             adset_id,
                                             slot,
                                             retry_error_text,
+                                            "MESSENGER",
                                         )
                                         if duplicated_ad_id:
                                             ad_id = duplicated_ad_id
@@ -1737,6 +1827,7 @@ class TelegramAdsBot:
                                     adset_id,
                                     slot,
                                     str(ad_exc),
+                                    "MESSENGER",
                                 )
                                 if duplicated_ad_id:
                                     ad_id = duplicated_ad_id

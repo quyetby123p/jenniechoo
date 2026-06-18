@@ -760,6 +760,44 @@ def test_is_auto_destination_error_recognizes_objective_mismatch_marker() -> Non
     assert MetaAdsClient.is_auto_destination_error(message) is True
 
 
+def test_diagnose_instagram_post_access_reports_missing_instagram_asset_access() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        assert method == "GET"
+        if path == "/61581440236157_123":
+            return {
+                "id": "61581440236157_123",
+                "admin_creator": {
+                    "name": "Instagram",
+                    "namespace": "instapp",
+                },
+                "instagram_eligibility": "eligible",
+                "is_instagram_eligible": True,
+            }
+        if path == "/me/permissions":
+            return {
+                "data": [
+                    {"permission": "ads_management", "status": "granted"},
+                    {"permission": "pages_manage_ads", "status": "granted"},
+                ]
+            }
+        if path == "/act_1/instagram_accounts":
+            return {"data": []}
+        raise AssertionError(f"Unexpected path: {path}")
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    diagnostics = client.diagnose_instagram_post_access("61581440236157_123")
+
+    assert diagnostics["is_instagram_origin"] is True
+    assert diagnostics["instagram_eligibility"] == "eligible"
+    assert diagnostics["is_instagram_eligible"] is True
+    assert diagnostics["instagram_basic_granted"] is False
+    assert diagnostics["instagram_account_count"] == 0
+    assert diagnostics["has_instagram_media_access"] is False
+
+
 def test_check_token_health_success() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
 
