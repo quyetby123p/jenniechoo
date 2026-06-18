@@ -989,6 +989,191 @@ def test_existing_mode_fallbacks_to_messenger_after_direct_objective_mismatch() 
     assert "không tương thích với mục tiêu" in payload["destination_fallback_reason"]
 
 
+def test_existing_mode_messenger_objective_mismatch_reuses_approved_creative_when_copy_fails() -> None:
+    class ApprovedCreativeFallbackMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.create_ad_calls: list[tuple[str, str | None]] = []
+            self.duplicate_calls: list[tuple[str, str | None, str | None, str]] = []
+
+        def list_eligible_adsets(self, campaign_id: str, max_count: int) -> list[dict[str, str]]:  # noqa: ARG002
+            return [
+                {
+                    "id": "adset_1",
+                    "name": "Adset Messenger",
+                    "destination_type": "MESSENGER",
+                    "effective_status": "ACTIVE",
+                }
+            ]
+
+        def create_ad_creative(
+            self,
+            plan,  # noqa: ANN001
+            slot,  # noqa: ANN001
+            resolved_post,  # noqa: ANN001
+            destination_type_override=None,  # noqa: ANN001
+            extra_payload_overrides=None,  # noqa: ANN001
+        ) -> str:
+            _ = plan, slot, resolved_post, destination_type_override, extra_payload_overrides
+            return "cr_rejected"
+
+        def create_ad(
+            self,
+            plan,  # noqa: ANN001
+            slot,  # noqa: ANN001
+            adset_id: str,  # noqa: ARG002
+            creative_id: str,
+            destination_type_override=None,  # noqa: ANN001
+        ) -> str:
+            _ = plan, slot
+            self.create_ad_calls.append((creative_id, destination_type_override))
+            if creative_id == "cr_rejected":
+                raise MetaApiError(
+                    "Meta API loi (400): Nội dung quảng cáo không tương thích với mục tiêu của chiến dịch chứa quảng cáo đó."
+                )
+            assert creative_id == "cr_approved"
+            return "ad_from_approved_creative"
+
+        def find_latest_ad_by_story_ids(
+            self,
+            story_ids: list[str],  # noqa: ARG002
+            *,
+            adset_id: str | None = None,  # noqa: ARG002
+            max_ads_scan: int = 800,  # noqa: ARG002
+        ) -> dict[str, str] | None:
+            return {
+                "id": "ad_manual_seed",
+                "name": "Manual seed",
+                "creative_id": "cr_approved",
+            }
+
+        def duplicate_ad_from_source(
+            self,
+            source_ad_id: str,
+            target_ad_name: str | None = None,
+            *,
+            target_adset_id: str | None = None,
+            status_option: str = "PAUSED",
+        ) -> str:
+            self.duplicate_calls.append((source_ad_id, target_ad_name, target_adset_id, status_option))
+            raise MetaApiError("standard_enhancements đã ngừng hoạt động")
+
+    meta = ApprovedCreativeFallbackMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/reel/936294636119314",
+        budget_daily_vnd=0,
+        use_existing_campaign=True,
+        manual_sku_keywords=["JCV234"],
+    )
+    asyncio.run(
+        bot._create_existing_campaign_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_1",
+            version=1,
+            selected_campaign={"id": "camp_1", "name": "ADS:QUYET|MK:ThaiLan|JCV234|Codex"},
+            campaign_keywords=["JCV234"],
+        )
+    )
+
+    assert meta.duplicate_calls == [
+        (
+            "ad_manual_seed",
+            "ADS:QUYET|MK:ThaiLan|SKU:JCV234|MED:Anh|ADSET:adset_1",
+            "adset_1",
+            "PAUSED",
+        )
+    ]
+    assert meta.create_ad_calls == [
+        ("cr_rejected", "MESSENGER"),
+        ("cr_approved", "MESSENGER"),
+    ]
+    assert rollback.calls[0] == (None, [], [], ["cr_rejected"])
+    assert all("cr_rejected" not in call[3] for call in rollback.calls[1:])
+    payload = storage.saved_jobs[-1][1]
+    assert storage.saved_jobs[-1][0] == "pending"
+    assert payload["ad_ids"] == ["ad_from_approved_creative"]
+    assert payload["creative_ids"] == []
+
+
+def test_existing_mode_messenger_instagram_origin_reports_missing_api_access() -> None:
+    class InstagramPermissionGapMeta(FakeMeta):
+        def list_eligible_adsets(self, campaign_id: str, max_count: int) -> list[dict[str, str]]:  # noqa: ARG002
+            return [
+                {
+                    "id": "adset_1",
+                    "name": "Adset Messenger",
+                    "destination_type": "MESSENGER",
+                    "effective_status": "ACTIVE",
+                }
+            ]
+
+        def create_ad_creative(
+            self,
+            plan,  # noqa: ANN001
+            slot,  # noqa: ANN001
+            resolved_post,  # noqa: ANN001
+            destination_type_override=None,  # noqa: ANN001
+            extra_payload_overrides=None,  # noqa: ANN001
+        ) -> str:
+            _ = plan, slot, resolved_post, destination_type_override, extra_payload_overrides
+            return "cr_rejected"
+
+        def create_ad(
+            self,
+            plan,  # noqa: ANN001
+            slot,  # noqa: ANN001
+            adset_id: str,  # noqa: ARG002
+            creative_id: str,  # noqa: ARG002
+            destination_type_override=None,  # noqa: ANN001
+        ) -> str:
+            _ = plan, slot, destination_type_override
+            raise MetaApiError(
+                "Meta API loi (400): Nội dung quảng cáo không tương thích với mục tiêu của chiến dịch chứa quảng cáo đó."
+            )
+
+        def diagnose_instagram_post_access(self, object_story_id: str) -> dict[str, Any]:  # noqa: ARG002
+            return {
+                "is_instagram_origin": True,
+                "instagram_basic_granted": False,
+                "instagram_account_count": 0,
+                "has_instagram_media_access": False,
+            }
+
+    meta = InstagramPermissionGapMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/reel/936294636119314",
+        budget_daily_vnd=0,
+        use_existing_campaign=True,
+        manual_sku_keywords=["JCV234"],
+    )
+    asyncio.run(
+        bot._create_existing_campaign_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_1",
+            version=1,
+            selected_campaign={"id": "camp_1", "name": "ADS:QUYET|MK:ThaiLan|JCV234|Codex"},
+            campaign_keywords=["JCV234"],
+        )
+    )
+
+    assert rollback.calls[0] == (None, [], [], ["cr_rejected"])
+    assert all("cr_rejected" not in call[3] for call in rollback.calls[1:])
+    assert storage.saved_jobs[-1][0] == "failed"
+    assert "instagram_basic" in storage.saved_jobs[-1][1]["error"]
+    assert bot._bot is not None
+    assert "tạo 1 ad PAUSED thủ công" in bot._bot.messages[-1]["text"]
+
+
 def test_existing_mode_fallbacks_to_messenger_when_instagram_media_requirement_fails() -> None:
     class MediaFallbackMeta(FakeMeta):
         def __init__(self) -> None:

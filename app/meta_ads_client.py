@@ -321,6 +321,83 @@ class MetaAdsClient:
                 raise ValidationError(self._page_ad_access_fix_message()) from exc
             raise
 
+    def diagnose_instagram_post_access(self, object_story_id: str) -> dict[str, Any]:
+        diagnostics: dict[str, Any] = {
+            "is_instagram_origin": False,
+            "instagram_eligibility": "",
+            "is_instagram_eligible": False,
+            "instagram_basic_granted": False,
+            "instagram_account_count": 0,
+            "has_instagram_media_access": False,
+            "errors": [],
+        }
+        normalized_story_id = str(object_story_id or "").strip()
+        if normalized_story_id:
+            try:
+                post = self._request(
+                    "GET",
+                    f"/{normalized_story_id}",
+                    params={
+                        "fields": "id,admin_creator,instagram_eligibility,is_instagram_eligible",
+                    },
+                    access_token=(
+                        self.settings.meta_page_access_token.strip()
+                        or self.settings.meta_access_token
+                    ),
+                )
+                admin_creator = post.get("admin_creator")
+                if isinstance(admin_creator, dict):
+                    creator_name = str(admin_creator.get("name", "")).strip().lower()
+                    creator_namespace = str(admin_creator.get("namespace", "")).strip().lower()
+                    diagnostics["is_instagram_origin"] = (
+                        creator_name == "instagram"
+                        or creator_namespace in {"instagram", "instapp"}
+                    )
+                diagnostics["instagram_eligibility"] = str(
+                    post.get("instagram_eligibility", "")
+                ).strip()
+                diagnostics["is_instagram_eligible"] = bool(
+                    post.get("is_instagram_eligible", False)
+                )
+            except Exception as exc:  # noqa: BLE001
+                diagnostics["errors"].append(f"post: {exc}")
+
+        try:
+            permissions = self._request(
+                "GET",
+                "/me/permissions",
+                access_token=self.settings.meta_access_token,
+            )
+            granted = {
+                str(item.get("permission", "")).strip()
+                for item in permissions.get("data", [])
+                if isinstance(item, dict)
+                and str(item.get("status", "")).strip().lower() == "granted"
+            }
+            diagnostics["instagram_basic_granted"] = bool(
+                {"instagram_basic", "instagram_business_basic"} & granted
+            )
+        except Exception as exc:  # noqa: BLE001
+            diagnostics["errors"].append(f"permissions: {exc}")
+
+        try:
+            accounts = self._request(
+                "GET",
+                f"/{self.ad_account_id}/instagram_accounts",
+                params={"fields": "id,username", "limit": 100},
+                access_token=self.settings.meta_access_token,
+            )
+            data = accounts.get("data", [])
+            diagnostics["instagram_account_count"] = len(data) if isinstance(data, list) else 0
+        except Exception as exc:  # noqa: BLE001
+            diagnostics["errors"].append(f"instagram_accounts: {exc}")
+
+        diagnostics["has_instagram_media_access"] = bool(
+            diagnostics["instagram_basic_granted"]
+            and diagnostics["instagram_account_count"] > 0
+        )
+        return diagnostics
+
     def get_daily_spend(self, report_date: date, timezone_name: str) -> dict[str, Any]:
         result = self.get_spend_for_range(report_date, report_date, timezone_name)
         return {
