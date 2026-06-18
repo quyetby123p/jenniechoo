@@ -882,6 +882,113 @@ def test_existing_mode_retries_with_account_asset_feed_spec_after_objective_mism
     assert storage.saved_jobs[-1][1]["ad_ids"] == ["ad_2"]
 
 
+def test_existing_mode_fallbacks_to_messenger_after_direct_objective_mismatch() -> None:
+    class MessengerFallbackMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.create_ad_calls = 0
+            self.creative_destinations: list[str | None] = []
+            self.creative_overrides: list[dict[str, Any] | None] = []
+            self.ad_destinations: list[str | None] = []
+            self.adset_spec = {"optimization_type": "DOF_MESSAGING_DESTINATION", "source": "adset"}
+
+        def list_eligible_adsets(self, campaign_id: str, max_count: int) -> list[dict[str, str]]:  # noqa: ARG002
+            return [
+                {
+                    "id": "adset_1",
+                    "name": "Adset Multi",
+                    "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                    "effective_status": "ACTIVE",
+                }
+            ]
+
+        def get_multi_destination_asset_feed_spec(
+            self,
+            adset_id: str,
+            max_ads_scan: int = 20,
+        ) -> dict[str, Any]:  # noqa: ARG002
+            return dict(self.adset_spec)
+
+        def get_account_multi_destination_asset_feed_spec(
+            self,
+            max_ads_scan: int = 200,
+        ) -> dict[str, Any]:  # noqa: ARG002
+            return dict(self.adset_spec)
+
+        def create_ad_creative(
+            self,
+            plan,  # noqa: ANN001
+            slot,  # noqa: ANN001
+            resolved_post,  # noqa: ANN001
+            destination_type_override=None,  # noqa: ANN001
+            extra_payload_overrides=None,  # noqa: ANN001
+        ) -> str:
+            _ = plan, slot, resolved_post
+            self.creative_destinations.append(destination_type_override)
+            self.creative_overrides.append(extra_payload_overrides)
+            return f"cr_{len(self.creative_destinations)}"
+
+        def create_ad(
+            self,
+            plan,  # noqa: ANN001
+            slot,  # noqa: ANN001
+            adset_id: str,  # noqa: ARG002
+            creative_id: str,  # noqa: ARG002
+            destination_type_override=None,  # noqa: ANN001
+        ) -> str:
+            _ = plan, slot
+            self.create_ad_calls += 1
+            self.ad_destinations.append(destination_type_override)
+            if self.create_ad_calls == 1:
+                raise MetaApiError(
+                    "Meta API loi (400): Nội dung quảng cáo không tương thích với mục tiêu của chiến dịch chứa quảng cáo đó."
+                )
+            return "ad_messenger"
+
+    meta = MessengerFallbackMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/reel/936294636119314",
+        budget_daily_vnd=0,
+        use_existing_campaign=True,
+        manual_sku_keywords=[],
+        existing_campaign_hint="video",
+    )
+    asyncio.run(
+        bot._create_existing_campaign_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_1",
+            version=1,
+            selected_campaign={"id": "camp_1", "name": "ADS:QUYET|MK:ThaiLan|SKU:ALL|Video"},
+            campaign_keywords=["VIDEO"],
+        )
+    )
+
+    assert meta.creative_destinations == [
+        "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+        "MESSENGER",
+    ]
+    assert meta.creative_overrides == [
+        {"asset_feed_spec": meta.adset_spec},
+        None,
+    ]
+    assert meta.ad_destinations == [
+        "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+        "MESSENGER",
+    ]
+    assert rollback.calls == [(None, [], [], ["cr_1"])]
+    assert storage.saved_jobs[-1][0] == "pending"
+    payload = storage.saved_jobs[-1][1]
+    assert payload["ad_ids"] == ["ad_messenger"]
+    assert payload["creative_ids"] == ["cr_2"]
+    assert payload["active_destination_type"] == "MESSENGER"
+    assert "không tương thích với mục tiêu" in payload["destination_fallback_reason"]
+
+
 def test_existing_mode_fallbacks_to_messenger_when_instagram_media_requirement_fails() -> None:
     class MediaFallbackMeta(FakeMeta):
         def __init__(self) -> None:
