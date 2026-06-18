@@ -1546,6 +1546,7 @@ class TelegramAdsBot:
                             and bool(account_asset_feed_spec)
                             and creative_extra_overrides.get("asset_feed_spec") != account_asset_feed_spec
                         )
+                        retry_error: MetaApiError = exc
                         if can_retry_with_account_spec:
                             if ad_id:
                                 await asyncio.to_thread(self.rollback.rollback, None, [], [ad_id], [])
@@ -1567,26 +1568,91 @@ class TelegramAdsBot:
                                 adset_destination_type,
                                 retry_overrides,
                             )
-                            ad_id = await asyncio.to_thread(
-                                self.meta.create_ad,
-                                active_plan,
-                                slot,
-                                adset_id,
-                                creative_id,
-                                adset_destination_type,
-                            )
-                        else:
+                            try:
+                                ad_id = await asyncio.to_thread(
+                                    self.meta.create_ad,
+                                    active_plan,
+                                    slot,
+                                    adset_id,
+                                    creative_id,
+                                    adset_destination_type,
+                                )
+                            except MetaApiError as account_retry_exc:
+                                retry_error = account_retry_exc
+                                retry_error_text = str(account_retry_exc)
+                                if not (
+                                    self.meta.is_auto_destination_error(retry_error_text)
+                                    or self.meta.is_post_not_advertisable_error(retry_error_text)
+                                ):
+                                    if creative_id:
+                                        await asyncio.to_thread(
+                                            self.rollback.rollback,
+                                            None,
+                                            [],
+                                            [],
+                                            [creative_id],
+                                        )
+                                        creative_id = None
+                                    raise
+
+                        if not ad_id:
                             if ad_id:
                                 await asyncio.to_thread(self.rollback.rollback, None, [], [ad_id], [])
                                 ad_id = None
                             if creative_id:
                                 await asyncio.to_thread(self.rollback.rollback, None, [], [], [creative_id])
                                 creative_id = None
-                            raise ValidationError(
-                                "Mode lên cũ chỉ tạo ads, không đổi cấu hình campaign/adset.\n"
-                                "Adset hiện tại đang đa đích (Messenger + Instagram) và Meta từ chối creative mới cho post này.\n"
-                                "Anh thử lại sau vài phút hoặc chọn adset khác trong cùng campaign."
-                            ) from exc
+                            active_destination_type = "MESSENGER"
+                            destination_fallback_reason = str(retry_error)
+                            self.logger.warning(
+                                "Fallback len cu sang creative/ad MESSENGER cho adset %s "
+                                "do loi objective tren multi-destination: %s",
+                                adset_id,
+                                retry_error,
+                            )
+                            try:
+                                creative_id = await asyncio.to_thread(
+                                    self.meta.create_ad_creative,
+                                    active_plan,
+                                    slot,
+                                    resolved_post,
+                                    "MESSENGER",
+                                    None,
+                                )
+                                ad_id = await asyncio.to_thread(
+                                    self.meta.create_ad,
+                                    active_plan,
+                                    slot,
+                                    adset_id,
+                                    creative_id,
+                                    "MESSENGER",
+                                )
+                            except MetaApiError as messenger_exc:
+                                messenger_error_text = str(messenger_exc)
+                                if creative_id:
+                                    await asyncio.to_thread(
+                                        self.rollback.rollback,
+                                        None,
+                                        [],
+                                        [],
+                                        [creative_id],
+                                    )
+                                    creative_id = None
+                                if (
+                                    self.meta.is_auto_destination_error(messenger_error_text)
+                                    or self.meta.is_post_not_advertisable_error(messenger_error_text)
+                                ):
+                                    duplicated_ad_id = await _try_duplicate_from_existing_ad(
+                                        adset_id,
+                                        slot,
+                                        messenger_error_text,
+                                    )
+                                    if duplicated_ad_id:
+                                        ad_id = duplicated_ad_id
+                                    else:
+                                        raise
+                                else:
+                                    raise
                     elif (
                         adset_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
                         and self.meta.is_instagram_media_requirement_error(error_text)
