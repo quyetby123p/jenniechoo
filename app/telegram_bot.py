@@ -1204,6 +1204,8 @@ class TelegramAdsBot:
         account_multi_destination_asset_feed_spec_checked = False
         instagram_post_access_diagnostics: dict[str, Any] | None = None
         instagram_post_access_diagnostics_checked = False
+        reusable_story_creative_id: str | None = None
+        reusable_story_creative_checked = False
 
         try:
             if not campaign_id:
@@ -1238,6 +1240,7 @@ class TelegramAdsBot:
                 )
             selected_adset_ids = [str(item.get("id", "")).strip() for item in adsets if str(item.get("id", "")).strip()]
             non_jc_suffix = build_non_jc_hashtag_suffix(resolved_post.message_text)
+            story_id_candidates = self._build_story_id_candidates(resolved_post, command.post_url)
 
             async def _get_account_asset_feed_spec_cached() -> dict[str, Any] | None:
                 nonlocal account_multi_destination_asset_feed_spec
@@ -1284,6 +1287,26 @@ class TelegramAdsBot:
                     instagram_post_access_diagnostics = {}
                 return dict(instagram_post_access_diagnostics or {})
 
+            async def _get_reusable_story_creative_cached() -> str | None:
+                nonlocal reusable_story_creative_id
+                nonlocal reusable_story_creative_checked
+                if reusable_story_creative_checked:
+                    return reusable_story_creative_id
+                reusable_story_creative_checked = True
+                try:
+                    reusable_story_creative_id = await asyncio.to_thread(
+                        self.meta.find_reusable_creative_id_by_story_ids,
+                        story_id_candidates,
+                        max_ads_scan=1600,
+                    )
+                except (ValidationError, MetaApiError) as exc:
+                    self.logger.warning(
+                        "Khong tra cuu duoc creative hop le cua cung bai post/reel: %s",
+                        exc,
+                    )
+                    reusable_story_creative_id = None
+                return reusable_story_creative_id
+
             async def _try_duplicate_from_existing_ad(
                 adset_id: str,
                 slot: AudienceSlot,
@@ -1292,7 +1315,6 @@ class TelegramAdsBot:
             ) -> str | None:
                 if not resolved_post:
                     return None
-                story_id_candidates = self._build_story_id_candidates(resolved_post, command.post_url)
                 lookup_order: list[str] = []
                 seen_lookup: set[str] = set()
                 for lookup_adset_id in [adset_id, *selected_adset_ids]:
@@ -1414,6 +1436,33 @@ class TelegramAdsBot:
 
                 creative_id: str | None = None
                 ad_id: str | None = None
+                source_creative_id = await _get_reusable_story_creative_cached()
+                if source_creative_id:
+                    try:
+                        ad_id = await asyncio.to_thread(
+                            self.meta.create_ad,
+                            active_plan,
+                            slot,
+                            adset_id,
+                            source_creative_id,
+                            adset_destination_type,
+                        )
+                    except MetaApiError as reuse_exc:
+                        self.logger.warning(
+                            "Creative %s cua cung post/reel khong gan duoc vao adset %s; "
+                            "thu tao creative moi: %s",
+                            source_creative_id,
+                            adset_id,
+                            reuse_exc,
+                        )
+                    else:
+                        self.logger.info(
+                            "Tai su dung creative %s cua cung post/reel cho adset cu %s.",
+                            source_creative_id,
+                            adset_id,
+                        )
+                        ad_ids.append(ad_id)
+                        continue
                 try:
                     creative_id = await asyncio.to_thread(
                         self.meta.create_ad_creative,
