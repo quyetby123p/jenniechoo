@@ -175,6 +175,15 @@ class FakeMeta:
     ) -> dict[str, str] | None:
         return None
 
+    def find_reusable_creative_id_by_story_ids(
+        self,
+        story_ids: list[str],  # noqa: ARG002
+        *,
+        adset_id: str | None = None,  # noqa: ARG002
+        max_ads_scan: int = 800,  # noqa: ARG002
+    ) -> str | None:
+        return None
+
     def duplicate_ad_from_source(
         self,
         source_ad_id: str,  # noqa: ARG002
@@ -581,6 +590,81 @@ def test_existing_mode_draft_never_mutates_campaign_or_adset() -> None:
     assert storage.saved_jobs[-1][1]["campaign_mode"] == "existing"
     assert storage.saved_jobs[-1][1]["publish_scope"] == "ads_only"
     assert storage.saved_jobs[-1][1]["adset_ids"] == []
+
+
+def test_existing_mode_reuses_successful_new_campaign_creative_for_same_reel() -> None:
+    class ReuseCreativeMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.reuse_lookups: list[list[str]] = []
+            self.create_ad_calls: list[tuple[str, str, str | None]] = []
+
+        def list_eligible_adsets(self, campaign_id: str, max_count: int) -> list[dict[str, str]]:  # noqa: ARG002
+            return [
+                {
+                    "id": "old_adset_1",
+                    "name": "Old Messenger Adset",
+                    "destination_type": "MESSENGER",
+                    "effective_status": "ACTIVE",
+                }
+            ]
+
+        def find_reusable_creative_id_by_story_ids(
+            self,
+            story_ids: list[str],
+            *,
+            adset_id: str | None = None,  # noqa: ARG002
+            max_ads_scan: int = 800,  # noqa: ARG002
+        ) -> str | None:
+            self.reuse_lookups.append(list(story_ids))
+            return "creative_from_new_campaign"
+
+        def create_ad(
+            self,
+            plan,  # noqa: ANN001, ARG002
+            slot,  # noqa: ANN001, ARG002
+            adset_id: str,
+            creative_id: str,
+            destination_type_override=None,  # noqa: ANN001
+        ) -> str:
+            self.create_ad_calls.append((adset_id, creative_id, destination_type_override))
+            return "ad_in_old_campaign"
+
+        def create_ad_creative(self, *args, **kwargs) -> str:  # noqa: ANN002, ANN003
+            raise AssertionError("Không được tạo creative mới khi đã có creative hợp lệ từ camp mới.")
+
+    meta = ReuseCreativeMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+    command = AdsCommand(
+        post_url="https://www.facebook.com/reel/936294636119314",
+        budget_daily_vnd=0,
+        use_existing_campaign=True,
+        manual_sku_keywords=["JCV234"],
+    )
+
+    asyncio.run(
+        bot._create_existing_campaign_draft_and_send_review(
+            chat_id=1,
+            command=command,
+            post_fingerprint="same_reel",
+            version=1,
+            selected_campaign={"id": "old_campaign", "name": "ADS:QUYET|MK:ThaiLan|JCV234|Codex"},
+            campaign_keywords=["JCV234"],
+        )
+    )
+
+    assert meta.reuse_lookups == [[
+        "61581440236157_123",
+        "61581440236157_936294636119314",
+    ]]
+    assert meta.create_ad_calls == [
+        ("old_adset_1", "creative_from_new_campaign", "MESSENGER")
+    ]
+    payload = storage.saved_jobs[-1][1]
+    assert payload["ad_ids"] == ["ad_in_old_campaign"]
+    assert payload["creative_ids"] == []
 
 
 def test_approve_existing_mode_publishes_ads_only() -> None:
