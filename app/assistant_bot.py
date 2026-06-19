@@ -1227,6 +1227,12 @@ class TelegramAssistantBot:
 
     async def _build_general_qa_reply(self, question: str) -> str:
         normalized_question = " ".join(str(question or "").split())
+        if not self.settings.internal_qa_enabled:
+            return (
+                "Bot hiện chỉ theo dõi task công việc. "
+                "Anh có thể gửi: `thêm công việc: <tên task>`, `tiến độ` hoặc `/task`."
+            )
+
         normalized_lookup = _normalize_question_text(normalized_question)
         activity_date = self._resolve_activity_question_date(question)
         if activity_date is not None:
@@ -1584,6 +1590,7 @@ class TelegramAssistantBot:
             f"- Nhắc trước sự kiện: {self.settings.event_reminder_lead_minutes} phút\n"
             f"- EOD giờ: {self.settings.eod_hour:02d}:00\n"
             f"- Task tracker: {'Bật' if self.settings.tasks_enabled else 'Tắt'}\n"
+            f"- Hỏi thông tin nội bộ: {'Bật' if self.settings.internal_qa_enabled else 'Tắt'}\n"
             f"- Task group chat id: {self.settings.task_group_chat_id}\n"
             f"- Daily task check-in: {'Bật' if self.settings.daily_task_checkin_enabled else 'Tắt'} "
             f"({self.settings.daily_task_morning_hour:02d}:{self.settings.daily_task_morning_minute:02d}/"

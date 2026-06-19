@@ -42,6 +42,7 @@ class AssistantSettings:
     gmail_query_default: str
     sheets_spreadsheet_id: str
     sheets_gid: int
+    internal_qa_enabled: bool = True
     tasks_enabled: bool = False
     task_group_chat_id: int = 0
     task_require_tag: bool = True
@@ -260,6 +261,7 @@ def load_assistant_settings(project_root: Path | None = None) -> AssistantSettin
     )
     openai_retry_backoff = _parse_retry_backoff(os.getenv("BOT3_OPENAI_RETRY_BACKOFF", "2,5"))
     openai_enabled = _parse_bool(os.getenv("BOT3_OPENAI_ENABLED", "1"), default=True)
+    internal_qa_enabled = _parse_bool(os.getenv("BOT3_INTERNAL_QA_ENABLED", "1"), default=True)
 
     google_oauth_client_id = os.getenv("BOT3_GOOGLE_OAUTH_CLIENT_ID", "").strip()
     google_oauth_client_secret = os.getenv("BOT3_GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
@@ -401,6 +403,7 @@ def load_assistant_settings(project_root: Path | None = None) -> AssistantSettin
         gmail_query_default=gmail_query_default,
         sheets_spreadsheet_id=sheets_spreadsheet_id,
         sheets_gid=sheets_gid,
+        internal_qa_enabled=internal_qa_enabled,
         tasks_enabled=tasks_enabled,
         task_group_chat_id=task_group_chat_id,
         task_require_tag=task_require_tag,

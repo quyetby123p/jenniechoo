@@ -17,7 +17,12 @@ from app.assistant_models import AssistantMemoryHit
 from app.assistant_settings import AssistantSettings
 
 
-def _settings(tmp_path: Path, *, openai_enabled: bool = False) -> AssistantSettings:
+def _settings(
+    tmp_path: Path,
+    *,
+    openai_enabled: bool = False,
+    internal_qa_enabled: bool = True,
+) -> AssistantSettings:
     return AssistantSettings(
         project_root=tmp_path,
         workspace_root=tmp_path,
@@ -50,6 +55,7 @@ def _settings(tmp_path: Path, *, openai_enabled: bool = False) -> AssistantSetti
         gmail_query_default="is:unread",
         sheets_spreadsheet_id="sheet",
         sheets_gid=0,
+        internal_qa_enabled=internal_qa_enabled,
     )
 
 
@@ -135,6 +141,27 @@ def test_general_qa_openai_disabled_prefers_local_reasoning(tmp_path: Path) -> N
     assert "Theo dữ liệu nội bộ hiện có" in reply
     assert "route nhanh đến đúng context" in reply
     assert "BOT3_OPENAI_ENABLED" not in reply
+
+
+def test_general_qa_disabled_does_not_read_internal_memory(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, openai_enabled=False, internal_qa_enabled=False)
+    bot = TelegramAssistantBot(
+        settings=settings,
+        logger=logging.getLogger("assistant_bot_general_qa_disabled_test"),
+        storage=object(),  # type: ignore[arg-type]
+        memory=_FailIfSearchedMemory(),  # type: ignore[arg-type]
+        google=object(),  # type: ignore[arg-type]
+        openai=_FakeOpenAI(),  # type: ignore[arg-type]
+        internal_ops=_FakeInternalOps(),  # type: ignore[arg-type]
+        approval=object(),  # type: ignore[arg-type]
+        scheduler=_FakeScheduler(datetime(2026, 5, 19, 19, 30, 0)),  # type: ignore[arg-type]
+        tasks=object(),  # type: ignore[arg-type]
+    )
+
+    reply = asyncio.run(bot._build_general_qa_reply("cho anh xem thông tin nội bộ"))
+    assert "chỉ theo dõi task công việc" in reply
+    assert "Theo dữ liệu nội bộ hiện có" not in reply
+    assert "workspace_memory" not in reply
 
 
 def test_general_qa_openai_disabled_lookup_question_prefers_web(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
@@ -272,6 +299,11 @@ class _FakeMemory:
 
     def search(self, _query: str, *, limit: int = 6) -> list[AssistantMemoryHit]:
         return self._hits[:limit]
+
+
+class _FailIfSearchedMemory:
+    def search(self, _query: str, *, limit: int = 6) -> list[AssistantMemoryHit]:
+        raise AssertionError(f"Memory search must be skipped (limit={limit}).")
 
 
 class _FakeOpenAI:

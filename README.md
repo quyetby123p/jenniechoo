@@ -695,6 +695,7 @@ Can dien cac bien trong `.env`:
 - `BOT3_MEMORY_INDEX_PATH` (mac dinh `storage/assistant_bot/memory.db`)
 - `BOT3_REDACTION_ENABLED` (mac dinh `1`)
 - `BOT3_OPENAI_ENABLED` (mac dinh `1`, dat `0` neu muon tat ChatGPT/OpenAI va chi dung du lieu noi bo)
+- `BOT3_INTERNAL_QA_ENABLED` (mac dinh `1`, dat `0` de Bot 3 chi quan ly task va khong doc/tra loi tu memory noi bo)
 - `BOT3_OPENAI_API_KEY`
 - `BOT3_OPENAI_MODEL` (mac dinh `gpt-4.1-mini`)
 - `BOT3_OPENAI_TIMEOUT_SECONDS` (mac dinh `45`)
