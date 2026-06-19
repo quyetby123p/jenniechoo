@@ -49,6 +49,7 @@ def _settings(tmp_path: Path) -> AssistantSettings:
         task_manager_user_ids=[1],
         task_weekly_summary_enabled=True,
         daily_task_checkin_enabled=True,
+        daily_task_local_scheduler_enabled=True,
     )
 
 
@@ -72,6 +73,21 @@ def test_daily_task_morning_reply_creates_tasks_and_state(tmp_path: Path) -> Non
     day_state = state["days"]["2026-06-04"]
     assert day_state["morning_answered"] is True
     assert len(day_state["task_uids"]) == 2
+
+
+def test_cloud_owned_daily_scheduler_disables_local_loop(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    settings = AssistantSettings(
+        **{
+            **settings.__dict__,
+            "daily_task_local_scheduler_enabled": False,
+        }
+    )
+    storage = AssistantStorageService(settings=settings, logger=_fake_logger())
+    tasks = AssistantTaskService(settings=settings, logger=_fake_logger())
+    bot = _build_bot(settings=settings, storage=storage, tasks=tasks)
+
+    assert bot._should_run_daily_task_local_scheduler() is False
 
 
 def test_daily_task_morning_no_tasks_skips_evening(tmp_path: Path) -> None:

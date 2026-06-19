@@ -53,6 +53,7 @@ class AssistantSettings:
     task_weekly_summary_max_items: int = 5
     task_db_path: Path | None = None
     daily_task_checkin_enabled: bool = False
+    daily_task_local_scheduler_enabled: bool = True
     daily_task_morning_hour: int = 9
     daily_task_morning_minute: int = 0
     daily_task_evening_hour: int = 17
@@ -312,6 +313,10 @@ def load_assistant_settings(project_root: Path | None = None) -> AssistantSettin
         max_value=20,
     )
     daily_task_checkin_enabled = _parse_bool(os.getenv("BOT3_DAILY_TASK_CHECKIN_ENABLED", "0"), default=False)
+    daily_task_local_scheduler_enabled = _parse_bool(
+        os.getenv("BOT3_DAILY_TASK_LOCAL_SCHEDULER_ENABLED", "1"),
+        default=True,
+    )
     daily_task_morning_hour = _parse_int(
         os.getenv("BOT3_DAILY_TASK_MORNING_HOUR", "9"),
         default=9,
@@ -407,6 +412,7 @@ def load_assistant_settings(project_root: Path | None = None) -> AssistantSettin
         task_weekly_summary_max_items=task_weekly_summary_max_items,
         task_db_path=task_db_path,
         daily_task_checkin_enabled=daily_task_checkin_enabled,
+        daily_task_local_scheduler_enabled=daily_task_local_scheduler_enabled,
         daily_task_morning_hour=daily_task_morning_hour,
         daily_task_morning_minute=daily_task_morning_minute,
         daily_task_evening_hour=daily_task_evening_hour,

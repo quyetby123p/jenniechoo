@@ -109,11 +109,13 @@ class TelegramAssistantBot:
                 self._task_weekly_summary_loop(),
                 name="assistant_task_weekly_summary_loop",
             )
-        if self.settings.tasks_enabled and self.settings.daily_task_checkin_enabled:
+        if self._should_run_daily_task_local_scheduler():
             self._daily_task_checkin_task = asyncio.create_task(
                 self._daily_task_checkin_loop(),
                 name="assistant_daily_task_checkin_loop",
             )
+        elif self.settings.tasks_enabled and self.settings.daily_task_checkin_enabled:
+            self.logger.info("Daily task check-in local scheduler dang tat; cloud scheduler la nguon gui chinh.")
 
         self.logger.info("Assistant bot dang chay polling...")
         try:
@@ -140,6 +142,13 @@ class TelegramAssistantBot:
                 if task:
                     with suppress(asyncio.CancelledError):
                         await task
+
+    def _should_run_daily_task_local_scheduler(self) -> bool:
+        return bool(
+            self.settings.tasks_enabled
+            and self.settings.daily_task_checkin_enabled
+            and self.settings.daily_task_local_scheduler_enabled
+        )
 
     async def _rebuild_memory_index_background(self) -> None:
         try:
@@ -1579,6 +1588,7 @@ class TelegramAssistantBot:
             f"- Daily task check-in: {'Bật' if self.settings.daily_task_checkin_enabled else 'Tắt'} "
             f"({self.settings.daily_task_morning_hour:02d}:{self.settings.daily_task_morning_minute:02d}/"
             f"{self.settings.daily_task_evening_hour:02d}:{self.settings.daily_task_evening_minute:02d})\n"
+            f"- Daily task local scheduler: {'Bật' if self.settings.daily_task_local_scheduler_enabled else 'Tắt (cloud phụ trách)'}\n"
             f"- Google connector: {'OK' if google_ok else f'LỖI ({google_reason})'}\n"
             f"- OpenAI connector: {openai_status}\n"
             f"- Memory index: {memory_status.get('doc_count', 0)} docs"

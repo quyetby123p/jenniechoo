@@ -720,6 +720,7 @@ Can dien cac bien trong `.env`:
 - `BOT3_TASK_WEEKLY_SUMMARY_MINUTE` (mac dinh `0`)
 - `BOT3_TASK_WEEKLY_SUMMARY_MAX_ITEMS` (mac dinh `5`)
 - `BOT3_DAILY_TASK_CHECKIN_ENABLED` (mac dinh `0`, dat `1` de bat hoi task 09:00/17:00)
+- `BOT3_DAILY_TASK_LOCAL_SCHEDULER_ENABLED` (mac dinh `1`; dat `0` khi Bot 3 dung webhook cloud de cloud la noi duy nhat gui prompt, tranh local hoi nhung cloud nhan cau tra loi va mat draft)
 - `BOT3_DAILY_TASK_MORNING_HOUR` / `BOT3_DAILY_TASK_MORNING_MINUTE` (mac dinh `9:00`)
 - `BOT3_DAILY_TASK_EVENING_HOUR` / `BOT3_DAILY_TASK_EVENING_MINUTE` (mac dinh `17:00`)
 - `BOT3_DAILY_TASK_WEEKDAYS` (mac dinh `0,1,2,3,4,5` = T2-T7)
