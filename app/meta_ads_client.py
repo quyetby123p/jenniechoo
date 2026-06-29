@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from datetime import date, datetime, timezone
 import json
 import logging
@@ -993,6 +994,7 @@ class MetaAdsClient:
         *,
         adset_id: str | None = None,
         max_ads_scan: int = 800,
+        expected_page_welcome_message: Any | None = None,
     ) -> str | None:
         normalized_ids: set[str] = {
             str(item).strip()
@@ -1007,7 +1009,10 @@ class MetaAdsClient:
         else:
             next_path = f"/{self.ad_account_id}/ads"
         next_params: dict[str, Any] | None = {
-            "fields": "id,updated_time,creative{id,object_story_id,effective_object_story_id}",
+            "fields": (
+                "id,updated_time,"
+                "creative{id,object_story_id,effective_object_story_id,page_welcome_message}"
+            ),
             "limit": 200,
         }
         scanned = 0
@@ -1037,6 +1042,11 @@ class MetaAdsClient:
                 effective_object_story_id = str(creative.get("effective_object_story_id", "")).strip()
                 if object_story_id not in normalized_ids and effective_object_story_id not in normalized_ids:
                     continue
+                if not self._page_welcome_message_matches_expected(
+                    creative.get("page_welcome_message"),
+                    expected_page_welcome_message,
+                ):
+                    continue
                 candidates.append(
                     {
                         "creative_id": creative_id,
@@ -1064,6 +1074,7 @@ class MetaAdsClient:
         *,
         adset_id: str | None = None,
         max_ads_scan: int = 800,
+        expected_page_welcome_message: Any | None = None,
     ) -> dict[str, str] | None:
         normalized_ids: set[str] = {
             str(item).strip()
@@ -1078,7 +1089,10 @@ class MetaAdsClient:
         else:
             next_path = f"/{self.ad_account_id}/ads"
         next_params: dict[str, Any] | None = {
-            "fields": "id,name,status,effective_status,updated_time,creative{id,object_story_id,effective_object_story_id}",
+            "fields": (
+                "id,name,status,effective_status,updated_time,"
+                "creative{id,object_story_id,effective_object_story_id,page_welcome_message}"
+            ),
             "limit": 200,
         }
         scanned = 0
@@ -1104,6 +1118,11 @@ class MetaAdsClient:
                 object_story_id = str(creative.get("object_story_id", "")).strip()
                 effective_object_story_id = str(creative.get("effective_object_story_id", "")).strip()
                 if object_story_id not in normalized_ids and effective_object_story_id not in normalized_ids:
+                    continue
+                if not self._page_welcome_message_matches_expected(
+                    creative.get("page_welcome_message"),
+                    expected_page_welcome_message,
+                ):
                     continue
                 candidates.append(
                     {
@@ -1131,6 +1150,49 @@ class MetaAdsClient:
             reverse=True,
         )
         return candidates[0]
+
+    @classmethod
+    def _page_welcome_message_matches_expected(cls, actual: Any, expected: Any | None) -> bool:
+        if expected is None:
+            return True
+        actual_normalized = cls._normalize_page_welcome_message_for_compare(actual)
+        expected_normalized = cls._normalize_page_welcome_message_for_compare(expected)
+        return cls._contains_expected_page_welcome_message(
+            actual_normalized,
+            expected_normalized,
+        )
+
+    @classmethod
+    def _normalize_page_welcome_message_for_compare(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped and stripped[0] in "[{":
+                with suppress(ValueError, TypeError):
+                    return cls._normalize_page_welcome_message_for_compare(json.loads(stripped))
+            return stripped
+        if isinstance(value, dict):
+            return {
+                str(key): cls._normalize_page_welcome_message_for_compare(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [cls._normalize_page_welcome_message_for_compare(item) for item in value]
+        return value
+
+    @classmethod
+    def _contains_expected_page_welcome_message(cls, actual: Any, expected: Any) -> bool:
+        if isinstance(expected, dict):
+            if not isinstance(actual, dict):
+                return False
+            for key, expected_value in expected.items():
+                if key not in actual:
+                    return False
+                if not cls._contains_expected_page_welcome_message(actual[key], expected_value):
+                    return False
+            return True
+        if isinstance(expected, list):
+            return isinstance(actual, list) and actual == expected
+        return actual == expected
 
     def create_campaign(self, plan: PlannedCampaign) -> str:
         payload = {

@@ -1211,6 +1211,7 @@ class TelegramAdsBot:
         reusable_story_creative_id: str | None = None
         reusable_story_creative_checked = False
         skipped_multi_destination_adsets = 0
+        expected_page_welcome_message: Any | None = None
 
         try:
             if not campaign_id:
@@ -1232,6 +1233,12 @@ class TelegramAdsBot:
                 objective_config=objective,
                 template_config=templates,
                 sku_keywords=active_keywords,
+            )
+            creative_payload_overrides = plan.raw.get("creative_payload_overrides", {})
+            expected_page_welcome_message = (
+                creative_payload_overrides.get("page_welcome_message")
+                if isinstance(creative_payload_overrides, dict)
+                else None
             )
             ad_name_sku_code_text = "ALL" if str(command.existing_campaign_hint or "").strip() else plan.sku_code_text
             requested_destination_type = "INHERIT_ADSET"
@@ -1307,6 +1314,7 @@ class TelegramAdsBot:
                         self.meta.find_reusable_creative_id_by_story_ids,
                         story_id_candidates,
                         max_ads_scan=1600,
+                        expected_page_welcome_message=expected_page_welcome_message,
                     )
                 except (ValidationError, MetaApiError) as exc:
                     self.logger.warning(
@@ -1341,6 +1349,7 @@ class TelegramAdsBot:
                             story_id_candidates,
                             adset_id=lookup_adset_id,
                             max_ads_scan=1200,
+                            expected_page_welcome_message=expected_page_welcome_message,
                         )
                     except Exception as lookup_exc:  # noqa: BLE001
                         self.logger.warning(
@@ -2022,6 +2031,7 @@ class TelegramAdsBot:
                             self._build_story_id_candidates(resolved_post, command.post_url),
                             adset_id=adset_lookup_id,
                             max_ads_scan=1200,
+                            expected_page_welcome_message=expected_page_welcome_message,
                         )
                     except Exception as lookup_exc:  # noqa: BLE001
                         self.logger.warning(

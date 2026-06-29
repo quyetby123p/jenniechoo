@@ -172,6 +172,7 @@ class FakeMeta:
         *,
         adset_id: str | None = None,  # noqa: ARG002
         max_ads_scan: int = 800,  # noqa: ARG002
+        expected_page_welcome_message=None,  # noqa: ANN001, ARG002
     ) -> dict[str, str] | None:
         return None
 
@@ -181,6 +182,7 @@ class FakeMeta:
         *,
         adset_id: str | None = None,  # noqa: ARG002
         max_ads_scan: int = 800,  # noqa: ARG002
+        expected_page_welcome_message=None,  # noqa: ANN001, ARG002
     ) -> str | None:
         return None
 
@@ -615,8 +617,10 @@ def test_existing_mode_reuses_successful_new_campaign_creative_for_same_reel() -
             *,
             adset_id: str | None = None,  # noqa: ARG002
             max_ads_scan: int = 800,  # noqa: ARG002
+            expected_page_welcome_message=None,  # noqa: ANN001
         ) -> str | None:
             self.reuse_lookups.append(list(story_ids))
+            assert isinstance(expected_page_welcome_message, dict)
             return "creative_from_new_campaign"
 
         def create_ad(
@@ -1124,6 +1128,7 @@ def test_existing_mode_messenger_objective_mismatch_reuses_approved_creative_whe
             *,
             adset_id: str | None = None,  # noqa: ARG002
             max_ads_scan: int = 800,  # noqa: ARG002
+            expected_page_welcome_message=None,  # noqa: ANN001, ARG002
         ) -> dict[str, str] | None:
             return {
                 "id": "ad_manual_seed",
@@ -1615,6 +1620,7 @@ def test_existing_mode_fallbacks_to_duplicate_source_ad_when_messenger_retry_sti
             *,
             adset_id: str | None = None,  # noqa: ARG002
             max_ads_scan: int = 800,  # noqa: ARG002
+            expected_page_welcome_message=None,  # noqa: ANN001, ARG002
         ) -> dict[str, str] | None:
             return {
                 "id": "120249992082570728",
@@ -1702,6 +1708,7 @@ def test_existing_mode_creative_post_not_advertisable_uses_duplicate_fallback() 
             *,
             adset_id: str | None = None,  # noqa: ARG002
             max_ads_scan: int = 800,  # noqa: ARG002
+            expected_page_welcome_message=None,  # noqa: ANN001, ARG002
         ) -> dict[str, str] | None:
             return {
                 "id": "120249992082570728",
@@ -2033,6 +2040,7 @@ def test_existing_mode_post_not_advertisable_shows_specific_guidance_and_rollbac
             *,
             adset_id: str | None = None,  # noqa: ARG002
             max_ads_scan: int = 800,  # noqa: ARG002
+            expected_page_welcome_message=None,  # noqa: ANN001, ARG002
         ) -> dict[str, str] | None:
             return {
                 "id": "120249992082570728",

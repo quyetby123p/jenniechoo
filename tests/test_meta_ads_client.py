@@ -180,6 +180,129 @@ def test_find_latest_ad_by_story_ids_returns_latest_candidate() -> None:
     assert matched["creative_id"] == "cr_2"
 
 
+def test_find_reusable_creative_id_by_story_ids_filters_message_template_mismatch() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+    expected_welcome = {
+        "reengagement": {
+            "message": {"text": "VAYXA welcome"},
+        },
+        "ice_breakers": {
+            "message": {"ice_breakers": []},
+        },
+        "has_ai_generated_welcome_message": False,
+    }
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = params, data, access_token
+        assert method == "GET"
+        assert path == "/act_1/ads"
+        return {
+            "data": [
+                {
+                    "id": "ad_bad",
+                    "updated_time": "2026-06-29T11:46:00+0700",
+                    "creative": {
+                        "id": "cr_bad",
+                        "object_story_id": "649228828282105_122179632500934207",
+                        "effective_object_story_id": "649228828282105_122179632500934207",
+                        "page_welcome_message": "Mess Cơ bản",
+                    },
+                },
+                {
+                    "id": "ad_good",
+                    "updated_time": "2026-06-29T11:20:00+0700",
+                    "creative": {
+                        "id": "cr_good",
+                        "object_story_id": "649228828282105_122179632500934207",
+                        "effective_object_story_id": "649228828282105_122179632500934207",
+                        "page_welcome_message": {
+                            "reengagement": {
+                                "message": {"text": "VAYXA welcome", "extra": "ok"},
+                            },
+                            "ice_breakers": {
+                                "message": {"ice_breakers": []},
+                            },
+                            "has_ai_generated_welcome_message": False,
+                            "template_version": 0,
+                        },
+                    },
+                },
+            ]
+        }
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    creative_id = client.find_reusable_creative_id_by_story_ids(
+        ["649228828282105_122179632500934207"],
+        expected_page_welcome_message=expected_welcome,
+    )
+
+    assert creative_id == "cr_good"
+
+
+def test_find_latest_ad_by_story_ids_filters_message_template_mismatch() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+    expected_welcome = {
+        "reengagement": {"message": {"text": "VAYXA welcome"}},
+        "has_ai_generated_welcome_message": False,
+    }
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = params, data, access_token
+        assert method == "GET"
+        assert path == "/adset_1/ads"
+        return {
+            "data": [
+                {
+                    "id": "ad_bad",
+                    "name": "Bad template",
+                    "status": "ACTIVE",
+                    "effective_status": "ACTIVE",
+                    "updated_time": "2026-06-29T11:46:00+0700",
+                    "creative": {
+                        "id": "cr_bad",
+                        "object_story_id": "649228828282105_122179632500934207",
+                        "effective_object_story_id": "649228828282105_122179632500934207",
+                        "page_welcome_message": "Mess Cơ bản",
+                    },
+                },
+                {
+                    "id": "ad_good",
+                    "name": "Good template",
+                    "status": "PAUSED",
+                    "effective_status": "PAUSED",
+                    "updated_time": "2026-06-29T11:20:00+0700",
+                    "creative": {
+                        "id": "cr_good",
+                        "object_story_id": "649228828282105_122179632500934207",
+                        "effective_object_story_id": "649228828282105_122179632500934207",
+                        "page_welcome_message": json.dumps(
+                            {
+                                "reengagement": {
+                                    "message": {"text": "VAYXA welcome"},
+                                },
+                                "has_ai_generated_welcome_message": False,
+                                "template_id": "saved_template_id",
+                            }
+                        ),
+                    },
+                },
+            ]
+        }
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    matched = client.find_latest_ad_by_story_ids(
+        ["649228828282105_122179632500934207"],
+        adset_id="adset_1",
+        expected_page_welcome_message=expected_welcome,
+    )
+
+    assert matched is not None
+    assert matched["id"] == "ad_good"
+    assert matched["creative_id"] == "cr_good"
+
+
 def test_create_campaign_normalizes_legacy_objective_in_override() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
     sent_payload: dict[str, str] = {}
