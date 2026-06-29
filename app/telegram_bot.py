@@ -1210,6 +1210,7 @@ class TelegramAdsBot:
         instagram_post_access_diagnostics_checked = False
         reusable_story_creative_id: str | None = None
         reusable_story_creative_checked = False
+        skipped_multi_destination_adsets = 0
 
         try:
             if not campaign_id:
@@ -1237,6 +1238,9 @@ class TelegramAdsBot:
             active_plan = plan
             active_destination_type = "INHERIT_ADSET"
             destination_fallback_reason = ""
+            configured_existing_destination_type = str(
+                plan.raw.get("adset_payload_overrides", {}).get("destination_type", "")
+            ).strip().upper()
 
             adsets = await asyncio.to_thread(self.meta.list_eligible_adsets, campaign_id, 20)
             if not adsets:
@@ -1409,6 +1413,16 @@ class TelegramAdsBot:
                     continue
                 adset_name = str(adset.get("name", "")).strip() or adset_id
                 adset_destination_type = str(adset.get("destination_type", "")).strip().upper() or "MESSENGER"
+                if (
+                    configured_existing_destination_type == "MESSENGER"
+                    and adset_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+                ):
+                    self.logger.warning(
+                        "Bo qua adset multi-destination %s vi profile dang cau hinh MESSENGER-only.",
+                        adset_id,
+                    )
+                    skipped_multi_destination_adsets += 1
+                    continue
                 creative_extra_overrides: dict[str, Any] = {}
                 if adset_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER":
                     try:
@@ -1909,6 +1923,13 @@ class TelegramAdsBot:
                     ad_ids.append(ad_id)
 
             if not ad_ids:
+                if skipped_multi_destination_adsets:
+                    raise ValidationError(
+                        "Campaign cũ hiện chỉ có adset đa đích Messenger + Instagram, "
+                        "không tương thích với cấu hình VAYXA Messenger-only.\n"
+                        "Anh tạo/lên lại campaign mới bằng Bot 2 để bot tạo adset Messenger-only, "
+                        "tránh lỗi CTA Instagram không được hỗ trợ."
+                    )
                 raise ValidationError("Không tạo được ads mới trong campaign đã chọn.")
 
             job_id = await asyncio.to_thread(self.storage.generate_job_id)

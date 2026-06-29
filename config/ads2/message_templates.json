@@ -3,7 +3,36 @@
   "templates": {
     "Mess Cơ bản": {
       "description": "Template mac dinh VAYXA theo mau da luu trong Ads Manager.",
-      "creative_patch": {},
+      "creative_patch": {
+        "page_welcome_message": {
+          "reengagement": {
+            "text": "VAYXA ขอเรียนทักทายค่ะ ♡\nขอบคุณที่ให้ความสนใจในแบรนด์ VAYXA\nทางเรายินดีเป็นอย่างยิ่งในการให้คำแนะนำเกี่ยวกับ ดีไซน์ ขนาด\nและรายละเอียดของสินค้า เพื่อช่วยให้คุณเลือกแบบที่เหมาะสมที่สุดค่ะ",
+            "include_products": false
+          },
+          "reengagement_disabled": false,
+          "type": "VISUAL_EDITOR",
+          "version": 2,
+          "landing_screen_type": "welcome_message",
+          "media_type": "text",
+          "text_format": {
+            "customer_action_type": "ice_breakers",
+            "message": {
+              "quick_replies": [],
+              "ice_breakers": [],
+              "text": "VAYXA ขอเรียนทักทายค่ะ ♡\nขอบคุณที่ให้ความสนใจในแบรนด์ VAYXA\nทางเรายินดีเป็นอย่างยิ่งในการให้คำแนะนำเกี่ยวกับ ดีไซน์ ขนาด\nและรายละเอียดของสินค้า เพื่อช่วยให้คุณเลือกแบบที่เหมาะสมที่สุดค่ะ"
+            }
+          },
+          "user_edit": true,
+          "surface": "visual_editor_new",
+          "ai_generated_icebreaker_toggle_enabled": false,
+          "is_eligible_for_customized_greeting": null,
+          "is_user_editing": false,
+          "is_eligible_for_leveraging_inbox_faqs": false,
+          "ice_breakers_edited": true,
+          "welcome_message_edited": true,
+          "has_ai_generated_welcome_message": false
+        }
+      },
       "ad_patch": {},
       "adset_patch": {}
     }
