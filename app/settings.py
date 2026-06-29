@@ -81,18 +81,29 @@ class Settings:
     web_report_status_map_path: str = "config/web_report_status_map.json"
     web_report_host: str = "0.0.0.0"
     web_report_port: int = 8000
+    profile: str = "default"
+    audiences_config_path_raw: str = "config/audiences.json"
+    objective_config_path_raw: str = "config/objective.json"
+    message_templates_path_raw: str = "config/message_templates.json"
 
     @property
     def audiences_config_path(self) -> Path:
-        return self.config_root / "audiences.json"
+        return self._resolve_project_path(self.audiences_config_path_raw, "config/audiences.json")
 
     @property
     def objective_config_path(self) -> Path:
-        return self.config_root / "objective.json"
+        return self._resolve_project_path(self.objective_config_path_raw, "config/objective.json")
 
     @property
     def message_templates_path(self) -> Path:
-        return self.config_root / "message_templates.json"
+        return self._resolve_project_path(self.message_templates_path_raw, "config/message_templates.json")
+
+    def _resolve_project_path(self, raw: str, default: str) -> Path:
+        text = str(raw or default).strip() or default
+        path = Path(text)
+        if path.is_absolute():
+            return path
+        return self.project_root / path
 
     @property
     def pending_requests_dir(self) -> Path:
@@ -234,6 +245,40 @@ def _require_env(key: str) -> str:
     return value
 
 
+def _normalize_profile(profile: str | None) -> str:
+    normalized = str(profile or "default").strip().lower()
+    return normalized or "default"
+
+
+def _profile_env(
+    key: str,
+    profile: str,
+    *,
+    default: str = "",
+    required: bool = False,
+    allow_base_fallback: bool = True,
+) -> str:
+    normalized_profile = _normalize_profile(profile)
+    keys = [key] if normalized_profile == "default" else [f"{normalized_profile.upper()}_{key}"]
+    if allow_base_fallback and key not in keys:
+        keys.append(key)
+    for env_key in keys:
+        value = os.getenv(env_key, "").strip()
+        if value:
+            return value
+    if required:
+        raise ConfigError(f"Bien moi truong bat buoc bi thieu: {keys[0]}")
+    return str(default or "").strip()
+
+
+def _resolve_project_path(project_root: Path, raw: str, default: str) -> Path:
+    text = str(raw or default).strip() or default
+    path = Path(text)
+    if path.is_absolute():
+        return path
+    return project_root / path
+
+
 def _parse_retry_backoff(raw: str) -> list[int]:
     values = []
     for part in raw.split(","):
@@ -307,21 +352,63 @@ def _parse_weekday_list(raw: str, *, default: tuple[int, ...]) -> tuple[int, ...
     return tuple(sorted(values))
 
 
-def load_settings(project_root: Path | None = None) -> Settings:
+def load_settings(project_root: Path | None = None, profile: str | None = None) -> Settings:
     if project_root is None:
         project_root = Path(__file__).resolve().parents[1]
+    profile_name = _normalize_profile(profile)
 
     env_file = project_root / ".env"
     if env_file.exists():
         load_dotenv(env_file, override=True)
 
-    telegram_bot_token = _require_env("TELEGRAM_BOT_TOKEN")
-    telegram_allowed_user_id = int(_require_env("TELEGRAM_ALLOWED_USER_ID"))
-    meta_access_token = _require_env("META_ACCESS_TOKEN")
-    meta_page_access_token = os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
-    meta_ad_account_id = _require_env("META_AD_ACCOUNT_ID")
-    meta_page_id = _require_env("META_PAGE_ID")
-    meta_api_version = os.getenv("META_API_VERSION", "v21.0").strip()
+    is_default_profile = profile_name == "default"
+    telegram_bot_token = _profile_env(
+        "TELEGRAM_BOT_TOKEN",
+        profile_name,
+        required=True,
+        allow_base_fallback=is_default_profile,
+    )
+    telegram_allowed_user_id = int(
+        _profile_env(
+            "TELEGRAM_ALLOWED_USER_ID",
+            profile_name,
+            required=True,
+            allow_base_fallback=True,
+        )
+    )
+    meta_access_token = _profile_env(
+        "META_ACCESS_TOKEN",
+        profile_name,
+        required=True,
+        allow_base_fallback=True,
+    )
+    if is_default_profile:
+        meta_page_access_token = os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
+    else:
+        meta_page_access_token = _profile_env(
+            "META_PAGE_ACCESS_TOKEN",
+            profile_name,
+            required=True,
+            allow_base_fallback=False,
+        )
+    meta_ad_account_id = _profile_env(
+        "META_AD_ACCOUNT_ID",
+        profile_name,
+        required=True,
+        allow_base_fallback=is_default_profile,
+    )
+    meta_page_id = _profile_env(
+        "META_PAGE_ID",
+        profile_name,
+        required=True,
+        allow_base_fallback=is_default_profile,
+    )
+    meta_api_version = _profile_env(
+        "META_API_VERSION",
+        profile_name,
+        default=os.getenv("META_API_VERSION", "v21.0"),
+        allow_base_fallback=True,
+    )
 
     app_timezone = os.getenv("APP_TIMEZONE", "Asia/Ho_Chi_Minh").strip()
     app_currency = os.getenv("APP_CURRENCY", "VND").strip()
@@ -569,15 +656,53 @@ def load_settings(project_root: Path | None = None) -> Settings:
         max_value=65535,
     )
 
-    storage_root = project_root / "storage"
-    logs_root = project_root / "logs"
-    state_root = project_root / "state"
+    profile_suffix = "" if is_default_profile else f"/{profile_name}"
+    audiences_config_path_raw = _profile_env(
+        "AUDIENCES_CONFIG_PATH",
+        profile_name,
+        default=f"config{profile_suffix}/audiences.json",
+        allow_base_fallback=False,
+    )
+    objective_config_path_raw = _profile_env(
+        "OBJECTIVE_CONFIG_PATH",
+        profile_name,
+        default=f"config{profile_suffix}/objective.json",
+        allow_base_fallback=False,
+    )
+    message_templates_path_raw = _profile_env(
+        "MESSAGE_TEMPLATES_PATH",
+        profile_name,
+        default=f"config{profile_suffix}/message_templates.json",
+        allow_base_fallback=False,
+    )
+    storage_root_raw = _profile_env(
+        "STORAGE_ROOT",
+        profile_name,
+        default=f"storage{profile_suffix}",
+        allow_base_fallback=False,
+    )
+    logs_root_raw = _profile_env(
+        "LOGS_ROOT",
+        profile_name,
+        default=f"logs{profile_suffix}",
+        allow_base_fallback=False,
+    )
+    state_root_raw = _profile_env(
+        "STATE_ROOT",
+        profile_name,
+        default=f"state{profile_suffix}",
+        allow_base_fallback=False,
+    )
+
+    storage_root = _resolve_project_path(project_root, storage_root_raw, "storage")
+    logs_root = _resolve_project_path(project_root, logs_root_raw, "logs")
+    state_root = _resolve_project_path(project_root, state_root_raw, "state")
     config_root = project_root / "config"
 
     for required in (
-        config_root / "audiences.json",
-        config_root / "objective.json",
-        config_root / "message_templates.json",
+        _resolve_project_path(project_root, audiences_config_path_raw, "config/audiences.json"),
+        _resolve_project_path(project_root, objective_config_path_raw, "config/objective.json"),
+        _resolve_project_path(project_root, message_templates_path_raw, "config/message_templates.json"),
     ):
         if not required.exists():
             raise ConfigError(f"Khong tim thay file cau hinh: {required}")
@@ -588,6 +713,10 @@ def load_settings(project_root: Path | None = None) -> Settings:
         logs_root=logs_root,
         state_root=state_root,
         config_root=config_root,
+        profile=profile_name,
+        audiences_config_path_raw=audiences_config_path_raw,
+        objective_config_path_raw=objective_config_path_raw,
+        message_templates_path_raw=message_templates_path_raw,
         telegram_bot_token=telegram_bot_token,
         telegram_allowed_user_id=telegram_allowed_user_id,
         meta_access_token=meta_access_token,

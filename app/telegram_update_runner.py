@@ -62,8 +62,10 @@ async def run_update_for_bot(update_payload: dict[str, Any], *, bot_name: str, v
         runtime = build_assistant_runtime()
     elif normalized_bot == "main":
         runtime = build_runtime()
+    elif normalized_bot == "ads2":
+        runtime = build_runtime(profile="ads2")
     else:
-        raise ValueError("--bot phai la main hoac bot3")
+        raise ValueError("--bot phai la main, ads2 hoac bot3")
 
     dispatcher = Dispatcher()
     dispatcher.include_router(runtime.bot.router)
@@ -88,7 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--update-json-file", default="", help="Path to Telegram update JSON.")
     parser.add_argument("--update-b64", default="", help="Base64-encoded Telegram update JSON.")
     parser.add_argument("--update-b64-file", default="", help="Path to base64-encoded Telegram update JSON.")
-    parser.add_argument("--bot", choices=["main", "bot3"], default="main", help="Bot router to process the update.")
+    parser.add_argument("--bot", choices=["main", "ads2", "bot3"], default="main", help="Bot router to process the update.")
     parser.add_argument("--validate-only", action="store_true", help="Only validate update payload shape.")
     return parser
 

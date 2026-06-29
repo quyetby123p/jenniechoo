@@ -26,8 +26,8 @@ from app.telegram_bot import TelegramAdsBot
 from app.utils import load_json
 
 
-def check_runtime_configuration() -> str:
-    settings = load_settings()
+def check_runtime_configuration(profile: str | None = None) -> str:
+    settings = load_settings(profile=profile)
     audiences = load_json(settings.audiences_config_path)
     objective = load_json(settings.objective_config_path)
     templates = load_json(settings.message_templates_path)
@@ -140,9 +140,9 @@ def check_runtime_configuration() -> str:
     return "Config hop le."
 
 
-async def run_bot() -> None:
+async def run_bot(profile: str | None = None) -> None:
     project_root = Path(__file__).resolve().parents[1]
-    settings = load_settings(project_root=project_root)
+    settings = load_settings(project_root=project_root, profile=profile)
     logger = configure_logger(
         settings.app_logs_dir,
         secrets=[
@@ -203,11 +203,11 @@ async def run_bot() -> None:
     await bot.run()
 
 
-def run_bot_forever() -> None:
+def run_bot_forever(profile: str | None = None) -> None:
     attempt = 0
     while True:
         try:
-            asyncio.run(run_bot())
+            asyncio.run(run_bot(profile=profile))
             attempt = 0
             print("Bot polling da dung, thu khoi dong lai sau 5 giay...")
             time.sleep(5)
@@ -231,11 +231,16 @@ def main() -> int:
         action="store_true",
         help="Kiem tra .env va config/*.json truoc khi chay bot.",
     )
+    parser.add_argument(
+        "--profile",
+        default="default",
+        help="Profile runtime can chay (default hoac ads2).",
+    )
     args = parser.parse_args()
 
     if args.check_config:
         try:
-            print(check_runtime_configuration())
+            print(check_runtime_configuration(profile=args.profile))
             return 0
         except Exception as exc:  # noqa: BLE001
             print(f"Config check that bai: {exc}")
@@ -243,9 +248,10 @@ def main() -> int:
 
     try:
         project_root = Path(__file__).resolve().parents[1]
-        lock_file = project_root / "state" / "bot.instance.lock"
+        settings = load_settings(project_root=project_root, profile=args.profile)
+        lock_file = settings.state_root / "bot.instance.lock"
         with single_instance_lock(lock_file):
-            run_bot_forever()
+            run_bot_forever(profile=args.profile)
     except KeyboardInterrupt:
         return 0
     except Exception as exc:  # noqa: BLE001

@@ -129,6 +129,11 @@ $bot3AllowedUserId = [string]$envValues["BOT3_ALLOWED_USER_ID"]
 if ([string]::IsNullOrWhiteSpace($bot3AllowedUserId)) {
     $bot3AllowedUserId = $allowedUserId
 }
+$ads2TelegramToken = [string]$envValues["ADS2_TELEGRAM_BOT_TOKEN"]
+$ads2AllowedUserId = [string]$envValues["ADS2_TELEGRAM_ALLOWED_USER_ID"]
+if ([string]::IsNullOrWhiteSpace($ads2AllowedUserId)) {
+    $ads2AllowedUserId = $allowedUserId
+}
 if ([string]::IsNullOrWhiteSpace($WebhookSecret)) {
     $WebhookSecret = [string]$envValues["TELEGRAM_WEBHOOK_SECRET"]
 }
@@ -136,6 +141,10 @@ if ([string]::IsNullOrWhiteSpace($WebhookSecret)) {
     $WebhookSecret = New-WebhookSecret
     Set-EnvFileValue -Path $envPath -Name "TELEGRAM_WEBHOOK_SECRET" -Value $WebhookSecret
     Write-Host "Generated TELEGRAM_WEBHOOK_SECRET and saved it to $EnvFile."
+}
+$ads2WebhookSecret = [string]$envValues["ADS2_TELEGRAM_WEBHOOK_SECRET"]
+if ([string]::IsNullOrWhiteSpace($ads2WebhookSecret)) {
+    $ads2WebhookSecret = $WebhookSecret
 }
 
 $botInfo = Invoke-RestMethod -Method Get -Uri ("https://api.telegram.org/bot{0}/getMe" -f $telegramToken)
@@ -150,6 +159,14 @@ if (-not [string]::IsNullOrWhiteSpace($bot3TelegramToken)) {
         throw "Bot 3 Telegram getMe failed."
     }
     $bot3Username = [string]$bot3Info.result.username
+}
+$ads2Username = ""
+if (-not [string]::IsNullOrWhiteSpace($ads2TelegramToken)) {
+    $ads2Info = Invoke-RestMethod -Method Get -Uri ("https://api.telegram.org/bot{0}/getMe" -f $ads2TelegramToken)
+    if (-not $ads2Info.ok) {
+        throw "ADS2 Telegram getMe failed."
+    }
+    $ads2Username = [string]$ads2Info.result.username
 }
 
 $groupIds = New-Object System.Collections.Generic.List[string]
@@ -185,6 +202,11 @@ try {
     Set-WranglerSecret -Name "BOT3_TASK_GROUP_CHAT_ID" -Value ([string]$envValues["BOT3_TASK_GROUP_CHAT_ID"]) -ConfigPath $configPath
     Set-WranglerSecret -Name "BOT3_ALLOWED_GROUP_CHAT_IDS" -Value $bot3AllowedGroupChatIds -ConfigPath $configPath
     Set-WranglerSecret -Name "BOT3_TELEGRAM_WEBHOOK_SECRET" -Value $WebhookSecret -ConfigPath $configPath
+    Set-WranglerSecret -Name "ADS2_TELEGRAM_BOT_TOKEN" -Value $ads2TelegramToken -ConfigPath $configPath
+    Set-WranglerSecret -Name "ADS2_TELEGRAM_ALLOWED_USER_ID" -Value $ads2AllowedUserId -ConfigPath $configPath
+    Set-WranglerSecret -Name "ADS2_BOT_USERNAME" -Value $ads2Username -ConfigPath $configPath
+    Set-WranglerSecret -Name "ADS2_ALLOWED_GROUP_CHAT_IDS" -Value $allowedGroupChatIds -ConfigPath $configPath
+    Set-WranglerSecret -Name "ADS2_TELEGRAM_WEBHOOK_SECRET" -Value $ads2WebhookSecret -ConfigPath $configPath
     Set-WranglerSecret -Name "GITHUB_TOKEN" -Value $githubToken -ConfigPath $configPath
     Set-WranglerSecret -Name "GITHUB_REPO" -Value $Repo -ConfigPath $configPath
     Set-WranglerSecret -Name "GITHUB_WORKFLOW_FILE" -Value $WorkflowFile -ConfigPath $configPath
@@ -252,6 +274,21 @@ if (-not $SkipSetWebhook) {
             throw "Bot 3 Telegram setWebhook failed: $($bot3Result | ConvertTo-Json -Compress)"
         }
         Write-Host "Bot 3 Telegram webhook configured."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ads2TelegramToken)) {
+        $ads2WebhookUrl = $WorkerUrl.TrimEnd("/") + "/telegram/webhook/ads2"
+        Write-Host ("Setting ADS2 Telegram webhook: {0}" -f $ads2WebhookUrl)
+        $ads2Body = @{
+            url = $ads2WebhookUrl
+            secret_token = $ads2WebhookSecret
+            allowed_updates = '["message","callback_query"]'
+            drop_pending_updates = "false"
+        }
+        $ads2Result = Invoke-RestMethod -Method Post -Uri ("https://api.telegram.org/bot{0}/setWebhook" -f $ads2TelegramToken) -Body $ads2Body
+        if (-not $ads2Result.ok) {
+            throw "ADS2 Telegram setWebhook failed: $($ads2Result | ConvertTo-Json -Compress)"
+        }
+        Write-Host "ADS2 Telegram webhook configured."
     }
 }
 

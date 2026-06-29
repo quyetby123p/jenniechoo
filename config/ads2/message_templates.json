@@ -1,0 +1,11 @@
+{
+  "default_template_name": "Mess Cơ bản",
+  "templates": {
+    "Mess Cơ bản": {
+      "description": "Template mac dinh VAYXA theo mau da luu trong Ads Manager.",
+      "creative_patch": {},
+      "ad_patch": {},
+      "adset_patch": {}
+    }
+  }
+}

@@ -83,10 +83,16 @@ function looksRelevantDirectText(text) {
 }
 
 function shouldDispatch(update, env, botName = "main") {
-  const isBot3 = String(botName || "").trim().toLowerCase() === "bot3";
+  const normalizedBot = String(botName || "").trim().toLowerCase();
+  const isBot3 = normalizedBot === "bot3";
+  const isAds2 = normalizedBot === "ads2";
   const actorId = actorIdFromUpdate(update);
   const allowedUserId = String(
-    isBot3 ? env.BOT3_ALLOWED_USER_ID || env.TELEGRAM_ALLOWED_USER_ID || "" : env.TELEGRAM_ALLOWED_USER_ID || "",
+    isBot3
+      ? env.BOT3_ALLOWED_USER_ID || env.TELEGRAM_ALLOWED_USER_ID || ""
+      : isAds2
+        ? env.ADS2_TELEGRAM_ALLOWED_USER_ID || env.TELEGRAM_ALLOWED_USER_ID || ""
+        : env.TELEGRAM_ALLOWED_USER_ID || "",
   ).trim();
   if (allowedUserId && actorId && actorId !== allowedUserId) {
     return false;
@@ -119,12 +125,17 @@ function shouldDispatch(update, env, botName = "main") {
   }
 
   const allowedGroupChatIds = csvSet(
-    isBot3 ? env.BOT3_ALLOWED_GROUP_CHAT_IDS || env.BOT3_TASK_GROUP_CHAT_ID || "" : env.ALLOWED_GROUP_CHAT_IDS,
+    isBot3
+      ? env.BOT3_ALLOWED_GROUP_CHAT_IDS || env.BOT3_TASK_GROUP_CHAT_ID || ""
+      : isAds2
+        ? env.ADS2_ALLOWED_GROUP_CHAT_IDS || env.ALLOWED_GROUP_CHAT_IDS
+        : env.ALLOWED_GROUP_CHAT_IDS,
   );
   if (!allowedGroupChatIds.has(chatId)) {
     return false;
   }
-  return text.startsWith("/") || hasBotMention(text, isBot3 ? env.BOT3_USERNAME : env.BOT_USERNAME);
+  const username = isBot3 ? env.BOT3_USERNAME : isAds2 ? env.ADS2_BOT_USERNAME : env.BOT_USERNAME;
+  return text.startsWith("/") || hasBotMention(text, username);
 }
 
 function base64Utf8(value) {
@@ -178,10 +189,11 @@ async function dispatchGitHubInputs(inputs, env) {
 
 async function dispatchTelegramUpdate(update, env, botName = "main") {
   const updateB64 = base64Utf8(JSON.stringify(update));
+  const normalizedBot = String(botName || "main").trim().toLowerCase();
   await dispatchGitHubInputs(
     {
       task: "telegram-update",
-      bot: String(botName || "main").trim().toLowerCase() === "bot3" ? "bot3" : "main",
+      bot: ["main", "ads2", "bot3"].includes(normalizedBot) ? normalizedBot : "main",
       update_b64: updateB64,
       source: "cloudflare-worker",
     },
@@ -446,8 +458,16 @@ async function sendAck(update, env, botName = "main") {
   if (String(env.CLOUD_DISPATCH_ACK_ENABLED || "0").trim() !== "1") {
     return;
   }
-  const isBot3 = String(botName || "").trim().toLowerCase() === "bot3";
-  const token = String(isBot3 ? env.BOT3_TELEGRAM_TOKEN || "" : env.TELEGRAM_BOT_TOKEN || "").trim();
+  const normalizedBot = String(botName || "").trim().toLowerCase();
+  const isBot3 = normalizedBot === "bot3";
+  const isAds2 = normalizedBot === "ads2";
+  const token = String(
+    isBot3
+      ? env.BOT3_TELEGRAM_TOKEN || ""
+      : isAds2
+        ? env.ADS2_TELEGRAM_BOT_TOKEN || ""
+        : env.TELEGRAM_BOT_TOKEN || "",
+  ).trim();
   if (!token) {
     return;
   }
@@ -486,14 +506,24 @@ export default {
     if (request.method === "POST" && url.pathname === "/schedule/mark") {
       return handleScheduleMark(request, env);
     }
-    const botName = url.pathname === "/telegram/webhook/bot3" ? "bot3" : "main";
-    if (request.method !== "POST" || !["/telegram/webhook", "/telegram/webhook/bot3"].includes(url.pathname)) {
+    const botName =
+      url.pathname === "/telegram/webhook/bot3"
+        ? "bot3"
+        : url.pathname === "/telegram/webhook/ads2"
+          ? "ads2"
+          : "main";
+    if (
+      request.method !== "POST"
+      || !["/telegram/webhook", "/telegram/webhook/ads2", "/telegram/webhook/bot3"].includes(url.pathname)
+    ) {
       return jsonResponse({ ok: false, error: "not_found" }, 404);
     }
 
     const expectedSecret = String(
       botName === "bot3"
         ? env.BOT3_TELEGRAM_WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
+        : botName === "ads2"
+          ? env.ADS2_TELEGRAM_WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
         : env.TELEGRAM_WEBHOOK_SECRET || "",
     ).trim();
     const providedSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";

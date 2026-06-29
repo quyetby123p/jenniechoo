@@ -53,11 +53,11 @@ class AssistantScheduledRuntime:
     telegram: Bot
 
 
-def build_runtime(project_root: Path | None = None) -> ScheduledRuntime:
+def build_runtime(project_root: Path | None = None, profile: str | None = None) -> ScheduledRuntime:
     if project_root is None:
         project_root = Path(__file__).resolve().parents[1]
 
-    settings = load_settings(project_root=project_root)
+    settings = load_settings(project_root=project_root, profile=profile)
     logger = configure_logger(
         settings.app_logs_dir,
         secrets=[

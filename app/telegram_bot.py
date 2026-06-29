@@ -23,7 +23,8 @@ from app.campaign_planner import (
     build_campaign_plan,
     build_existing_campaign_plan,
     build_non_jc_hashtag_suffix,
-    extract_jc_codes,
+    extract_sku_codes,
+    resolve_sku_prefix,
 )
 from app.command_parser import (
     parse_ads_command,
@@ -1082,9 +1083,11 @@ class TelegramAdsBot:
         source_request_id: str | None = None,
     ) -> None:
         try:
+            objective = load_json(self.settings.objective_config_path)
+            sku_prefix = resolve_sku_prefix(objective)
             resolved_post = await asyncio.to_thread(self.meta.resolve_post, command.post_url)
             await asyncio.to_thread(self.meta.ensure_ads_token_can_access_page)
-            keywords = self._resolve_existing_campaign_keywords(command, resolved_post.message_text)
+            keywords = self._resolve_existing_campaign_keywords(command, resolved_post.message_text, sku_prefix)
             campaign_candidates = await asyncio.to_thread(
                 self.meta.find_active_campaigns_by_keywords,
                 keywords,
@@ -1193,6 +1196,7 @@ class TelegramAdsBot:
     ) -> None:
         objective = load_json(self.settings.objective_config_path)
         templates = load_json(self.settings.message_templates_path)
+        sku_prefix = resolve_sku_prefix(objective)
 
         campaign_id = str(selected_campaign.get("id", "")).strip()
         selected_campaign_name = str(selected_campaign.get("name", "")).strip() or campaign_id
@@ -1216,6 +1220,7 @@ class TelegramAdsBot:
             active_keywords = campaign_keywords or self._resolve_existing_campaign_keywords(
                 command,
                 resolved_post.message_text,
+                sku_prefix,
             )
             plan = build_existing_campaign_plan(
                 command=command,
@@ -1239,7 +1244,7 @@ class TelegramAdsBot:
                     "Campaign đã chọn không có adset hợp lệ (ACTIVE/PAUSED) để lên ads."
                 )
             selected_adset_ids = [str(item.get("id", "")).strip() for item in adsets if str(item.get("id", "")).strip()]
-            non_jc_suffix = build_non_jc_hashtag_suffix(resolved_post.message_text)
+            non_jc_suffix = build_non_jc_hashtag_suffix(resolved_post.message_text, sku_prefix)
             story_id_candidates = self._build_story_id_candidates(resolved_post, command.post_url)
 
             async def _get_account_asset_feed_spec_cached() -> dict[str, Any] | None:
@@ -2039,7 +2044,12 @@ class TelegramAdsBot:
                 ),
             )
 
-    def _resolve_existing_campaign_keywords(self, command: AdsCommand, post_message: str) -> list[str]:
+    def _resolve_existing_campaign_keywords(
+        self,
+        command: AdsCommand,
+        post_message: str,
+        sku_prefix: str = "JC",
+    ) -> list[str]:
         hint_keywords = self._extract_campaign_hint_keywords(command.existing_campaign_hint)
         if hint_keywords:
             return hint_keywords
@@ -2056,12 +2066,14 @@ class TelegramAdsBot:
             if deduped:
                 return deduped
 
-        hashtags = extract_jc_codes(post_message or "")
+        hashtags = extract_sku_codes(post_message or "", sku_prefix)
         if hashtags:
             return hashtags
+        sku_example = "JCV140" if sku_prefix == "JC" else f"{sku_prefix}001"
         raise ValidationError(
             "Mode lên cũ cần SKU để map campaign.\n"
-            "Anh thêm SKU trong lệnh (ví dụ JCV140 lên cũ) hoặc thêm hashtag #JC... vào bài viết."
+            f"Anh thêm SKU trong lệnh (ví dụ {sku_example} lên cũ) "
+            f"hoặc thêm hashtag #{sku_prefix}... vào bài viết."
         )
 
     @staticmethod

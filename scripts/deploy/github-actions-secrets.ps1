@@ -68,6 +68,7 @@ $prefixes = @(
     "APP_",
     "TOKEN_HEALTHCHECK_",
     "TELEGRAM_",
+    "ADS2_",
     "META_",
     "PANCAKE_",
     "REPORT_",

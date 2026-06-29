@@ -6,6 +6,7 @@ from app.campaign_planner import (
     build_non_jc_hashtag_suffix,
     extract_jc_codes,
     extract_non_jc_hashtags,
+    extract_sku_codes,
 )
 from app.models import AdsCommand, ResolvedPost
 
@@ -99,6 +100,59 @@ def test_build_campaign_plan_template_missing() -> None:
         )
 
 
+def test_build_campaign_plan_allows_configured_custom_template() -> None:
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/permalink.php?story_fbid=1001&id=1002",
+        budget_daily_vnd=300000,
+    )
+    objective = _base_objective()
+    objective["message_template_name"] = "Mess Cơ bản"
+    templates = {
+        "templates": {
+            "Mess Cơ bản": {
+                "creative_patch": {},
+                "ad_patch": {},
+                "adset_patch": {},
+            }
+        }
+    }
+    plan = build_campaign_plan(
+        command=cmd,
+        resolved_post=_resolved_post(),
+        post_fingerprint="abc123",
+        version=1,
+        timezone_name="Asia/Ho_Chi_Minh",
+        audiences_config=_base_audiences(),
+        objective_config=objective,
+        template_config=templates,
+    )
+    assert plan.message_template_name == "Mess Cơ bản"
+
+
+def test_build_campaign_plan_uses_configured_vxv_prefix() -> None:
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/permalink.php?story_fbid=1001&id=1002",
+        budget_daily_vnd=300000,
+    )
+    objective = _base_objective()
+    objective["sku_prefix"] = "VXV"
+    resolved = _resolved_post()
+    resolved.message_text = "Noi dung post #VXV238 #VXV239 #VXV238 #Sale"
+    plan = build_campaign_plan(
+        command=cmd,
+        resolved_post=resolved,
+        post_fingerprint="abc123",
+        version=1,
+        timezone_name="Asia/Ho_Chi_Minh",
+        audiences_config=_base_audiences(),
+        objective_config=objective,
+        template_config=_base_templates(),
+    )
+    assert plan.campaign_name == "ADS:QUYET|MK:ThaiLan|VXV238_VXV239|Codex"
+    assert plan.sku_code_text == "VXV238_VXV239"
+    assert plan.audiences[0].ad_name == "ADS:QUYET|MK:ThaiLan|SKU:VXV238_VXV239|MED:Anh|Sale"
+
+
 def test_build_campaign_plan_missing_jc_code() -> None:
     cmd = AdsCommand(
         post_url="https://www.facebook.com/permalink.php?story_fbid=1001&id=1002",
@@ -117,6 +171,29 @@ def test_build_campaign_plan_missing_jc_code() -> None:
             objective_config=_base_objective(),
             template_config=_base_templates(),
         )
+
+
+def test_build_campaign_plan_missing_configured_prefix_mentions_vxv() -> None:
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/permalink.php?story_fbid=1001&id=1002",
+        budget_daily_vnd=300000,
+    )
+    objective = _base_objective()
+    objective["sku_prefix"] = "VXV"
+    resolved = _resolved_post()
+    resolved.message_text = "Noi dung post #JCV238"
+    with pytest.raises(ValueError) as exc_info:
+        build_campaign_plan(
+            command=cmd,
+            resolved_post=resolved,
+            post_fingerprint="abc123",
+            version=1,
+            timezone_name="Asia/Ho_Chi_Minh",
+            audiences_config=_base_audiences(),
+            objective_config=objective,
+            template_config=_base_templates(),
+        )
+    assert "#VXV..." in str(exc_info.value)
 
 
 def test_build_campaign_plan_appends_non_jc_hashtag_suffix() -> None:
@@ -148,6 +225,11 @@ def test_extract_non_jc_hashtags_and_suffix() -> None:
 def test_extract_jc_codes_splits_underscore_group() -> None:
     assert extract_jc_codes("#JCA250_JCA248_JCQ211") == ["JCA250", "JCA248", "JCQ211"]
     assert extract_non_jc_hashtags("#JCA250_JCA248_JCQ211 #lamthao") == ["lamthao"]
+
+
+def test_extract_sku_codes_uses_configured_prefix() -> None:
+    assert extract_sku_codes("#VXV250_VXV248 #JCA250", "VXV") == ["VXV250", "VXV248"]
+    assert build_non_jc_hashtag_suffix("#VXV250_VXV248 #lamthao", "VXV") == "|lamthao"
 
 
 def test_build_existing_campaign_plan_success() -> None:
