@@ -1008,6 +1008,7 @@ def test_get_multi_destination_creative_overrides_uses_healthy_message_page_seed
             }
         if path == "/cr_good":
             assert "instagram_user_id" in params["fields"]
+            assert "page_welcome_message" in params["fields"]
             return {
                 "call_to_action_type": "MESSAGE_PAGE",
                 "asset_feed_spec": {
@@ -1026,6 +1027,7 @@ def test_get_multi_destination_creative_overrides_uses_healthy_message_page_seed
                 },
                 "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
                 "instagram_user_id": "17841478128229539",
+                "page_welcome_message": '{"template_id":"962707759488898"}',
             }
         raise AssertionError(f"Unexpected path: {path}")
 
@@ -1054,6 +1056,7 @@ def test_get_multi_destination_creative_overrides_uses_healthy_message_page_seed
         },
         "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
         "instagram_user_id": "17841478128229539",
+        "page_welcome_message": '{"template_id":"962707759488898"}',
     }
 
 
@@ -1076,6 +1079,7 @@ def test_get_message_destination_creative_overrides_does_not_require_asset_feed_
             }
         if path == "/cr_seed":
             assert "asset_feed_spec" in params["fields"]
+            assert "page_welcome_message" in params["fields"]
             return {
                 "call_to_action_type": "MESSAGE_PAGE",
                 "degrees_of_freedom_spec": {
@@ -1085,6 +1089,7 @@ def test_get_message_destination_creative_overrides_does_not_require_asset_feed_
                     }
                 },
                 "instagram_user_id": "17841478128229539",
+                "page_welcome_message": '{"template_id":"962707759488898"}',
             }
         raise AssertionError(f"Unexpected path: {path}")
 
@@ -1104,6 +1109,7 @@ def test_get_message_destination_creative_overrides_does_not_require_asset_feed_
             }
         },
         "instagram_user_id": "17841478128229539",
+        "page_welcome_message": '{"template_id":"962707759488898"}',
     }
 
 

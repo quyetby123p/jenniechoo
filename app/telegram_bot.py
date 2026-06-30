@@ -1366,6 +1366,48 @@ class TelegramAdsBot:
                     account_message_destination_creative_overrides = None
                 return account_message_destination_creative_overrides
 
+            async def _build_messenger_asset_feed_retry_overrides(
+                base_overrides: dict[str, Any] | None,
+            ) -> dict[str, Any] | None:
+                account_seed_overrides = await _get_account_creative_overrides_cached()
+                account_asset_feed_spec = (
+                    account_seed_overrides.get("asset_feed_spec")
+                    if isinstance(account_seed_overrides, dict)
+                    else None
+                )
+                if not isinstance(account_asset_feed_spec, dict) or not account_asset_feed_spec:
+                    account_asset_feed_spec = await _get_account_asset_feed_spec_cached()
+                if not isinstance(account_asset_feed_spec, dict) or not account_asset_feed_spec:
+                    return None
+
+                messenger_asset_feed_spec = self._as_messenger_only_asset_feed_spec(
+                    account_asset_feed_spec,
+                    self.settings.meta_page_id,
+                )
+                if not messenger_asset_feed_spec:
+                    return None
+
+                retry_overrides: dict[str, Any] = {
+                    "asset_feed_spec": messenger_asset_feed_spec,
+                }
+                message_seed_overrides = await _get_account_message_creative_overrides_cached()
+                for source in (
+                    message_seed_overrides if isinstance(message_seed_overrides, dict) else {},
+                    base_overrides if isinstance(base_overrides, dict) else {},
+                    {"page_welcome_message": expected_page_welcome_message},
+                ):
+                    for field in ("page_welcome_message", "instagram_user_id", "instagram_actor_id"):
+                        if field in retry_overrides:
+                            continue
+                        value = source.get(field) if isinstance(source, dict) else None
+                        if value not in (None, "", {}, []):
+                            retry_overrides[field] = value
+
+                retry_overrides.pop("call_to_action_type", None)
+                retry_overrides.pop("degrees_of_freedom_spec", None)
+                retry_overrides.pop("contextual_multi_ads", None)
+                return retry_overrides
+
             async def _get_instagram_post_access_diagnostics_cached() -> dict[str, Any]:
                 nonlocal instagram_post_access_diagnostics
                 nonlocal instagram_post_access_diagnostics_checked
@@ -1983,16 +2025,65 @@ class TelegramAdsBot:
                         if creative_id:
                             await asyncio.to_thread(self.rollback.rollback, None, [], [], [creative_id])
                             creative_id = None
-                        duplicated_ad_id = await _try_duplicate_from_existing_ad(
-                            adset_id,
-                            slot,
-                            error_text,
-                            adset_destination_type,
-                        )
-                        if duplicated_ad_id:
-                            ad_id = duplicated_ad_id
-                            destination_fallback_reason = error_text
-                        else:
+                        if adset_destination_type == "MESSENGER" and force_message_page_cta:
+                            retry_overrides = await _build_messenger_asset_feed_retry_overrides(
+                                creative_extra_overrides,
+                            )
+                            if retry_overrides:
+                                try:
+                                    self.logger.warning(
+                                        "Retry len cu Messenger-only bang asset_feed_spec MESSAGE_PAGE "
+                                        "cho adset %s do loi auto-destination: %s",
+                                        adset_id,
+                                        exc,
+                                    )
+                                    creative_id = await asyncio.to_thread(
+                                        self.meta.create_ad_creative,
+                                        active_plan,
+                                        slot,
+                                        resolved_post,
+                                        "MESSENGER",
+                                        retry_overrides,
+                                    )
+                                    ad_id = await asyncio.to_thread(
+                                        self.meta.create_ad,
+                                        active_plan,
+                                        slot,
+                                        adset_id,
+                                        creative_id,
+                                        "MESSENGER",
+                                    )
+                                    destination_fallback_reason = error_text
+                                except MetaApiError as retry_exc:
+                                    self.logger.warning(
+                                        "Retry asset_feed_spec MESSAGE_PAGE that bai cho adset %s: %s",
+                                        adset_id,
+                                        retry_exc,
+                                    )
+                                    if ad_id:
+                                        await asyncio.to_thread(self.rollback.rollback, None, [], [ad_id], [])
+                                        ad_id = None
+                                    if creative_id:
+                                        await asyncio.to_thread(
+                                            self.rollback.rollback,
+                                            None,
+                                            [],
+                                            [],
+                                            [creative_id],
+                                        )
+                                        creative_id = None
+
+                        if not ad_id:
+                            duplicated_ad_id = await _try_duplicate_from_existing_ad(
+                                adset_id,
+                                slot,
+                                error_text,
+                                adset_destination_type,
+                            )
+                            if duplicated_ad_id:
+                                ad_id = duplicated_ad_id
+                                destination_fallback_reason = error_text
+                        if not ad_id:
                             diagnostics = await _get_instagram_post_access_diagnostics_cached()
                             if (
                                 diagnostics.get("is_instagram_origin")
@@ -2330,6 +2421,46 @@ class TelegramAdsBot:
             if isinstance(item, dict) and str(item.get("type", "")).strip().upper() == "MESSAGE_PAGE"
             else 1,
         )
+        return normalized
+
+    @staticmethod
+    def _as_messenger_only_asset_feed_spec(
+        asset_feed_spec: dict[str, Any],
+        page_id: str,
+    ) -> dict[str, Any]:
+        normalized = copy.deepcopy(asset_feed_spec)
+        call_to_actions = normalized.get("call_to_actions")
+        message_page_actions = [
+            copy.deepcopy(item)
+            for item in call_to_actions
+            if isinstance(item, dict) and str(item.get("type", "")).strip().upper() == "MESSAGE_PAGE"
+        ] if isinstance(call_to_actions, list) else []
+        if not message_page_actions:
+            message_page_actions = [
+                {
+                    "type": "MESSAGE_PAGE",
+                    "value": {
+                        "app_destination": "MESSENGER",
+                        "link": "https://fb.com/messenger_doc/",
+                    },
+                }
+            ]
+        for action in message_page_actions:
+            value = action.get("value")
+            if not isinstance(value, dict):
+                value = {}
+            value["app_destination"] = "MESSENGER"
+            if not str(value.get("link", "")).strip():
+                value["link"] = "https://fb.com/messenger_doc/"
+            action["value"] = value
+        normalized["call_to_actions"] = message_page_actions[:1]
+        normalized["ad_formats"] = ["CAROUSEL"]
+        normalized["link_urls"] = [{"website_url": f"https://m.me/{str(page_id).strip()}"}]
+        additional_data = normalized.get("additional_data")
+        if not isinstance(additional_data, dict):
+            additional_data = {}
+        additional_data["is_click_to_message"] = True
+        normalized["additional_data"] = additional_data
         return normalized
 
     @staticmethod

@@ -1033,7 +1033,7 @@ class MetaAdsClient:
                     "fields": (
                         "asset_feed_spec,call_to_action_type,"
                         "degrees_of_freedom_spec,contextual_multi_ads,"
-                        "instagram_user_id,instagram_actor_id"
+                        "instagram_user_id,instagram_actor_id,page_welcome_message"
                     )
                 },
             )
@@ -1054,6 +1054,7 @@ class MetaAdsClient:
                 "contextual_multi_ads",
                 "instagram_user_id",
                 "instagram_actor_id",
+                "page_welcome_message",
             ):
                 value = creative_payload.get(field)
                 if value not in (None, "", {}, []):

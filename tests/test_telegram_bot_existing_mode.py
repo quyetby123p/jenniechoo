@@ -1050,6 +1050,187 @@ def test_existing_mode_vxv_image_uses_messenger_seed_in_messenger_adset(monkeypa
     assert payload["ad_ids"] == ["ad_msg_seed"]
 
 
+def test_existing_mode_vxv_messenger_retries_with_message_asset_feed_when_root_cta_blocked(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    class MessengerAssetFeedRetryMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.created_creatives: list[tuple[str | None, dict[str, Any] | None]] = []
+            self.created_ads: list[tuple[str, str, str | None]] = []
+
+        @staticmethod
+        def is_auto_destination_error(error_message: str) -> bool:
+            message = str(error_message).lower()
+            return "(#3)" in message or "không tương thích với mục tiêu của chiến dịch" in message
+
+        def resolve_post(self, post_url: str) -> ResolvedPost:
+            return replace(
+                super().resolve_post(post_url),
+                message_text="Some nights #VXV011",
+                media_label="Anh",
+            )
+
+        def list_eligible_adsets(self, campaign_id: str, max_count: int) -> list[dict[str, str]]:  # noqa: ARG002
+            return [
+                {
+                    "id": "v2_messenger_adset_1",
+                    "name": "ADS:QUYET|MK:ThaiLan|VXV011|V2|Codex - Thời trang",
+                    "destination_type": "MESSENGER",
+                    "effective_status": "ACTIVE",
+                }
+            ]
+
+        def get_message_destination_creative_overrides(
+            self,
+            adset_id: str,  # noqa: ARG002
+            *,
+            max_ads_scan: int = 20,  # noqa: ARG002
+            expected_call_to_action_type: str | None = None,
+        ) -> dict[str, Any]:
+            assert expected_call_to_action_type == "MESSAGE_PAGE"
+            return {
+                "degrees_of_freedom_spec": {
+                    "creative_features_spec": {
+                        "media_order": {"enroll_status": "OPT_OUT"},
+                    }
+                },
+                "instagram_user_id": "17841478128229539",
+                "call_to_action_type": "MESSAGE_PAGE",
+            }
+
+        def get_account_multi_destination_creative_overrides(
+            self,
+            *,
+            max_ads_scan: int = 200,  # noqa: ARG002
+            expected_call_to_action_type: str | None = None,
+        ) -> dict[str, Any]:
+            assert expected_call_to_action_type == "MESSAGE_PAGE"
+            return {
+                "asset_feed_spec": {
+                    "optimization_type": "DOF_MESSAGING_DESTINATION",
+                    "call_to_actions": [
+                        {"type": "INSTAGRAM_MESSAGE", "value": {"app_destination": "INSTAGRAM_DIRECT"}},
+                        {"type": "MESSAGE_PAGE", "value": {"link": "https://fb.com/messenger_doc/"}},
+                    ],
+                    "additional_data": {"seed": True},
+                },
+                "call_to_action_type": "MESSAGE_PAGE",
+            }
+
+        def get_account_message_destination_creative_overrides(
+            self,
+            *,
+            max_ads_scan: int = 200,  # noqa: ARG002
+            expected_call_to_action_type: str | None = None,
+        ) -> dict[str, Any]:
+            assert expected_call_to_action_type == "MESSAGE_PAGE"
+            return {
+                "page_welcome_message": '{"template_id":"962707759488898"}',
+                "instagram_user_id": "17841478128229539",
+                "call_to_action_type": "MESSAGE_PAGE",
+            }
+
+        def create_ad_creative(
+            self,
+            plan,  # noqa: ANN001, ARG002
+            slot,  # noqa: ANN001, ARG002
+            resolved_post,  # noqa: ANN001, ARG002
+            destination_type_override=None,  # noqa: ANN001
+            extra_payload_overrides=None,  # noqa: ANN001
+        ) -> str:
+            self.created_creatives.append((destination_type_override, extra_payload_overrides))
+            if isinstance(extra_payload_overrides, dict) and extra_payload_overrides.get("call_to_action_type"):
+                raise MetaApiError("(#3) Application does not have the capability to make this API call.")
+            return "cr_asset_feed_retry"
+
+        def create_ad(
+            self,
+            plan,  # noqa: ANN001, ARG002
+            slot,  # noqa: ANN001, ARG002
+            adset_id: str,
+            creative_id: str,
+            destination_type_override=None,  # noqa: ANN001
+        ) -> str:
+            self.created_ads.append((adset_id, creative_id, destination_type_override))
+            return "ad_asset_feed_retry"
+
+    def fake_load_json(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        path_text = str(path)
+        if "audiences" in path_text:
+            return {
+                "thoi_trang_saved_audience_id": "aud_thoi_trang",
+                "du_lich_saved_audience_id": "aud_du_lich",
+                "tiec_saved_audience_id": "aud_tiec",
+            }
+        if "message_templates" in path_text:
+            return {
+                "templates": {
+                    "Mess Cơ bản": {
+                        "creative_patch": {"page_welcome_message": {"template_id": "962707759488898"}},
+                        "adset_patch": {},
+                    }
+                }
+            }
+        return {
+            "sku_prefix": "VXV",
+            "message_template_name": "Mess Cơ bản",
+            "adset_payload_overrides": {"destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"},
+        }
+
+    monkeypatch.setattr(telegram_bot_module, "load_json", fake_load_json)
+    meta = MessengerAssetFeedRetryMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/posts/122187983024934207",
+        budget_daily_vnd=0,
+        use_existing_campaign=True,
+        manual_sku_keywords=["VXV011"],
+        existing_campaign_hint="V2",
+    )
+    asyncio.run(
+        bot._create_existing_campaign_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_vxv011_v2_img_retry",
+            version=3,
+            selected_campaign={"id": "camp_vxv011_v2", "name": "ADS:QUYET|MK:ThaiLan|VXV011|V2|Codex"},
+            campaign_keywords=["VXV011"],
+        )
+    )
+
+    assert len(meta.created_creatives) == 2
+    first_overrides = meta.created_creatives[0][1]
+    assert isinstance(first_overrides, dict)
+    assert first_overrides["call_to_action_type"] == "MESSAGE_PAGE"
+    retry_destination, retry_overrides = meta.created_creatives[1]
+    assert retry_destination == "MESSENGER"
+    assert isinstance(retry_overrides, dict)
+    assert "call_to_action_type" not in retry_overrides
+    assert "degrees_of_freedom_spec" not in retry_overrides
+    assert retry_overrides["page_welcome_message"] == '{"template_id":"962707759488898"}'
+    assert retry_overrides["instagram_user_id"] == "17841478128229539"
+    retry_asset_feed = retry_overrides["asset_feed_spec"]
+    assert retry_asset_feed["ad_formats"] == ["CAROUSEL"]
+    assert retry_asset_feed["link_urls"] == [{"website_url": "https://m.me/61581440236157"}]
+    assert retry_asset_feed["call_to_actions"] == [
+        {
+            "type": "MESSAGE_PAGE",
+            "value": {
+                "link": "https://fb.com/messenger_doc/",
+                "app_destination": "MESSENGER",
+            },
+        }
+    ]
+    assert meta.created_ads == [("v2_messenger_adset_1", "cr_asset_feed_retry", "MESSENGER")]
+    payload = storage.saved_jobs[-1][1]
+    assert payload["ad_ids"] == ["ad_asset_feed_retry"]
+    assert payload["creative_ids"] == ["cr_asset_feed_retry"]
+
+
 def test_existing_mode_reuses_successful_new_campaign_creative_for_same_reel() -> None:
     class ReuseCreativeMeta(FakeMeta):
         def __init__(self) -> None:
