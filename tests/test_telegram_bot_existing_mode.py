@@ -714,6 +714,129 @@ def test_existing_mode_creates_messenger_adset_when_vayxa_campaign_has_only_mult
     assert "adset đa đích" in payload["destination_fallback_reason"]
 
 
+def test_existing_mode_image_post_uses_message_page_cta_in_multi_destination_adset(monkeypatch) -> None:  # noqa: ANN001
+    class ImagePostMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.created_creatives: list[tuple[str | None, dict[str, Any] | None]] = []
+            self.created_ads: list[tuple[str, str | None]] = []
+
+        def resolve_post(self, post_url: str) -> ResolvedPost:
+            return replace(
+                super().resolve_post(post_url),
+                message_text="Noi dung #VXV011",
+                media_label="Anh",
+            )
+
+        def list_eligible_adsets(self, campaign_id: str, max_count: int) -> list[dict[str, str]]:  # noqa: ARG002
+            return [
+                {
+                    "id": "old_multi_adset_1",
+                    "name": "ADS:QUYET|MK:ThaiLan|VXV011|Codex - Tiệc",
+                    "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                    "effective_status": "ACTIVE",
+                }
+            ]
+
+        def get_multi_destination_asset_feed_spec(self, adset_id: str, max_ads_scan: int = 20) -> dict[str, Any]:  # noqa: ARG002
+            return {
+                "optimization_type": "DOF_MESSAGING_DESTINATION",
+                "call_to_actions": [
+                    {"type": "INSTAGRAM_MESSAGE", "value": {"app_destination": "INSTAGRAM_DIRECT"}},
+                    {"type": "MESSAGE_PAGE", "value": {"app_destination": "MESSENGER"}},
+                ],
+            }
+
+        def create_ad_creative(
+            self,
+            plan,  # noqa: ANN001, ARG002
+            slot,  # noqa: ANN001, ARG002
+            resolved_post,  # noqa: ANN001, ARG002
+            destination_type_override=None,  # noqa: ANN001
+            extra_payload_overrides=None,  # noqa: ANN001
+        ) -> str:
+            self.created_creatives.append((destination_type_override, extra_payload_overrides))
+            return "cr_msg_1"
+
+        def create_ad(
+            self,
+            plan,  # noqa: ANN001, ARG002
+            slot,  # noqa: ANN001, ARG002
+            adset_id: str,
+            creative_id: str,  # noqa: ARG002
+            destination_type_override=None,  # noqa: ANN001
+        ) -> str:
+            self.created_ads.append((adset_id, destination_type_override))
+            return "ad_msg_1"
+
+    def fake_load_json(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        path_text = str(path)
+        if "audiences" in path_text:
+            return {
+                "thoi_trang_saved_audience_id": "aud_thoi_trang",
+                "du_lich_saved_audience_id": "aud_du_lich",
+                "tiec_saved_audience_id": "aud_tiec",
+            }
+        if "message_templates" in path_text:
+            return {
+                "templates": {
+                    "Mess Cơ bản": {
+                        "creative_patch": {"page_welcome_message": {"template_id": "962707759488898"}},
+                        "adset_patch": {},
+                    }
+                }
+            }
+        return {
+            "sku_prefix": "VXV",
+            "message_template_name": "Mess Cơ bản",
+            "adset_payload_overrides": {"destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"},
+        }
+
+    monkeypatch.setattr(telegram_bot_module, "load_json", fake_load_json)
+    meta = ImagePostMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/posts/122187961682934207",
+        budget_daily_vnd=0,
+        use_existing_campaign=True,
+        manual_sku_keywords=["VXV011"],
+    )
+    asyncio.run(
+        bot._create_existing_campaign_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_vxv011_img",
+            version=3,
+            selected_campaign={"id": "camp_vxv011", "name": "ADS:QUYET|MK:ThaiLan|VXV011|Codex"},
+            campaign_keywords=["VXV011"],
+        )
+    )
+
+    assert meta.created_creatives == [
+        (
+            "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+            {
+                "asset_feed_spec": {
+                    "optimization_type": "DOF_MESSAGING_DESTINATION",
+                    "call_to_actions": [
+                        {"type": "MESSAGE_PAGE", "value": {"app_destination": "MESSENGER"}},
+                        {"type": "INSTAGRAM_MESSAGE", "value": {"app_destination": "INSTAGRAM_DIRECT"}},
+                    ],
+                },
+                "call_to_action_type": "MESSAGE_PAGE",
+            },
+        )
+    ]
+    assert meta.created_ads == [("old_multi_adset_1", "MESSAGING_INSTAGRAM_DIRECT_MESSENGER")]
+    payload = storage.saved_jobs[-1][1]
+    assert payload["publish_scope"] == "ads_only"
+    assert payload["active_destination_type"] == "INHERIT_ADSET"
+    assert payload["destination_fallback_reason"] == ""
+
+
 def test_existing_mode_reuses_successful_new_campaign_creative_for_same_reel() -> None:
     class ReuseCreativeMeta(FakeMeta):
         def __init__(self) -> None:

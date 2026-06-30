@@ -870,7 +870,18 @@ class TelegramAdsBot:
                     and isinstance(multi_destination_asset_feed_spec, dict)
                     and multi_destination_asset_feed_spec
                 ):
-                    creative_extra_overrides = {"asset_feed_spec": multi_destination_asset_feed_spec}
+                    creative_extra_overrides = {
+                        "asset_feed_spec": self._with_message_page_cta_preferred(
+                            multi_destination_asset_feed_spec
+                        )
+                    }
+                if (
+                    active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+                    and self._should_force_message_page_cta_for_post(active_plan, resolved_post)
+                ):
+                    if creative_extra_overrides is None:
+                        creative_extra_overrides = {}
+                    creative_extra_overrides["call_to_action_type"] = "MESSAGE_PAGE"
                 try:
                     adset_id = await asyncio.to_thread(self.meta.create_adset, active_plan, campaign_id, slot)
                     creative_id = await asyncio.to_thread(
@@ -1266,7 +1277,6 @@ class TelegramAdsBot:
             configured_existing_destination_type = str(
                 plan.raw.get("adset_payload_overrides", {}).get("destination_type", "")
             ).strip().upper()
-
             adsets = await asyncio.to_thread(self.meta.list_eligible_adsets, campaign_id, 20)
             if not adsets:
                 raise ValidationError(
@@ -1496,7 +1506,9 @@ class TelegramAdsBot:
                             self.meta.get_multi_destination_asset_feed_spec,
                             adset_id,
                         )
-                        creative_extra_overrides["asset_feed_spec"] = asset_feed_spec
+                        creative_extra_overrides["asset_feed_spec"] = self._with_message_page_cta_preferred(
+                            asset_feed_spec
+                        )
                     except (ValidationError, MetaApiError) as exc:
                         self.logger.warning(
                             "Khong lay duoc asset_feed_spec tu adset %s: %s",
@@ -1506,7 +1518,11 @@ class TelegramAdsBot:
                     if "asset_feed_spec" not in creative_extra_overrides:
                         account_asset_feed_spec = await _get_account_asset_feed_spec_cached()
                         if isinstance(account_asset_feed_spec, dict) and account_asset_feed_spec:
-                            creative_extra_overrides["asset_feed_spec"] = account_asset_feed_spec
+                            creative_extra_overrides["asset_feed_spec"] = self._with_message_page_cta_preferred(
+                                account_asset_feed_spec
+                            )
+                    if self._should_force_message_page_cta_for_post(active_plan, resolved_post):
+                        creative_extra_overrides["call_to_action_type"] = "MESSAGE_PAGE"
                 slot = AudienceSlot(
                     key=f"existing_{index}",
                     label=adset_name,
@@ -2186,6 +2202,40 @@ class TelegramAdsBot:
         if 0 <= fallback_index < len(DEFAULT_AUDIENCE_LAYOUT):
             return DEFAULT_AUDIENCE_LAYOUT[fallback_index]
         return None
+
+    @classmethod
+    def _with_message_page_cta_preferred(cls, asset_feed_spec: dict[str, Any]) -> dict[str, Any]:
+        normalized = copy.deepcopy(asset_feed_spec)
+        call_to_actions = normalized.get("call_to_actions")
+        if not isinstance(call_to_actions, list):
+            return normalized
+        normalized["call_to_actions"] = sorted(
+            call_to_actions,
+            key=lambda item: 0
+            if isinstance(item, dict) and str(item.get("type", "")).strip().upper() == "MESSAGE_PAGE"
+            else 1,
+        )
+        return normalized
+
+    @staticmethod
+    def _should_force_message_page_cta_for_post(
+        plan: PlannedCampaign,
+        resolved_post: Any,
+    ) -> bool:
+        adset_overrides = plan.raw.get("adset_payload_overrides", {}) if isinstance(plan.raw, dict) else {}
+        destination_type = ""
+        if isinstance(adset_overrides, dict):
+            destination_type = str(adset_overrides.get("destination_type", "")).strip().upper()
+        if destination_type != "MESSAGING_INSTAGRAM_DIRECT_MESSENGER":
+            return False
+        sku_text = str(plan.sku_code_text or "").strip().upper()
+        campaign_name = str(plan.campaign_name or "").strip().upper()
+        if "VXV" not in sku_text and "VXV" not in campaign_name:
+            return False
+        media_label = str(
+            getattr(resolved_post, "media_label", "") or plan.media_label or ""
+        ).strip().lower()
+        return media_label not in {"video"}
 
     @staticmethod
     def _extract_campaign_hint_keywords(campaign_hint: str) -> list[str]:
