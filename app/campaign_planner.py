@@ -6,11 +6,12 @@ from app.models import AdsCommand, AudienceSlot, PlannedCampaign, ResolvedPost
 from app.utils import deep_merge
 
 
-_AUDIENCE_LAYOUT = [
+DEFAULT_AUDIENCE_LAYOUT = [
     ("thoi_trang_saved_audience_id", "Thời trang", "TS"),
     ("du_lich_saved_audience_id", "Du lịch", "DL"),
     ("tiec_saved_audience_id", "Tiệc", "TIEC"),
 ]
+_AUDIENCE_LAYOUT = DEFAULT_AUDIENCE_LAYOUT
 _DEFAULT_SKU_PREFIX = "JC"
 _SKU_PREFIX_PATTERN = re.compile(r"^[A-Z][0-9A-Z]{1,7}$")
 _HASHTAG_PATTERN = re.compile(r"#(?P<tag>\w+)", re.UNICODE)

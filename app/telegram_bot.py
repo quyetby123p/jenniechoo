@@ -11,6 +11,7 @@ import math
 import os
 from pathlib import Path
 import re
+import unicodedata
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -20,6 +21,7 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from app.approval_service import ApprovalService
 from app.campaign_planner import (
+    DEFAULT_AUDIENCE_LAYOUT,
     build_campaign_plan,
     build_existing_campaign_plan,
     build_non_jc_hashtag_suffix,
@@ -713,6 +715,12 @@ class TelegramAdsBot:
                     self.meta.publish_ads,
                     [str(item) for item in job.get("ad_ids", [])],
                 )
+            elif publish_scope == "adsets_ads":
+                await asyncio.to_thread(
+                    self.meta.publish_adsets_and_ads,
+                    [str(item) for item in job.get("adset_ids", [])],
+                    [str(item) for item in job.get("ad_ids", [])],
+                )
             else:
                 await asyncio.to_thread(
                     self.meta.publish_tree,
@@ -730,8 +738,12 @@ class TelegramAdsBot:
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("Loi publish job %s", job_id)
             campaign_value = str(job.get("campaign_id", "")).strip()
-            rollback_campaign_id = campaign_value if (publish_scope != "ads_only" and campaign_value) else None
-            rollback_adset_ids = [str(item) for item in job.get("adset_ids", [])] if publish_scope != "ads_only" else []
+            rollback_campaign_id = campaign_value if (publish_scope == "tree" and campaign_value) else None
+            rollback_adset_ids = (
+                [str(item) for item in job.get("adset_ids", [])]
+                if publish_scope in {"tree", "adsets_ads"}
+                else []
+            )
             await asyncio.to_thread(
                 self.rollback.rollback,
                 rollback_campaign_id,
@@ -774,8 +786,12 @@ class TelegramAdsBot:
 
         publish_scope = str(job.get("publish_scope", "tree")).strip().lower()
         campaign_value = str(job.get("campaign_id", "")).strip()
-        rollback_campaign_id = campaign_value if (publish_scope != "ads_only" and campaign_value) else None
-        rollback_adset_ids = [str(item) for item in job.get("adset_ids", [])] if publish_scope != "ads_only" else []
+        rollback_campaign_id = campaign_value if (publish_scope == "tree" and campaign_value) else None
+        rollback_adset_ids = (
+            [str(item) for item in job.get("adset_ids", [])]
+            if publish_scope in {"tree", "adsets_ads"}
+            else []
+        )
         await self._answer_callback_safely(query, "Đang hủy và rollback...")
         await asyncio.to_thread(
             self.rollback.rollback,
@@ -1196,11 +1212,13 @@ class TelegramAdsBot:
     ) -> None:
         objective = load_json(self.settings.objective_config_path)
         templates = load_json(self.settings.message_templates_path)
+        audiences = load_json(self.settings.audiences_config_path)
         sku_prefix = resolve_sku_prefix(objective)
 
         campaign_id = str(selected_campaign.get("id", "")).strip()
         selected_campaign_name = str(selected_campaign.get("name", "")).strip() or campaign_id
         selected_adset_ids: list[str] = []
+        created_adset_ids: list[str] = []
         ad_ids: list[str] = []
         creative_ids: list[str] = []
         resolved_post = None
@@ -1426,12 +1444,51 @@ class TelegramAdsBot:
                     configured_existing_destination_type == "MESSENGER"
                     and adset_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
                 ):
+                    layout = self._resolve_audience_layout_for_adset(adset_name, skipped_multi_destination_adsets)
+                    if not layout:
+                        raise ValidationError(
+                            "Không map được adset đa đích cũ sang audience Messenger-only mới."
+                        )
+                    audience_key, audience_label, audience_suffix = layout
+                    saved_audience_id = str(audiences.get(audience_key, "")).strip()
+                    if not saved_audience_id or saved_audience_id == "replace_me":
+                        raise ValidationError(
+                            f"Saved Audience ID cho '{audience_label}' chưa được cấu hình trong audiences.json."
+                        )
+                    fallback_slot = AudienceSlot(
+                        key=f"existing_messenger_{index}",
+                        label=audience_label,
+                        suffix=audience_suffix,
+                        saved_audience_id=saved_audience_id,
+                        adset_name=f"{selected_campaign_name} - {audience_label} | Messenger-only",
+                        ad_name="",
+                    )
+                    new_adset_id = await asyncio.to_thread(
+                        self.meta.create_adset,
+                        active_plan,
+                        campaign_id,
+                        fallback_slot,
+                    )
+                    if not new_adset_id:
+                        raise ValidationError(
+                            f"Không tạo được adset Messenger-only cho '{audience_label}'."
+                        )
+                    created_adset_ids.append(new_adset_id)
                     self.logger.warning(
-                        "Bo qua adset multi-destination %s vi profile dang cau hinh MESSENGER-only.",
+                        "Tao adset Messenger-only %s tu adset multi-destination %s vi profile dang cau hinh MESSENGER-only.",
+                        new_adset_id,
                         adset_id,
                     )
                     skipped_multi_destination_adsets += 1
-                    continue
+                    active_destination_type = "MESSENGER"
+                    if not destination_fallback_reason:
+                        destination_fallback_reason = (
+                            "Campaign cũ chỉ có adset đa đích Messenger + Instagram; "
+                            "bot đã tạo adset Messenger-only mới trong cùng campaign."
+                        )
+                    adset_id = new_adset_id
+                    adset_name = fallback_slot.adset_name
+                    adset_destination_type = "MESSENGER"
                 creative_extra_overrides: dict[str, Any] = {}
                 if adset_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER":
                     try:
@@ -1935,9 +1992,8 @@ class TelegramAdsBot:
                 if skipped_multi_destination_adsets:
                     raise ValidationError(
                         "Campaign cũ hiện chỉ có adset đa đích Messenger + Instagram, "
-                        "không tương thích với cấu hình VAYXA Messenger-only.\n"
-                        "Anh tạo/lên lại campaign mới bằng Bot 2 để bot tạo adset Messenger-only, "
-                        "tránh lỗi CTA Instagram không được hỗ trợ."
+                        "nhưng bot chưa tạo được adset Messenger-only thay thế.\n"
+                        "Anh kiểm tra lại Saved Audience/config ADS2 rồi chạy lại giúp em."
                     )
                 raise ValidationError("Không tạo được ads mới trong campaign đã chọn.")
 
@@ -1965,9 +2021,9 @@ class TelegramAdsBot:
                 "selected_campaign_name": selected_campaign_name,
                 "selected_adset_ids": selected_adset_ids,
                 "selected_adset_count": len(selected_adset_ids),
-                "publish_scope": "ads_only",
+                "publish_scope": "adsets_ads" if created_adset_ids else "ads_only",
                 "campaign_id": campaign_id,
-                "adset_ids": [],
+                "adset_ids": created_adset_ids,
                 "ad_ids": ad_ids,
                 "creative_ids": creative_ids,
                 "resolved_post_id": resolved_post.post_id,
@@ -1992,7 +2048,7 @@ class TelegramAdsBot:
             )
         except (ValidationError, MetaApiError, ValueError, KeyError, TypeError) as exc:
             self.logger.exception("Tạo nháp campaign cũ thất bại")
-            await asyncio.to_thread(self.rollback.rollback, None, [], ad_ids, creative_ids)
+            await asyncio.to_thread(self.rollback.rollback, None, created_adset_ids, ad_ids, creative_ids)
             failed_job_id = await asyncio.to_thread(self.storage.generate_job_id)
             failed_payload = {
                 "job_id": failed_job_id,
@@ -2004,11 +2060,12 @@ class TelegramAdsBot:
                 "post_fingerprint": post_fingerprint,
                 "budget_daily_vnd": command.budget_daily_vnd,
                 "campaign_id": campaign_id,
+                "publish_scope": "adsets_ads" if created_adset_ids else "ads_only",
                 "selected_campaign_id": campaign_id,
                 "selected_campaign_name": selected_campaign_name,
                 "selected_adset_ids": selected_adset_ids,
                 "selected_adset_count": len(selected_adset_ids),
-                "adset_ids": [],
+                "adset_ids": created_adset_ids,
                 "ad_ids": ad_ids,
                 "creative_ids": creative_ids,
                 "error": str(exc),
@@ -2106,6 +2163,29 @@ class TelegramAdsBot:
             f"Anh thêm SKU trong lệnh (ví dụ {sku_example} lên cũ) "
             f"hoặc thêm hashtag #{sku_prefix}... vào bài viết."
         )
+
+    @staticmethod
+    def _normalize_label_for_match(value: str) -> str:
+        normalized = unicodedata.normalize("NFD", str(value or ""))
+        without_marks = "".join(
+            character for character in normalized if unicodedata.category(character) != "Mn"
+        )
+        return re.sub(r"[^0-9a-z]+", " ", without_marks.lower()).strip()
+
+    @classmethod
+    def _resolve_audience_layout_for_adset(
+        cls,
+        adset_name: str,
+        fallback_index: int,
+    ) -> tuple[str, str, str] | None:
+        normalized_adset_name = cls._normalize_label_for_match(adset_name)
+        for audience_key, audience_label, audience_suffix in DEFAULT_AUDIENCE_LAYOUT:
+            normalized_label = cls._normalize_label_for_match(audience_label)
+            if normalized_label and normalized_label in normalized_adset_name:
+                return audience_key, audience_label, audience_suffix
+        if 0 <= fallback_index < len(DEFAULT_AUDIENCE_LAYOUT):
+            return DEFAULT_AUDIENCE_LAYOUT[fallback_index]
+        return None
 
     @staticmethod
     def _extract_campaign_hint_keywords(campaign_hint: str) -> list[str]:
@@ -3643,6 +3723,7 @@ class TelegramAdsBot:
         adset_lines = "\n".join(f"- {adset_id}" for adset_id in job.get("adset_ids", []))
         ad_lines = "\n".join(f"- {ad_id}" for ad_id in job["ad_ids"])
         selected_adset_lines = "\n".join(f"- {adset_id}" for adset_id in job.get("selected_adset_ids", []))
+        publish_scope = str(job.get("publish_scope", "tree")).strip().lower()
         fallback_note = ""
         if (
             job.get("requested_destination_type") == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
@@ -3653,6 +3734,19 @@ class TelegramAdsBot:
                 "nên em đã tự chuyển sang Messenger-only để chiến dịch tạo thành công."
             )
         if campaign_mode == "existing":
+            created_adset_note = ""
+            if adset_lines:
+                created_adset_note = f"- Adset Messenger-only mới:\n{adset_lines}\n"
+            if publish_scope == "adsets_ads":
+                approval_note = (
+                    "\n\nKhi bấm Duyệt, em bật ACTIVE cho adset Messenger-only mới và ad mới "
+                    "(không đổi trạng thái campaign/adset cũ)."
+                )
+            else:
+                approval_note = (
+                    "\n\nKhi bấm Duyệt, em chỉ bật ACTIVE cho các ad mới tạo "
+                    "(không đổi trạng thái campaign/adset cũ)."
+                )
             budget_text = (
                 f"{job['budget_daily_vnd']:,} VND"
                 if int(job.get("budget_daily_vnd", 0)) > 0
@@ -3671,11 +3765,12 @@ class TelegramAdsBot:
                 f"- Destination type: {job.get('active_destination_type', '')}\n"
                 f"- Post map dùng để chạy ads: {job.get('resolved_permalink_url', job.get('post_url', ''))}\n"
                 f"- Adset đích ({job.get('selected_adset_count', 0)}):\n{selected_adset_lines}\n"
+                f"{created_adset_note}"
                 f"- Ad IDs mới tạo:\n{ad_lines}\n"
                 f"- Link Ads Manager: {job['ads_manager_url']}\n"
-                "\n\nKhi bấm Duyệt, em chỉ bật ACTIVE cho các ad mới tạo (không đổi trạng thái campaign/adset cũ)."
+                f"{approval_note}"
                 + fallback_note
-                + "\n\nAnh bấm Duyệt để publish, hoặc Hủy để rollback ads/creative mới tạo."
+                + "\n\nAnh bấm Duyệt để publish, hoặc Hủy để rollback adset/ads/creative mới tạo."
             )
         return (
             "Đã tạo nháp campaign thành công.\n"
@@ -3707,11 +3802,18 @@ class TelegramAdsBot:
 
     def _build_published_message(self, job: dict[str, Any]) -> str:
         if str(job.get("campaign_mode", "new")).strip().lower() == "existing":
+            publish_scope = str(job.get("publish_scope", "tree")).strip().lower()
+            scope_note = (
+                "- Đã bật adset Messenger-only mới và ads mới\n"
+                if publish_scope == "adsets_ads"
+                else ""
+            )
             return (
                 "Publish ads vào campaign cũ thành công.\n"
                 f"- Job ID: {job['job_id']}\n"
                 f"- Campaign ID: {job['campaign_id']}\n"
                 f"- Trạng thái: {job['status']}\n"
+                f"{scope_note}"
                 f"- Link Ads Manager: {job['ads_manager_url']}"
             )
         return (

@@ -6,7 +6,7 @@
   "sku_prefix": "VXV",
   "campaign_payload_overrides": {},
   "adset_payload_overrides": {
-    "destination_type": "MESSENGER",
+    "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
     "billing_event": "IMPRESSIONS",
     "optimization_goal": "MESSAGING_PURCHASE_CONVERSION",
     "promoted_object": {

@@ -116,6 +116,7 @@ class FakeStorage:
 class FakeMeta:
     def __init__(self) -> None:
         self.publish_ads_calls: list[list[str]] = []
+        self.publish_adsets_and_ads_calls: list[tuple[list[str], list[str]]] = []
         self.publish_tree_calls: list[tuple[str, list[str], list[str]]] = []
         self.campaign_candidates: list[dict[str, str]] = []
         self.find_active_campaigns_calls: list[list[str]] = []
@@ -143,6 +144,9 @@ class FakeMeta:
 
     def publish_tree(self, campaign_id: str, adset_ids: list[str], ad_ids: list[str]) -> None:
         self.publish_tree_calls.append((campaign_id, list(adset_ids), list(ad_ids)))
+
+    def publish_adsets_and_ads(self, adset_ids: list[str], ad_ids: list[str]) -> None:
+        self.publish_adsets_and_ads_calls.append((list(adset_ids), list(ad_ids)))
 
     @staticmethod
     def is_auto_destination_error(error_message: str) -> bool:
@@ -594,6 +598,122 @@ def test_existing_mode_draft_never_mutates_campaign_or_adset() -> None:
     assert storage.saved_jobs[-1][1]["adset_ids"] == []
 
 
+def test_existing_mode_creates_messenger_adset_when_vayxa_campaign_has_only_multi_destination_adsets(monkeypatch) -> None:  # noqa: ANN001
+    class MultiDestinationOnlyMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.created_adsets: list[tuple[str, str, str]] = []
+            self.created_creatives: list[tuple[str | None, dict[str, Any] | None]] = []
+            self.created_ads: list[tuple[str, str | None]] = []
+
+        def resolve_post(self, post_url: str) -> ResolvedPost:
+            return replace(
+                super().resolve_post(post_url),
+                message_text="Noi dung #VXV011",
+                media_label="Video",
+            )
+
+        def list_eligible_adsets(self, campaign_id: str, max_count: int) -> list[dict[str, str]]:  # noqa: ARG002
+            return [
+                {
+                    "id": "old_multi_adset_1",
+                    "name": "ADS:QUYET|MK:ThaiLan|VXV011|Codex - Thời trang",
+                    "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                    "effective_status": "ACTIVE",
+                }
+            ]
+
+        def create_adset(self, plan: PlannedCampaign, campaign_id: str, slot: AudienceSlot) -> str:
+            self.created_adsets.append((campaign_id, slot.adset_name, slot.saved_audience_id))
+            assert plan.raw["adset_payload_overrides"]["destination_type"] == "MESSENGER"
+            return "new_msg_adset_1"
+
+        def create_ad_creative(
+            self,
+            plan,  # noqa: ANN001, ARG002
+            slot,  # noqa: ANN001, ARG002
+            resolved_post,  # noqa: ANN001, ARG002
+            destination_type_override=None,  # noqa: ANN001
+            extra_payload_overrides=None,  # noqa: ANN001
+        ) -> str:
+            self.created_creatives.append((destination_type_override, extra_payload_overrides))
+            return "cr_msg_1"
+
+        def create_ad(
+            self,
+            plan,  # noqa: ANN001, ARG002
+            slot,  # noqa: ANN001
+            adset_id: str,
+            creative_id: str,  # noqa: ARG002
+            destination_type_override=None,  # noqa: ANN001
+        ) -> str:
+            self.created_ads.append((adset_id, destination_type_override))
+            assert "ADSET:new_msg_adset_1" in slot.ad_name
+            return "ad_msg_1"
+
+    def fake_load_json(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        path_text = str(path)
+        if "audiences" in path_text:
+            return {
+                "thoi_trang_saved_audience_id": "aud_thoi_trang",
+                "du_lich_saved_audience_id": "aud_du_lich",
+                "tiec_saved_audience_id": "aud_tiec",
+            }
+        if "message_templates" in path_text:
+            return {
+                "templates": {
+                    "Mess Cơ bản": {
+                        "creative_patch": {"page_welcome_message": {"template_id": "962707759488898"}},
+                        "adset_patch": {},
+                    }
+                }
+            }
+        return {
+            "sku_prefix": "VXV",
+            "message_template_name": "Mess Cơ bản",
+            "adset_payload_overrides": {"destination_type": "MESSENGER"},
+        }
+
+    monkeypatch.setattr(telegram_bot_module, "load_json", fake_load_json)
+    meta = MultiDestinationOnlyMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/reel/1261208852835773",
+        budget_daily_vnd=0,
+        use_existing_campaign=True,
+        manual_sku_keywords=["VXV011"],
+    )
+    asyncio.run(
+        bot._create_existing_campaign_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_vxv011",
+            version=2,
+            selected_campaign={"id": "camp_vxv011", "name": "ADS:QUYET|MK:ThaiLan|VXV011|Codex"},
+            campaign_keywords=["VXV011"],
+        )
+    )
+
+    assert meta.created_adsets == [
+        (
+            "camp_vxv011",
+            "ADS:QUYET|MK:ThaiLan|VXV011|Codex - Thời trang | Messenger-only",
+            "aud_thoi_trang",
+        )
+    ]
+    assert meta.created_creatives == [("MESSENGER", {})]
+    assert meta.created_ads == [("new_msg_adset_1", "MESSENGER")]
+    payload = storage.saved_jobs[-1][1]
+    assert payload["publish_scope"] == "adsets_ads"
+    assert payload["adset_ids"] == ["new_msg_adset_1"]
+    assert payload["selected_adset_ids"] == ["old_multi_adset_1"]
+    assert payload["active_destination_type"] == "MESSENGER"
+    assert "adset đa đích" in payload["destination_fallback_reason"]
+
+
 def test_existing_mode_reuses_successful_new_campaign_creative_for_same_reel() -> None:
     class ReuseCreativeMeta(FakeMeta):
         def __init__(self) -> None:
@@ -697,6 +817,62 @@ def test_approve_existing_mode_publishes_ads_only() -> None:
 
     assert meta.publish_ads_calls == [["ad_1", "ad_2"]]
     assert meta.publish_tree_calls == []
+
+
+def test_approve_existing_mode_with_new_adsets_publishes_adsets_and_ads_only() -> None:
+    meta = FakeMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    storage.jobs["job_1"] = (
+        "pending",
+        {
+            "job_id": "job_1",
+            "status": "pending",
+            "campaign_mode": "existing",
+            "publish_scope": "adsets_ads",
+            "campaign_id": "old_camp_1",
+            "adset_ids": ["new_adset_1"],
+            "ad_ids": ["new_ad_1"],
+            "creative_ids": ["cr_1"],
+            "ads_manager_url": "https://adsmanager.facebook.com",
+        },
+    )
+
+    query = FakeQuery()
+    asyncio.run(bot._on_approve(query, "job_1"))
+
+    assert meta.publish_adsets_and_ads_calls == [(["new_adset_1"], ["new_ad_1"])]
+    assert meta.publish_ads_calls == []
+    assert meta.publish_tree_calls == []
+
+
+def test_reject_existing_mode_with_new_adsets_rolls_back_without_campaign() -> None:
+    meta = FakeMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    storage.jobs["job_1"] = (
+        "pending",
+        {
+            "job_id": "job_1",
+            "status": "pending",
+            "campaign_mode": "existing",
+            "publish_scope": "adsets_ads",
+            "campaign_id": "old_camp_1",
+            "adset_ids": ["new_adset_1"],
+            "ad_ids": ["new_ad_1"],
+            "creative_ids": ["cr_1"],
+            "ads_manager_url": "https://adsmanager.facebook.com",
+        },
+    )
+
+    query = FakeQuery()
+    asyncio.run(bot._on_reject(query, "job_1"))
+
+    assert rollback.calls == [(None, ["new_adset_1"], ["new_ad_1"], ["cr_1"])]
 
 
 def test_approve_missing_job_sends_regular_message() -> None:

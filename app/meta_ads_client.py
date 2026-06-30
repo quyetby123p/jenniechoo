@@ -1407,6 +1407,12 @@ class MetaAdsClient:
         for ad_id in ad_ids:
             self.update_status(ad_id, "ACTIVE")
 
+    def publish_adsets_and_ads(self, adset_ids: list[str], ad_ids: list[str]) -> None:
+        for adset_id in adset_ids:
+            self.update_status(adset_id, "ACTIVE")
+        for ad_id in ad_ids:
+            self.update_status(ad_id, "ACTIVE")
+
     def rollback_tree(
         self,
         campaign_id: str | None,
