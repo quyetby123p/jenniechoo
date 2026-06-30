@@ -1057,6 +1057,56 @@ def test_get_multi_destination_creative_overrides_uses_healthy_message_page_seed
     }
 
 
+def test_get_message_destination_creative_overrides_does_not_require_asset_feed_spec() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = data, access_token
+        assert method == "GET"
+        if path == "/adset_1/ads":
+            return {
+                "data": [
+                    {
+                        "id": "seed_ad",
+                        "effective_status": "ACTIVE",
+                        "updated_time": "2026-06-30T14:16:24+0700",
+                        "creative": {"id": "cr_seed"},
+                    }
+                ]
+            }
+        if path == "/cr_seed":
+            assert "asset_feed_spec" in params["fields"]
+            return {
+                "call_to_action_type": "MESSAGE_PAGE",
+                "degrees_of_freedom_spec": {
+                    "creative_features_spec": {
+                        "media_order": {"enroll_status": "OPT_OUT"},
+                        "product_extensions": {"enroll_status": "OPT_OUT"},
+                    }
+                },
+                "instagram_user_id": "17841478128229539",
+            }
+        raise AssertionError(f"Unexpected path: {path}")
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    overrides = client.get_message_destination_creative_overrides(
+        "adset_1",
+        expected_call_to_action_type="MESSAGE_PAGE",
+    )
+
+    assert overrides == {
+        "call_to_action_type": "MESSAGE_PAGE",
+        "degrees_of_freedom_spec": {
+            "creative_features_spec": {
+                "media_order": {"enroll_status": "OPT_OUT"},
+                "product_extensions": {"enroll_status": "OPT_OUT"},
+            }
+        },
+        "instagram_user_id": "17841478128229539",
+    }
+
+
 def test_get_multi_destination_asset_feed_spec_raises_when_missing() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
 

@@ -943,6 +943,44 @@ class MetaAdsClient:
             ),
         )
 
+    def get_message_destination_creative_overrides(
+        self,
+        adset_id: str,
+        *,
+        max_ads_scan: int = 20,
+        expected_call_to_action_type: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_adset_id = str(adset_id).strip()
+        if not normalized_adset_id:
+            raise ValidationError("Thiếu adset_id để lấy mẫu creative Messenger.")
+        return self._find_multi_destination_creative_overrides(
+            f"/{normalized_adset_id}/ads",
+            max_ads_scan=max_ads_scan,
+            expected_call_to_action_type=expected_call_to_action_type,
+            require_asset_feed_spec=False,
+            missing_message=(
+                "Không tìm thấy creative mẫu Messenger khỏe từ ads hiện có trong adset. "
+                "Anh tạo trước 1 ads thủ công trong adset này rồi chạy lại giúp em."
+            ),
+        )
+
+    def get_account_message_destination_creative_overrides(
+        self,
+        *,
+        max_ads_scan: int = 200,
+        expected_call_to_action_type: str | None = None,
+    ) -> dict[str, Any]:
+        return self._find_multi_destination_creative_overrides(
+            f"/{self.ad_account_id}/ads",
+            max_ads_scan=max_ads_scan,
+            expected_call_to_action_type=expected_call_to_action_type,
+            require_asset_feed_spec=False,
+            missing_message=(
+                "Không tìm thấy creative mẫu Messenger khỏe từ ads trong ad account. "
+                "Anh tạo trước 1 ads thủ công có nút nhắn tin rồi chạy lại giúp em."
+            ),
+        )
+
     def _find_multi_destination_creative_overrides(
         self,
         ads_path: str,
@@ -950,6 +988,7 @@ class MetaAdsClient:
         max_ads_scan: int,
         expected_call_to_action_type: str | None,
         missing_message: str,
+        require_asset_feed_spec: bool = True,
     ) -> dict[str, Any]:
         payload = self._request(
             "GET",
@@ -1003,9 +1042,11 @@ class MetaAdsClient:
             if expected_cta and actual_cta != expected_cta:
                 continue
             asset_feed_spec = creative_payload.get("asset_feed_spec")
-            if not isinstance(asset_feed_spec, dict) or not asset_feed_spec:
+            if require_asset_feed_spec and (not isinstance(asset_feed_spec, dict) or not asset_feed_spec):
                 continue
-            overrides: dict[str, Any] = {"asset_feed_spec": asset_feed_spec}
+            overrides: dict[str, Any] = {}
+            if isinstance(asset_feed_spec, dict) and asset_feed_spec:
+                overrides["asset_feed_spec"] = asset_feed_spec
             if expected_cta:
                 overrides["call_to_action_type"] = actual_cta
             for field in (
@@ -1017,7 +1058,8 @@ class MetaAdsClient:
                 value = creative_payload.get(field)
                 if value not in (None, "", {}, []):
                     overrides[field] = value
-            return overrides
+            if overrides:
+                return overrides
 
         raise ValidationError(missing_message)
 

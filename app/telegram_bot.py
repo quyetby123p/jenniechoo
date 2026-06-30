@@ -1251,6 +1251,8 @@ class TelegramAdsBot:
         account_multi_destination_asset_feed_spec_checked = False
         account_multi_destination_creative_overrides: dict[str, Any] | None = None
         account_multi_destination_creative_overrides_checked = False
+        account_message_destination_creative_overrides: dict[str, Any] | None = None
+        account_message_destination_creative_overrides_checked = False
         instagram_post_access_diagnostics: dict[str, Any] | None = None
         instagram_post_access_diagnostics_checked = False
         reusable_story_creative_id: str | None = None
@@ -1344,6 +1346,25 @@ class TelegramAdsBot:
                     )
                     account_multi_destination_creative_overrides = None
                 return account_multi_destination_creative_overrides
+
+            async def _get_account_message_creative_overrides_cached() -> dict[str, Any] | None:
+                nonlocal account_message_destination_creative_overrides
+                nonlocal account_message_destination_creative_overrides_checked
+                if account_message_destination_creative_overrides_checked:
+                    return account_message_destination_creative_overrides
+                account_message_destination_creative_overrides_checked = True
+                try:
+                    account_message_destination_creative_overrides = await asyncio.to_thread(
+                        self.meta.get_account_message_destination_creative_overrides,
+                        expected_call_to_action_type=expected_reusable_call_to_action_type,
+                    )
+                except (ValidationError, MetaApiError) as exc:
+                    self.logger.warning(
+                        "Khong lay duoc creative seed Messenger cap account cho luong len cu: %s",
+                        exc,
+                    )
+                    account_message_destination_creative_overrides = None
+                return account_message_destination_creative_overrides
 
             async def _get_instagram_post_access_diagnostics_cached() -> dict[str, Any]:
                 nonlocal instagram_post_access_diagnostics
@@ -1586,6 +1607,24 @@ class TelegramAdsBot:
                             )
                     if force_message_page_cta:
                         creative_extra_overrides["call_to_action_type"] = "MESSAGE_PAGE"
+                elif adset_destination_type == "MESSENGER" and force_message_page_cta:
+                    try:
+                        message_seed_overrides = await asyncio.to_thread(
+                            self.meta.get_message_destination_creative_overrides,
+                            adset_id,
+                            expected_call_to_action_type="MESSAGE_PAGE",
+                        )
+                        creative_extra_overrides.update(message_seed_overrides)
+                    except (ValidationError, MetaApiError) as exc:
+                        self.logger.warning(
+                            "Khong lay duoc creative seed Messenger MESSAGE_PAGE tu adset %s: %s",
+                            adset_id,
+                            exc,
+                        )
+                        account_message_seed_overrides = await _get_account_message_creative_overrides_cached()
+                        if isinstance(account_message_seed_overrides, dict) and account_message_seed_overrides:
+                            creative_extra_overrides.update(account_message_seed_overrides)
+                    creative_extra_overrides["call_to_action_type"] = "MESSAGE_PAGE"
                 slot = AudienceSlot(
                     key=f"existing_{index}",
                     label=adset_name,
