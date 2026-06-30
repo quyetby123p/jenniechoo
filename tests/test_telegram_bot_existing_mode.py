@@ -192,6 +192,26 @@ class FakeMeta:
     ) -> str | None:
         return None
 
+    def get_multi_destination_creative_overrides(
+        self,
+        adset_id: str,  # noqa: ARG002
+        *,
+        max_ads_scan: int = 20,  # noqa: ARG002
+        expected_call_to_action_type: str | None = None,  # noqa: ARG002
+    ) -> dict[str, Any]:
+        raise ValidationError("FakeMeta chua cau hinh creative seed.")
+
+    def get_account_multi_destination_creative_overrides(
+        self,
+        *,
+        max_ads_scan: int = 200,  # noqa: ARG002
+        expected_call_to_action_type: str | None = None,  # noqa: ARG002
+    ) -> dict[str, Any]:
+        raise ValidationError("FakeMeta chua cau hinh account creative seed.")
+
+    def get_account_multi_destination_asset_feed_spec(self, max_ads_scan: int = 200) -> dict[str, Any]:  # noqa: ARG002
+        raise ValidationError("FakeMeta chua cau hinh account asset_feed_spec.")
+
     def duplicate_ad_from_source(
         self,
         source_ad_id: str,  # noqa: ARG002
@@ -741,13 +761,32 @@ def test_existing_mode_image_post_uses_message_page_cta_in_multi_destination_ads
                 }
             ]
 
-        def get_multi_destination_asset_feed_spec(self, adset_id: str, max_ads_scan: int = 20) -> dict[str, Any]:  # noqa: ARG002
+        def get_multi_destination_creative_overrides(
+            self,
+            adset_id: str,  # noqa: ARG002
+            *,
+            max_ads_scan: int = 20,  # noqa: ARG002
+            expected_call_to_action_type: str | None = None,
+        ) -> dict[str, Any]:
+            assert expected_call_to_action_type == "MESSAGE_PAGE"
             return {
-                "optimization_type": "DOF_MESSAGING_DESTINATION",
-                "call_to_actions": [
-                    {"type": "INSTAGRAM_MESSAGE", "value": {"app_destination": "INSTAGRAM_DIRECT"}},
-                    {"type": "MESSAGE_PAGE", "value": {"app_destination": "MESSENGER"}},
-                ],
+                "asset_feed_spec": {
+                    "optimization_type": "DOF_MESSAGING_DESTINATION",
+                    "call_to_actions": [
+                        {"type": "INSTAGRAM_MESSAGE", "value": {"app_destination": "INSTAGRAM_DIRECT"}},
+                        {"type": "MESSAGE_PAGE", "value": {"app_destination": "MESSENGER"}},
+                    ],
+                    "additional_data": {"seed": True},
+                },
+                "degrees_of_freedom_spec": {
+                    "creative_features_spec": {
+                        "media_order": {"enroll_status": "OPT_IN"},
+                        "standard_enhancements": {"enroll_status": "OPT_IN"},
+                    }
+                },
+                "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
+                "instagram_user_id": "17841478128229539",
+                "call_to_action_type": "MESSAGE_PAGE",
             }
 
         def find_reusable_creative_id_by_story_ids(
@@ -837,10 +876,19 @@ def test_existing_mode_image_post_uses_message_page_cta_in_multi_destination_ads
                 "asset_feed_spec": {
                     "optimization_type": "DOF_MESSAGING_DESTINATION",
                     "call_to_actions": [
-                        {"type": "MESSAGE_PAGE", "value": {"app_destination": "MESSENGER"}},
                         {"type": "INSTAGRAM_MESSAGE", "value": {"app_destination": "INSTAGRAM_DIRECT"}},
+                        {"type": "MESSAGE_PAGE", "value": {"app_destination": "MESSENGER"}},
                     ],
+                    "additional_data": {"seed": True},
                 },
+                "degrees_of_freedom_spec": {
+                    "creative_features_spec": {
+                        "media_order": {"enroll_status": "OPT_IN"},
+                        "standard_enhancements": {"enroll_status": "OPT_IN"},
+                    }
+                },
+                "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
+                "instagram_user_id": "17841478128229539",
                 "call_to_action_type": "MESSAGE_PAGE",
             },
         )
@@ -1326,11 +1374,46 @@ def test_existing_mode_vxv_image_retry_preserves_message_page_cta(monkeypatch) -
                 }
             ]
 
-        def get_multi_destination_asset_feed_spec(self, adset_id: str, max_ads_scan: int = 20) -> dict[str, Any]:  # noqa: ARG002
-            return dict(self.adset_spec)
+        def get_multi_destination_creative_overrides(
+            self,
+            adset_id: str,  # noqa: ARG002
+            *,
+            max_ads_scan: int = 20,  # noqa: ARG002
+            expected_call_to_action_type: str | None = None,
+        ) -> dict[str, Any]:
+            assert expected_call_to_action_type == "MESSAGE_PAGE"
+            return {
+                "asset_feed_spec": dict(self.adset_spec),
+                "degrees_of_freedom_spec": {
+                    "creative_features_spec": {
+                        "media_order": {"enroll_status": "OPT_IN"},
+                        "standard_enhancements": {"enroll_status": "OPT_IN"},
+                    }
+                },
+                "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
+                "instagram_user_id": "17841478128229539",
+                "call_to_action_type": "MESSAGE_PAGE",
+            }
 
-        def get_account_multi_destination_asset_feed_spec(self, max_ads_scan: int = 200) -> dict[str, Any]:  # noqa: ARG002
-            return dict(self.account_spec)
+        def get_account_multi_destination_creative_overrides(
+            self,
+            *,
+            max_ads_scan: int = 200,  # noqa: ARG002
+            expected_call_to_action_type: str | None = None,
+        ) -> dict[str, Any]:
+            assert expected_call_to_action_type == "MESSAGE_PAGE"
+            return {
+                "asset_feed_spec": dict(self.account_spec),
+                "degrees_of_freedom_spec": {
+                    "creative_features_spec": {
+                        "media_order": {"enroll_status": "OPT_IN"},
+                        "standard_enhancements": {"enroll_status": "OPT_IN"},
+                    }
+                },
+                "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
+                "instagram_user_id": "17841478128229539",
+                "call_to_action_type": "MESSAGE_PAGE",
+            }
 
         def create_ad_creative(
             self,
@@ -1412,14 +1495,30 @@ def test_existing_mode_vxv_image_retry_preserves_message_page_cta(monkeypatch) -
                 "optimization_type": "DOF_MESSAGING_DESTINATION",
                 "source": "adset",
                 "call_to_actions": [
-                    {"type": "MESSAGE_PAGE"},
                     {"type": "INSTAGRAM_MESSAGE"},
+                    {"type": "MESSAGE_PAGE"},
                 ],
             },
+            "degrees_of_freedom_spec": {
+                "creative_features_spec": {
+                    "media_order": {"enroll_status": "OPT_IN"},
+                    "standard_enhancements": {"enroll_status": "OPT_IN"},
+                }
+            },
+            "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
+            "instagram_user_id": "17841478128229539",
             "call_to_action_type": "MESSAGE_PAGE",
         },
         {
             "asset_feed_spec": meta.account_spec,
+            "degrees_of_freedom_spec": {
+                "creative_features_spec": {
+                    "media_order": {"enroll_status": "OPT_IN"},
+                    "standard_enhancements": {"enroll_status": "OPT_IN"},
+                }
+            },
+            "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
+            "instagram_user_id": "17841478128229539",
             "call_to_action_type": "MESSAGE_PAGE",
         },
     ]

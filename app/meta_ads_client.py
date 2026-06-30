@@ -888,61 +888,72 @@ class MetaAdsClient:
         return adsets
 
     def get_multi_destination_asset_feed_spec(self, adset_id: str, max_ads_scan: int = 20) -> dict[str, Any]:
-        normalized_adset_id = str(adset_id).strip()
-        if not normalized_adset_id:
-            raise ValidationError("Thiếu adset_id để lấy cấu hình đa đích.")
-
-        payload = self._request(
-            "GET",
-            f"/{normalized_adset_id}/ads",
-            params={
-                "fields": "id,creative{id},updated_time,effective_status,status",
-                "limit": max(1, int(max_ads_scan)),
-            },
-        )
-        ads = payload.get("data", [])
-        if not isinstance(ads, list):
-            ads = []
-
-        creatives: list[dict[str, str]] = []
-        for item in ads:
-            if not isinstance(item, dict):
-                continue
-            creative = item.get("creative", {}) if isinstance(item.get("creative"), dict) else {}
-            creative_id = str(creative.get("id", "")).strip()
-            if not creative_id:
-                continue
-            creatives.append(
-                {
-                    "creative_id": creative_id,
-                    "updated_time": str(item.get("updated_time", "")).strip(),
-                }
-            )
-        creatives.sort(
-            key=lambda row: self._parse_meta_datetime(row.get("updated_time", "")),
-            reverse=True,
-        )
-
-        for row in creatives:
-            creative_id = row["creative_id"]
-            creative_payload = self._request(
-                "GET",
-                f"/{creative_id}",
-                params={"fields": "asset_feed_spec"},
-            )
-            asset_feed_spec = creative_payload.get("asset_feed_spec")
-            if isinstance(asset_feed_spec, dict) and asset_feed_spec:
-                return asset_feed_spec
-
+        overrides = self.get_multi_destination_creative_overrides(adset_id, max_ads_scan=max_ads_scan)
+        asset_feed_spec = overrides.get("asset_feed_spec")
+        if isinstance(asset_feed_spec, dict) and asset_feed_spec:
+            return asset_feed_spec
         raise ValidationError(
             "Không tìm thấy asset_feed_spec từ ads hiện có trong adset đa đích. "
             "Anh tạo trước 1 ads thủ công trong adset này rồi chạy lại giúp em."
         )
 
+    def get_multi_destination_creative_overrides(
+        self,
+        adset_id: str,
+        *,
+        max_ads_scan: int = 20,
+        expected_call_to_action_type: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_adset_id = str(adset_id).strip()
+        if not normalized_adset_id:
+            raise ValidationError("Thiếu adset_id để lấy mẫu creative đa đích.")
+        return self._find_multi_destination_creative_overrides(
+            f"/{normalized_adset_id}/ads",
+            max_ads_scan=max_ads_scan,
+            expected_call_to_action_type=expected_call_to_action_type,
+            missing_message=(
+                "Không tìm thấy creative mẫu khỏe từ ads hiện có trong adset đa đích. "
+                "Anh tạo trước 1 ads thủ công trong adset này rồi chạy lại giúp em."
+            ),
+        )
+
     def get_account_multi_destination_asset_feed_spec(self, max_ads_scan: int = 200) -> dict[str, Any]:
+        overrides = self.get_account_multi_destination_creative_overrides(max_ads_scan=max_ads_scan)
+        asset_feed_spec = overrides.get("asset_feed_spec")
+        if isinstance(asset_feed_spec, dict) and asset_feed_spec:
+            return asset_feed_spec
+        raise ValidationError(
+            "Không tìm thấy asset_feed_spec từ ads trong ad account. "
+            "Anh tạo trước 1 ads thủ công có nút nhắn tin rồi chạy lại giúp em."
+        )
+
+    def get_account_multi_destination_creative_overrides(
+        self,
+        *,
+        max_ads_scan: int = 200,
+        expected_call_to_action_type: str | None = None,
+    ) -> dict[str, Any]:
+        return self._find_multi_destination_creative_overrides(
+            f"/{self.ad_account_id}/ads",
+            max_ads_scan=max_ads_scan,
+            expected_call_to_action_type=expected_call_to_action_type,
+            missing_message=(
+                "Không tìm thấy creative mẫu khỏe từ ads trong ad account. "
+                "Anh tạo trước 1 ads thủ công có nút nhắn tin rồi chạy lại giúp em."
+            ),
+        )
+
+    def _find_multi_destination_creative_overrides(
+        self,
+        ads_path: str,
+        *,
+        max_ads_scan: int,
+        expected_call_to_action_type: str | None,
+        missing_message: str,
+    ) -> dict[str, Any]:
         payload = self._request(
             "GET",
-            f"/{self.ad_account_id}/ads",
+            ads_path,
             params={
                 "fields": "id,creative{id},updated_time,effective_status,status",
                 "limit": max(1, int(max_ads_scan)),
@@ -956,6 +967,9 @@ class MetaAdsClient:
         for item in ads:
             if not isinstance(item, dict):
                 continue
+            effective_status = str(item.get("effective_status", "")).strip().upper()
+            if effective_status == "WITH_ISSUES":
+                continue
             creative = item.get("creative", {}) if isinstance(item.get("creative"), dict) else {}
             creative_id = str(creative.get("id", "")).strip()
             if not creative_id:
@@ -966,7 +980,6 @@ class MetaAdsClient:
                     "updated_time": str(item.get("updated_time", "")).strip(),
                 }
             )
-
         creatives.sort(
             key=lambda row: self._parse_meta_datetime(row.get("updated_time", "")),
             reverse=True,
@@ -977,16 +990,36 @@ class MetaAdsClient:
             creative_payload = self._request(
                 "GET",
                 f"/{creative_id}",
-                params={"fields": "asset_feed_spec"},
+                params={
+                    "fields": (
+                        "asset_feed_spec,call_to_action_type,"
+                        "degrees_of_freedom_spec,contextual_multi_ads,"
+                        "instagram_user_id,instagram_actor_id"
+                    )
+                },
             )
+            expected_cta = str(expected_call_to_action_type or "").strip().upper()
+            actual_cta = str(creative_payload.get("call_to_action_type", "")).strip().upper()
+            if expected_cta and actual_cta != expected_cta:
+                continue
             asset_feed_spec = creative_payload.get("asset_feed_spec")
-            if isinstance(asset_feed_spec, dict) and asset_feed_spec:
-                return asset_feed_spec
+            if not isinstance(asset_feed_spec, dict) or not asset_feed_spec:
+                continue
+            overrides: dict[str, Any] = {"asset_feed_spec": asset_feed_spec}
+            if expected_cta:
+                overrides["call_to_action_type"] = actual_cta
+            for field in (
+                "degrees_of_freedom_spec",
+                "contextual_multi_ads",
+                "instagram_user_id",
+                "instagram_actor_id",
+            ):
+                value = creative_payload.get(field)
+                if value not in (None, "", {}, []):
+                    overrides[field] = value
+            return overrides
 
-        raise ValidationError(
-            "Không tìm thấy asset_feed_spec từ ads trong ad account. "
-            "Anh tạo trước 1 ads thủ công có nút nhắn tin rồi chạy lại giúp em."
-        )
+        raise ValidationError(missing_message)
 
     def find_reusable_creative_id_by_story_ids(
         self,
@@ -1314,7 +1347,11 @@ class MetaAdsClient:
             plan.raw.get("creative_payload_overrides", {}),
         )
         if extra_payload_overrides:
-            payload = deep_merge(payload, dict(extra_payload_overrides))
+            normalized_extra_overrides = dict(extra_payload_overrides)
+            for replace_field in ("degrees_of_freedom_spec", "contextual_multi_ads"):
+                if replace_field in normalized_extra_overrides:
+                    payload.pop(replace_field, None)
+            payload = deep_merge(payload, normalized_extra_overrides)
         # Legacy key can cause unstable creative rendering in Ads Manager UI.
         payload.pop("message_template_name", None)
         payload.pop("page_welcome_message_source_creative_id", None)

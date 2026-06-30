@@ -846,15 +846,23 @@ class TelegramAdsBot:
             active_destination_type = requested_destination_type
             destination_fallback_reason = ""
             multi_destination_asset_feed_spec: dict[str, Any] | None = None
+            multi_destination_creative_overrides: dict[str, Any] | None = None
+            force_message_page_cta = self._should_force_message_page_cta_for_post(plan, resolved_post)
 
             if active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER":
                 try:
-                    multi_destination_asset_feed_spec = await asyncio.to_thread(
-                        self.meta.get_account_multi_destination_asset_feed_spec
-                    )
+                    if force_message_page_cta:
+                        multi_destination_creative_overrides = await asyncio.to_thread(
+                            self.meta.get_account_multi_destination_creative_overrides,
+                            expected_call_to_action_type="MESSAGE_PAGE",
+                        )
+                    else:
+                        multi_destination_asset_feed_spec = await asyncio.to_thread(
+                            self.meta.get_account_multi_destination_asset_feed_spec
+                        )
                 except (ValidationError, MetaApiError) as exc:
                     self.logger.warning(
-                        "Khong lay duoc asset_feed_spec tham chieu cho luong len moi: %s",
+                        "Khong lay duoc creative seed/asset_feed_spec tham chieu cho luong len moi: %s",
                         exc,
                     )
 
@@ -867,6 +875,12 @@ class TelegramAdsBot:
                 creative_extra_overrides: dict[str, Any] | None = None
                 if (
                     active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+                    and isinstance(multi_destination_creative_overrides, dict)
+                    and multi_destination_creative_overrides
+                ):
+                    creative_extra_overrides = dict(multi_destination_creative_overrides)
+                elif (
+                    active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
                     and isinstance(multi_destination_asset_feed_spec, dict)
                     and multi_destination_asset_feed_spec
                 ):
@@ -877,7 +891,7 @@ class TelegramAdsBot:
                     }
                 if (
                     active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
-                    and self._should_force_message_page_cta_for_post(active_plan, resolved_post)
+                    and force_message_page_cta
                 ):
                     if creative_extra_overrides is None:
                         creative_extra_overrides = {}
@@ -1235,6 +1249,8 @@ class TelegramAdsBot:
         resolved_post = None
         account_multi_destination_asset_feed_spec: dict[str, Any] | None = None
         account_multi_destination_asset_feed_spec_checked = False
+        account_multi_destination_creative_overrides: dict[str, Any] | None = None
+        account_multi_destination_creative_overrides_checked = False
         instagram_post_access_diagnostics: dict[str, Any] | None = None
         instagram_post_access_diagnostics_checked = False
         reusable_story_creative_id: str | None = None
@@ -1274,6 +1290,7 @@ class TelegramAdsBot:
                 if self._should_force_message_page_cta_for_post(plan, resolved_post)
                 else None
             )
+            force_message_page_cta = expected_reusable_call_to_action_type == "MESSAGE_PAGE"
             ad_name_sku_code_text = "ALL" if str(command.existing_campaign_hint or "").strip() else plan.sku_code_text
             requested_destination_type = "INHERIT_ADSET"
             active_plan = plan
@@ -1308,6 +1325,25 @@ class TelegramAdsBot:
                     )
                     account_multi_destination_asset_feed_spec = None
                 return account_multi_destination_asset_feed_spec
+
+            async def _get_account_creative_overrides_cached() -> dict[str, Any] | None:
+                nonlocal account_multi_destination_creative_overrides
+                nonlocal account_multi_destination_creative_overrides_checked
+                if account_multi_destination_creative_overrides_checked:
+                    return account_multi_destination_creative_overrides
+                account_multi_destination_creative_overrides_checked = True
+                try:
+                    account_multi_destination_creative_overrides = await asyncio.to_thread(
+                        self.meta.get_account_multi_destination_creative_overrides,
+                        expected_call_to_action_type=expected_reusable_call_to_action_type,
+                    )
+                except (ValidationError, MetaApiError) as exc:
+                    self.logger.warning(
+                        "Khong lay duoc creative seed cap account cho luong len cu: %s",
+                        exc,
+                    )
+                    account_multi_destination_creative_overrides = None
+                return account_multi_destination_creative_overrides
 
             async def _get_instagram_post_access_diagnostics_cached() -> dict[str, Any]:
                 nonlocal instagram_post_access_diagnostics
@@ -1508,27 +1544,47 @@ class TelegramAdsBot:
                     adset_destination_type = "MESSENGER"
                 creative_extra_overrides: dict[str, Any] = {}
                 if adset_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER":
-                    try:
-                        asset_feed_spec = await asyncio.to_thread(
-                            self.meta.get_multi_destination_asset_feed_spec,
-                            adset_id,
-                        )
-                        creative_extra_overrides["asset_feed_spec"] = self._with_message_page_cta_preferred(
-                            asset_feed_spec
-                        )
-                    except (ValidationError, MetaApiError) as exc:
-                        self.logger.warning(
-                            "Khong lay duoc asset_feed_spec tu adset %s: %s",
-                            adset_id,
-                            exc,
-                        )
+                    if force_message_page_cta:
+                        try:
+                            seed_overrides = await asyncio.to_thread(
+                                self.meta.get_multi_destination_creative_overrides,
+                                adset_id,
+                                expected_call_to_action_type="MESSAGE_PAGE",
+                            )
+                            creative_extra_overrides.update(seed_overrides)
+                        except (ValidationError, MetaApiError) as exc:
+                            self.logger.warning(
+                                "Khong lay duoc creative seed MESSAGE_PAGE tu adset %s: %s",
+                                adset_id,
+                                exc,
+                            )
+                    if "asset_feed_spec" not in creative_extra_overrides:
+                        if force_message_page_cta:
+                            account_seed_overrides = await _get_account_creative_overrides_cached()
+                            if isinstance(account_seed_overrides, dict) and account_seed_overrides:
+                                creative_extra_overrides.update(account_seed_overrides)
+                        else:
+                            try:
+                                asset_feed_spec = await asyncio.to_thread(
+                                    self.meta.get_multi_destination_asset_feed_spec,
+                                    adset_id,
+                                )
+                                creative_extra_overrides["asset_feed_spec"] = self._with_message_page_cta_preferred(
+                                    asset_feed_spec
+                                )
+                            except (ValidationError, MetaApiError) as exc:
+                                self.logger.warning(
+                                    "Khong lay duoc asset_feed_spec tu adset %s: %s",
+                                    adset_id,
+                                    exc,
+                                )
                     if "asset_feed_spec" not in creative_extra_overrides:
                         account_asset_feed_spec = await _get_account_asset_feed_spec_cached()
                         if isinstance(account_asset_feed_spec, dict) and account_asset_feed_spec:
                             creative_extra_overrides["asset_feed_spec"] = self._with_message_page_cta_preferred(
                                 account_asset_feed_spec
                             )
-                    if self._should_force_message_page_cta_for_post(active_plan, resolved_post):
+                    if force_message_page_cta:
                         creative_extra_overrides["call_to_action_type"] = "MESSAGE_PAGE"
                 slot = AudienceSlot(
                     key=f"existing_{index}",
@@ -1754,7 +1810,16 @@ class TelegramAdsBot:
                         adset_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
                         and self.meta.is_auto_destination_error(error_text)
                     ):
-                        account_asset_feed_spec = await _get_account_asset_feed_spec_cached()
+                        account_seed_overrides = (
+                            await _get_account_creative_overrides_cached()
+                            if force_message_page_cta
+                            else None
+                        )
+                        account_asset_feed_spec = (
+                            account_seed_overrides.get("asset_feed_spec")
+                            if isinstance(account_seed_overrides, dict)
+                            else await _get_account_asset_feed_spec_cached()
+                        )
                         can_retry_with_account_spec = (
                             isinstance(account_asset_feed_spec, dict)
                             and bool(account_asset_feed_spec)
@@ -1769,7 +1834,10 @@ class TelegramAdsBot:
                                 await asyncio.to_thread(self.rollback.rollback, None, [], [], [creative_id])
                                 creative_id = None
                             retry_overrides = dict(creative_extra_overrides)
-                            retry_overrides["asset_feed_spec"] = account_asset_feed_spec
+                            if isinstance(account_seed_overrides, dict) and account_seed_overrides:
+                                retry_overrides.update(account_seed_overrides)
+                            else:
+                                retry_overrides["asset_feed_spec"] = account_asset_feed_spec
                             self.logger.warning(
                                 "Retry len cu voi asset_feed_spec cap account cho adset %s do loi auto-destination: %s",
                                 adset_id,

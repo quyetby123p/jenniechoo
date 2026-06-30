@@ -629,6 +629,73 @@ def test_create_ad_creative_applies_extra_overrides() -> None:
     assert captured["asset_feed_spec"]["optimization_type"] == "DOF_MESSAGING_DESTINATION"
 
 
+def test_create_ad_creative_replaces_dof_with_seed_override() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+    captured: dict[str, object] = {}
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = params, access_token
+        assert method == "POST"
+        assert path == "/act_1/adcreatives"
+        if data:
+            captured.update(data)
+        return {"id": "creative_123"}
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    plan = PlannedCampaign(
+        version=1,
+        campaign_name="ADS:QUYET|MK:ThaiLan|VXV011",
+        sku_code_text="VXV011",
+        media_label="Anh",
+        post_url="https://www.facebook.com/posts/1",
+        post_fingerprint="abc",
+        budget_daily_vnd=300000,
+        objective="OUTCOME_ENGAGEMENT",
+        conversion_location="MESSAGING_DESTINATION",
+        result_goal="MAXIMIZE_PURCHASES_VIA_MESSAGE",
+        message_template_name="Mess Cơ bản",
+        raw={"creative_payload_overrides": {}},
+    )
+    slot = AudienceSlot(
+        key="thoi_trang_saved_audience_id",
+        label="Thoi trang",
+        suffix="TS",
+        saved_audience_id="111",
+        adset_name="A",
+        ad_name="B",
+    )
+    resolved = ResolvedPost(
+        post_id="123",
+        page_id="61581440236157",
+        permalink_url="https://www.facebook.com/posts/123",
+        object_story_id="61581440236157_123",
+    )
+    seed_dof = {
+        "creative_features_spec": {
+            "media_order": {"enroll_status": "OPT_IN"},
+            "standard_enhancements": {"enroll_status": "OPT_IN"},
+        }
+    }
+
+    creative_id = client.create_ad_creative(
+        plan=plan,
+        slot=slot,
+        resolved_post=resolved,
+        destination_type_override="MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+        extra_payload_overrides={
+            "degrees_of_freedom_spec": seed_dof,
+            "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
+            "instagram_user_id": "17841478128229539",
+        },
+    )
+
+    assert creative_id == "creative_123"
+    assert captured["degrees_of_freedom_spec"] == seed_dof
+    assert "product_extensions" not in captured["degrees_of_freedom_spec"]["creative_features_spec"]
+    assert captured["instagram_user_id"] == "17841478128229539"
+
+
 def test_create_ad_includes_dof_for_auto_destination() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
     captured: dict[str, object] = {}
@@ -914,6 +981,80 @@ def test_get_multi_destination_asset_feed_spec_success() -> None:
 
     spec = client.get_multi_destination_asset_feed_spec("adset_1")
     assert spec["optimization_type"] == "DOF_MESSAGING_DESTINATION"
+
+
+def test_get_multi_destination_creative_overrides_uses_healthy_message_page_seed() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = data, access_token
+        assert method == "GET"
+        if path == "/adset_1/ads":
+            return {
+                "data": [
+                    {
+                        "id": "bad_newer",
+                        "effective_status": "WITH_ISSUES",
+                        "updated_time": "2026-06-30T11:45:00+0700",
+                        "creative": {"id": "cr_bad"},
+                    },
+                    {
+                        "id": "good_seed",
+                        "effective_status": "ACTIVE",
+                        "updated_time": "2026-06-30T11:34:56+0700",
+                        "creative": {"id": "cr_good"},
+                    },
+                ]
+            }
+        if path == "/cr_good":
+            assert "instagram_user_id" in params["fields"]
+            return {
+                "call_to_action_type": "MESSAGE_PAGE",
+                "asset_feed_spec": {
+                    "optimization_type": "DOF_MESSAGING_DESTINATION",
+                    "call_to_actions": [
+                        {"type": "INSTAGRAM_MESSAGE"},
+                        {"type": "MESSAGE_PAGE"},
+                    ],
+                    "additional_data": {"seed": True},
+                },
+                "degrees_of_freedom_spec": {
+                    "creative_features_spec": {
+                        "media_order": {"enroll_status": "OPT_IN"},
+                        "standard_enhancements": {"enroll_status": "OPT_IN"},
+                    }
+                },
+                "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
+                "instagram_user_id": "17841478128229539",
+            }
+        raise AssertionError(f"Unexpected path: {path}")
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    overrides = client.get_multi_destination_creative_overrides(
+        "adset_1",
+        expected_call_to_action_type="MESSAGE_PAGE",
+    )
+
+    assert overrides == {
+        "asset_feed_spec": {
+            "optimization_type": "DOF_MESSAGING_DESTINATION",
+            "call_to_actions": [
+                {"type": "INSTAGRAM_MESSAGE"},
+                {"type": "MESSAGE_PAGE"},
+            ],
+            "additional_data": {"seed": True},
+        },
+        "call_to_action_type": "MESSAGE_PAGE",
+        "degrees_of_freedom_spec": {
+            "creative_features_spec": {
+                "media_order": {"enroll_status": "OPT_IN"},
+                "standard_enhancements": {"enroll_status": "OPT_IN"},
+            }
+        },
+        "contextual_multi_ads": {"enroll_status": "OPT_OUT"},
+        "instagram_user_id": "17841478128229539",
+    }
 
 
 def test_get_multi_destination_asset_feed_spec_raises_when_missing() -> None:
