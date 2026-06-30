@@ -995,6 +995,7 @@ class MetaAdsClient:
         adset_id: str | None = None,
         max_ads_scan: int = 800,
         expected_page_welcome_message: Any | None = None,
+        expected_call_to_action_type: str | None = None,
     ) -> str | None:
         normalized_ids: set[str] = {
             str(item).strip()
@@ -1003,6 +1004,7 @@ class MetaAdsClient:
         }
         if not normalized_ids:
             return None
+        expected_cta = str(expected_call_to_action_type or "").strip().upper()
 
         if adset_id and str(adset_id).strip():
             next_path = f"/{str(adset_id).strip()}/ads"
@@ -1011,7 +1013,10 @@ class MetaAdsClient:
         next_params: dict[str, Any] | None = {
             "fields": (
                 "id,updated_time,"
-                "creative{id,object_story_id,effective_object_story_id,page_welcome_message}"
+                "creative{"
+                "id,object_story_id,effective_object_story_id,"
+                "page_welcome_message,call_to_action_type"
+                "}"
             ),
             "limit": 200,
         }
@@ -1047,6 +1052,10 @@ class MetaAdsClient:
                     expected_page_welcome_message,
                 ):
                     continue
+                if expected_cta:
+                    actual_cta = str(creative.get("call_to_action_type", "")).strip().upper()
+                    if actual_cta != expected_cta:
+                        continue
                 candidates.append(
                     {
                         "creative_id": creative_id,
@@ -1075,6 +1084,7 @@ class MetaAdsClient:
         adset_id: str | None = None,
         max_ads_scan: int = 800,
         expected_page_welcome_message: Any | None = None,
+        expected_call_to_action_type: str | None = None,
     ) -> dict[str, str] | None:
         normalized_ids: set[str] = {
             str(item).strip()
@@ -1083,6 +1093,7 @@ class MetaAdsClient:
         }
         if not normalized_ids:
             return None
+        expected_cta = str(expected_call_to_action_type or "").strip().upper()
 
         if adset_id and str(adset_id).strip():
             next_path = f"/{str(adset_id).strip()}/ads"
@@ -1091,7 +1102,10 @@ class MetaAdsClient:
         next_params: dict[str, Any] | None = {
             "fields": (
                 "id,name,status,effective_status,updated_time,"
-                "creative{id,object_story_id,effective_object_story_id,page_welcome_message}"
+                "creative{"
+                "id,object_story_id,effective_object_story_id,"
+                "page_welcome_message,call_to_action_type"
+                "}"
             ),
             "limit": 200,
         }
@@ -1124,6 +1138,10 @@ class MetaAdsClient:
                     expected_page_welcome_message,
                 ):
                     continue
+                if expected_cta:
+                    actual_cta = str(creative.get("call_to_action_type", "")).strip().upper()
+                    if actual_cta != expected_cta:
+                        continue
                 candidates.append(
                     {
                         "id": str(item.get("id", "")).strip(),
@@ -1132,6 +1150,7 @@ class MetaAdsClient:
                         "effective_status": str(item.get("effective_status", "")).strip(),
                         "updated_time": str(item.get("updated_time", "")).strip(),
                         "creative_id": str(creative.get("id", "")).strip(),
+                        "call_to_action_type": str(creative.get("call_to_action_type", "")).strip(),
                         "object_story_id": object_story_id,
                         "effective_object_story_id": effective_object_story_id,
                     }

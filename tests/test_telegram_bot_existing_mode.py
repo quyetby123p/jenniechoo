@@ -177,6 +177,7 @@ class FakeMeta:
         adset_id: str | None = None,  # noqa: ARG002
         max_ads_scan: int = 800,  # noqa: ARG002
         expected_page_welcome_message=None,  # noqa: ANN001, ARG002
+        expected_call_to_action_type: str | None = None,  # noqa: ARG002
     ) -> dict[str, str] | None:
         return None
 
@@ -187,6 +188,7 @@ class FakeMeta:
         adset_id: str | None = None,  # noqa: ARG002
         max_ads_scan: int = 800,  # noqa: ARG002
         expected_page_welcome_message=None,  # noqa: ANN001, ARG002
+        expected_call_to_action_type: str | None = None,  # noqa: ARG002
     ) -> str | None:
         return None
 
@@ -720,6 +722,7 @@ def test_existing_mode_image_post_uses_message_page_cta_in_multi_destination_ads
             super().__init__()
             self.created_creatives: list[tuple[str | None, dict[str, Any] | None]] = []
             self.created_ads: list[tuple[str, str | None]] = []
+            self.reusable_expected_ctas: list[str | None] = []
 
         def resolve_post(self, post_url: str) -> ResolvedPost:
             return replace(
@@ -746,6 +749,18 @@ def test_existing_mode_image_post_uses_message_page_cta_in_multi_destination_ads
                     {"type": "MESSAGE_PAGE", "value": {"app_destination": "MESSENGER"}},
                 ],
             }
+
+        def find_reusable_creative_id_by_story_ids(
+            self,
+            story_ids: list[str],  # noqa: ARG002
+            *,
+            adset_id: str | None = None,  # noqa: ARG002
+            max_ads_scan: int = 800,  # noqa: ARG002
+            expected_page_welcome_message=None,  # noqa: ANN001, ARG002
+            expected_call_to_action_type: str | None = None,
+        ) -> str | None:
+            self.reusable_expected_ctas.append(expected_call_to_action_type)
+            return None
 
         def create_ad_creative(
             self,
@@ -831,6 +846,7 @@ def test_existing_mode_image_post_uses_message_page_cta_in_multi_destination_ads
         )
     ]
     assert meta.created_ads == [("old_multi_adset_1", "MESSAGING_INSTAGRAM_DIRECT_MESSENGER")]
+    assert meta.reusable_expected_ctas == ["MESSAGE_PAGE"]
     payload = storage.saved_jobs[-1][1]
     assert payload["publish_scope"] == "ads_only"
     assert payload["active_destination_type"] == "INHERIT_ADSET"
@@ -861,6 +877,7 @@ def test_existing_mode_reuses_successful_new_campaign_creative_for_same_reel() -
             adset_id: str | None = None,  # noqa: ARG002
             max_ads_scan: int = 800,  # noqa: ARG002
             expected_page_welcome_message=None,  # noqa: ANN001
+            expected_call_to_action_type: str | None = None,  # noqa: ARG002
         ) -> str | None:
             self.reuse_lookups.append(list(story_ids))
             assert isinstance(expected_page_welcome_message, dict)
@@ -1269,6 +1286,147 @@ def test_existing_mode_retries_with_account_asset_feed_spec_after_objective_mism
     assert storage.saved_jobs[-1][1]["ad_ids"] == ["ad_2"]
 
 
+def test_existing_mode_vxv_image_retry_preserves_message_page_cta(monkeypatch) -> None:  # noqa: ANN001
+    class RetryVayxaImageMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.create_ad_calls = 0
+            self.creative_overrides: list[dict[str, Any] | None] = []
+            self.adset_spec = {
+                "optimization_type": "DOF_MESSAGING_DESTINATION",
+                "source": "adset",
+                "call_to_actions": [
+                    {"type": "INSTAGRAM_MESSAGE"},
+                    {"type": "MESSAGE_PAGE"},
+                ],
+            }
+            self.account_spec = {
+                "optimization_type": "DOF_MESSAGING_DESTINATION",
+                "source": "account",
+                "call_to_actions": [
+                    {"type": "INSTAGRAM_MESSAGE"},
+                    {"type": "MESSAGE_PAGE"},
+                ],
+            }
+
+        def resolve_post(self, post_url: str) -> ResolvedPost:
+            return replace(
+                super().resolve_post(post_url),
+                message_text="Softness #VXV011",
+                media_label="Anh",
+            )
+
+        def list_eligible_adsets(self, campaign_id: str, max_count: int) -> list[dict[str, str]]:  # noqa: ARG002
+            return [
+                {
+                    "id": "old_multi_adset_1",
+                    "name": "ADS:QUYET|MK:ThaiLan|VXV011|Codex - Thời trang",
+                    "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                    "effective_status": "ACTIVE",
+                }
+            ]
+
+        def get_multi_destination_asset_feed_spec(self, adset_id: str, max_ads_scan: int = 20) -> dict[str, Any]:  # noqa: ARG002
+            return dict(self.adset_spec)
+
+        def get_account_multi_destination_asset_feed_spec(self, max_ads_scan: int = 200) -> dict[str, Any]:  # noqa: ARG002
+            return dict(self.account_spec)
+
+        def create_ad_creative(
+            self,
+            plan,  # noqa: ANN001
+            slot,  # noqa: ANN001
+            resolved_post,  # noqa: ANN001
+            destination_type_override=None,  # noqa: ANN001
+            extra_payload_overrides=None,  # noqa: ANN001
+        ) -> str:
+            _ = plan, slot, resolved_post, destination_type_override
+            self.creative_overrides.append(extra_payload_overrides)
+            return f"cr_{len(self.creative_overrides)}"
+
+        def create_ad(
+            self,
+            plan,  # noqa: ANN001
+            slot,  # noqa: ANN001
+            adset_id: str,  # noqa: ARG002
+            creative_id: str,  # noqa: ARG002
+            destination_type_override=None,  # noqa: ANN001
+        ) -> str:
+            _ = plan, slot, destination_type_override
+            self.create_ad_calls += 1
+            if self.create_ad_calls == 1:
+                raise MetaApiError(
+                    "Meta API loi (400): Nội dung quảng cáo không tương thích với mục tiêu của chiến dịch chứa quảng cáo đó."
+                )
+            return "ad_vxv_retry"
+
+    def fake_load_json(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        path_text = str(path)
+        if "audiences" in path_text:
+            return {
+                "thoi_trang_saved_audience_id": "aud_thoi_trang",
+                "du_lich_saved_audience_id": "aud_du_lich",
+                "tiec_saved_audience_id": "aud_tiec",
+            }
+        if "message_templates" in path_text:
+            return {
+                "templates": {
+                    "Mess Cơ bản": {
+                        "creative_patch": {"page_welcome_message": {"template_id": "962707759488898"}},
+                        "adset_patch": {},
+                    }
+                }
+            }
+        return {
+            "sku_prefix": "VXV",
+            "message_template_name": "Mess Cơ bản",
+            "adset_payload_overrides": {"destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"},
+        }
+
+    monkeypatch.setattr(telegram_bot_module, "load_json", fake_load_json)
+    meta = RetryVayxaImageMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/posts/122187961682934207",
+        budget_daily_vnd=0,
+        use_existing_campaign=True,
+        manual_sku_keywords=["VXV011"],
+    )
+    asyncio.run(
+        bot._create_existing_campaign_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_vxv011_retry",
+            version=3,
+            selected_campaign={"id": "camp_vxv011", "name": "ADS:QUYET|MK:ThaiLan|VXV011|Codex"},
+            campaign_keywords=["VXV011"],
+        )
+    )
+
+    assert meta.creative_overrides == [
+        {
+            "asset_feed_spec": {
+                "optimization_type": "DOF_MESSAGING_DESTINATION",
+                "source": "adset",
+                "call_to_actions": [
+                    {"type": "MESSAGE_PAGE"},
+                    {"type": "INSTAGRAM_MESSAGE"},
+                ],
+            },
+            "call_to_action_type": "MESSAGE_PAGE",
+        },
+        {
+            "asset_feed_spec": meta.account_spec,
+            "call_to_action_type": "MESSAGE_PAGE",
+        },
+    ]
+    assert rollback.calls == [(None, [], [], ["cr_1"])]
+    assert storage.saved_jobs[-1][1]["ad_ids"] == ["ad_vxv_retry"]
+
+
 def test_existing_mode_fallbacks_to_messenger_after_direct_objective_mismatch() -> None:
     class MessengerFallbackMeta(FakeMeta):
         def __init__(self) -> None:
@@ -1428,6 +1586,7 @@ def test_existing_mode_messenger_objective_mismatch_reuses_approved_creative_whe
             adset_id: str | None = None,  # noqa: ARG002
             max_ads_scan: int = 800,  # noqa: ARG002
             expected_page_welcome_message=None,  # noqa: ANN001, ARG002
+            expected_call_to_action_type: str | None = None,  # noqa: ARG002
         ) -> dict[str, str] | None:
             return {
                 "id": "ad_manual_seed",
@@ -1920,6 +2079,7 @@ def test_existing_mode_fallbacks_to_duplicate_source_ad_when_messenger_retry_sti
             adset_id: str | None = None,  # noqa: ARG002
             max_ads_scan: int = 800,  # noqa: ARG002
             expected_page_welcome_message=None,  # noqa: ANN001, ARG002
+            expected_call_to_action_type: str | None = None,  # noqa: ARG002
         ) -> dict[str, str] | None:
             return {
                 "id": "120249992082570728",
@@ -2008,6 +2168,7 @@ def test_existing_mode_creative_post_not_advertisable_uses_duplicate_fallback() 
             adset_id: str | None = None,  # noqa: ARG002
             max_ads_scan: int = 800,  # noqa: ARG002
             expected_page_welcome_message=None,  # noqa: ANN001, ARG002
+            expected_call_to_action_type: str | None = None,  # noqa: ARG002
         ) -> dict[str, str] | None:
             return {
                 "id": "120249992082570728",
@@ -2340,6 +2501,7 @@ def test_existing_mode_post_not_advertisable_shows_specific_guidance_and_rollbac
             adset_id: str | None = None,  # noqa: ARG002
             max_ads_scan: int = 800,  # noqa: ARG002
             expected_page_welcome_message=None,  # noqa: ANN001, ARG002
+            expected_call_to_action_type: str | None = None,  # noqa: ARG002
         ) -> dict[str, str] | None:
             return {
                 "id": "120249992082570728",

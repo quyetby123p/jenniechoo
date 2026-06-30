@@ -240,6 +240,49 @@ def test_find_reusable_creative_id_by_story_ids_filters_message_template_mismatc
     assert creative_id == "cr_good"
 
 
+def test_find_reusable_creative_id_by_story_ids_filters_cta_mismatch() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = data, access_token
+        assert method == "GET"
+        assert path == "/act_1/ads"
+        assert "call_to_action_type" in params["fields"]
+        return {
+            "data": [
+                {
+                    "id": "ad_bad_cta",
+                    "updated_time": "2026-06-30T11:28:56+0700",
+                    "creative": {
+                        "id": "cr_bad_cta",
+                        "object_story_id": "649228828282105_122187967838934207",
+                        "effective_object_story_id": "649228828282105_122187967838934207",
+                        "call_to_action_type": "INSTAGRAM_MESSAGE",
+                    },
+                },
+                {
+                    "id": "ad_good_cta",
+                    "updated_time": "2026-06-30T11:20:00+0700",
+                    "creative": {
+                        "id": "cr_good_cta",
+                        "object_story_id": "649228828282105_122187967838934207",
+                        "effective_object_story_id": "649228828282105_122187967838934207",
+                        "call_to_action_type": "MESSAGE_PAGE",
+                    },
+                },
+            ]
+        }
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    creative_id = client.find_reusable_creative_id_by_story_ids(
+        ["649228828282105_122187967838934207"],
+        expected_call_to_action_type="MESSAGE_PAGE",
+    )
+
+    assert creative_id == "cr_good_cta"
+
+
 def test_find_latest_ad_by_story_ids_filters_message_template_mismatch() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
     expected_welcome = {
@@ -301,6 +344,59 @@ def test_find_latest_ad_by_story_ids_filters_message_template_mismatch() -> None
     assert matched is not None
     assert matched["id"] == "ad_good"
     assert matched["creative_id"] == "cr_good"
+
+
+def test_find_latest_ad_by_story_ids_filters_cta_mismatch() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = data, access_token
+        assert method == "GET"
+        assert path == "/adset_1/ads"
+        assert "call_to_action_type" in params["fields"]
+        return {
+            "data": [
+                {
+                    "id": "ad_bad_cta",
+                    "name": "Bad CTA",
+                    "status": "ACTIVE",
+                    "effective_status": "WITH_ISSUES",
+                    "updated_time": "2026-06-30T11:28:56+0700",
+                    "creative": {
+                        "id": "cr_bad_cta",
+                        "object_story_id": "649228828282105_122187967838934207",
+                        "effective_object_story_id": "649228828282105_122187967838934207",
+                        "call_to_action_type": "INSTAGRAM_MESSAGE",
+                    },
+                },
+                {
+                    "id": "ad_good_cta",
+                    "name": "Good CTA",
+                    "status": "ACTIVE",
+                    "effective_status": "ACTIVE",
+                    "updated_time": "2026-06-30T11:20:00+0700",
+                    "creative": {
+                        "id": "cr_good_cta",
+                        "object_story_id": "649228828282105_122187967838934207",
+                        "effective_object_story_id": "649228828282105_122187967838934207",
+                        "call_to_action_type": "MESSAGE_PAGE",
+                    },
+                },
+            ]
+        }
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    matched = client.find_latest_ad_by_story_ids(
+        ["649228828282105_122187967838934207"],
+        adset_id="adset_1",
+        expected_call_to_action_type="MESSAGE_PAGE",
+    )
+
+    assert matched is not None
+    assert matched["id"] == "ad_good_cta"
+    assert matched["creative_id"] == "cr_good_cta"
+    assert matched["call_to_action_type"] == "MESSAGE_PAGE"
 
 
 def test_create_campaign_normalizes_legacy_objective_in_override() -> None:

@@ -1269,6 +1269,11 @@ class TelegramAdsBot:
                 if isinstance(creative_payload_overrides, dict)
                 else None
             )
+            expected_reusable_call_to_action_type = (
+                "MESSAGE_PAGE"
+                if self._should_force_message_page_cta_for_post(plan, resolved_post)
+                else None
+            )
             ad_name_sku_code_text = "ALL" if str(command.existing_campaign_hint or "").strip() else plan.sku_code_text
             requested_destination_type = "INHERIT_ADSET"
             active_plan = plan
@@ -1343,6 +1348,7 @@ class TelegramAdsBot:
                         story_id_candidates,
                         max_ads_scan=1600,
                         expected_page_welcome_message=expected_page_welcome_message,
+                        expected_call_to_action_type=expected_reusable_call_to_action_type,
                     )
                 except (ValidationError, MetaApiError) as exc:
                     self.logger.warning(
@@ -1378,6 +1384,7 @@ class TelegramAdsBot:
                             adset_id=lookup_adset_id,
                             max_ads_scan=1200,
                             expected_page_welcome_message=expected_page_welcome_message,
+                            expected_call_to_action_type=expected_reusable_call_to_action_type,
                         )
                     except Exception as lookup_exc:  # noqa: BLE001
                         self.logger.warning(
@@ -1761,7 +1768,8 @@ class TelegramAdsBot:
                             if creative_id:
                                 await asyncio.to_thread(self.rollback.rollback, None, [], [], [creative_id])
                                 creative_id = None
-                            retry_overrides = {"asset_feed_spec": account_asset_feed_spec}
+                            retry_overrides = dict(creative_extra_overrides)
+                            retry_overrides["asset_feed_spec"] = account_asset_feed_spec
                             self.logger.warning(
                                 "Retry len cu voi asset_feed_spec cap account cho adset %s do loi auto-destination: %s",
                                 adset_id,
