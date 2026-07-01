@@ -1550,6 +1550,33 @@ class TelegramAdsBot:
                 )
                 return copied_ad_id
 
+            if configured_existing_destination_type != "MESSENGER":
+                has_multi_destination_adsets = any(
+                    str(item.get("destination_type", "")).strip().upper()
+                    == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+                    for item in adsets
+                    if isinstance(item, dict)
+                )
+                if has_multi_destination_adsets and not await _get_reusable_story_creative_cached():
+                    diagnostics = await _get_instagram_post_access_diagnostics_cached()
+                    if (
+                        diagnostics.get("is_instagram_origin")
+                        and not diagnostics.get("has_instagram_media_access")
+                    ):
+                        configured_existing_destination_type = "MESSENGER"
+                        active_plan = self._plan_with_destination_override(active_plan, "MESSENGER")
+                        active_destination_type = "MESSENGER"
+                        destination_fallback_reason = (
+                            "Reel này là bài Instagram liên kết; token cloud chưa đọc được IG media, "
+                            "nên bot tạo adset Messenger-only mới trong campaign cũ."
+                        )
+                        self.logger.warning(
+                            "Tu dong tao adset Messenger-only trong campaign cu %s vi post %s la IG-origin "
+                            "va khong co creative seed cung reel de tai su dung.",
+                            campaign_id,
+                            resolved_post.object_story_id,
+                        )
+
             for index, adset in enumerate(adsets, start=1):
                 adset_id = str(adset.get("id", "")).strip()
                 if not adset_id:
