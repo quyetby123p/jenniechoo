@@ -2118,15 +2118,92 @@ class TelegramAdsBot:
                                 diagnostics.get("is_instagram_origin")
                                 and not diagnostics.get("has_instagram_media_access")
                             ):
-                                raise ValidationError(
-                                    "Meta API không có quyền đọc bài Instagram gốc của reel liên kết này.\n"
-                                    "Token cloud đang thiếu quyền `instagram_basic` hoặc tài khoản Instagram "
-                                    "chưa được gán cho token/ad account, nên Ads Manager UI lên được nhưng API bị chặn.\n"
-                                    "Em chưa tìm thấy ad thủ công nào dùng đúng bài này để tái sử dụng creative.\n"
-                                    "Anh tạo 1 ad PAUSED thủ công từ reel này trong campaign rồi chạy lại; "
-                                    "bot sẽ dùng creative đã được Meta duyệt để tạo ads cho các adset còn lại."
-                                ) from exc
-                            raise
+                                if adset_destination_type != "MESSAGING_INSTAGRAM_DIRECT_MESSENGER":
+                                    raise ValidationError(
+                                        "Meta API không có quyền đọc bài Instagram gốc của reel liên kết này.\n"
+                                        "Token cloud đang thiếu quyền `instagram_basic` hoặc tài khoản Instagram "
+                                        "chưa được gán cho token/ad account, nên Ads Manager UI lên được nhưng API bị chặn.\n"
+                                        "Em chưa tìm thấy ad thủ công nào dùng đúng bài này để tái sử dụng creative.\n"
+                                        "Anh tạo 1 ad PAUSED thủ công từ reel này trong campaign rồi chạy lại; "
+                                        "bot sẽ dùng creative đã được Meta duyệt để tạo ads cho các adset còn lại."
+                                    ) from exc
+                                layout = self._resolve_audience_layout_for_adset(
+                                    adset_name,
+                                    skipped_multi_destination_adsets,
+                                )
+                                if not layout:
+                                    raise ValidationError(
+                                        "Không map được adset đa đích cũ sang audience Messenger-only mới."
+                                    ) from exc
+                                audience_key, audience_label, audience_suffix = layout
+                                saved_audience_id = str(audiences.get(audience_key, "")).strip()
+                                if not saved_audience_id or saved_audience_id == "replace_me":
+                                    raise ValidationError(
+                                        f"Saved Audience ID cho '{audience_label}' chưa được cấu hình trong audiences.json."
+                                    ) from exc
+                                fallback_slot = AudienceSlot(
+                                    key=f"existing_messenger_retry_{index}",
+                                    label=audience_label,
+                                    suffix=audience_suffix,
+                                    saved_audience_id=saved_audience_id,
+                                    adset_name=f"{selected_campaign_name} - {audience_label} | Messenger-only",
+                                    ad_name="",
+                                )
+                                messenger_plan = self._plan_with_destination_override(active_plan, "MESSENGER")
+                                new_adset_id = await asyncio.to_thread(
+                                    self.meta.create_adset,
+                                    messenger_plan,
+                                    campaign_id,
+                                    fallback_slot,
+                                )
+                                if not new_adset_id:
+                                    raise ValidationError(
+                                        f"Không tạo được adset Messenger-only cho '{audience_label}'."
+                                    ) from exc
+                                created_adset_ids.append(new_adset_id)
+                                skipped_multi_destination_adsets += 1
+                                active_plan = messenger_plan
+                                active_destination_type = "MESSENGER"
+                                destination_fallback_reason = (
+                                    "Reel này là bài Instagram liên kết; token cloud chưa đọc được IG media, "
+                                    "nên bot tạo adset Messenger-only mới trong campaign cũ."
+                                )
+                                messenger_slot = AudienceSlot(
+                                    key=f"existing_messenger_retry_{index}_ad",
+                                    label=f"{audience_label} | Messenger-only",
+                                    suffix=audience_suffix,
+                                    saved_audience_id=saved_audience_id,
+                                    adset_name=fallback_slot.adset_name,
+                                    ad_name=(
+                                        f"ADS:QUYET|MK:ThaiLan|SKU:{ad_name_sku_code_text}|"
+                                        f"MED:{plan.media_label}|ADSET:{new_adset_id}{non_jc_suffix}"
+                                    ),
+                                )
+                                self.logger.warning(
+                                    "Retry tao adset Messenger-only %s trong campaign cu %s cho IG-origin reel %s "
+                                    "sau khi adset da dich bi Meta chan.",
+                                    new_adset_id,
+                                    campaign_id,
+                                    resolved_post.object_story_id,
+                                )
+                                creative_id = await asyncio.to_thread(
+                                    self.meta.create_ad_creative,
+                                    messenger_plan,
+                                    messenger_slot,
+                                    resolved_post,
+                                    "MESSENGER",
+                                    None,
+                                )
+                                ad_id = await asyncio.to_thread(
+                                    self.meta.create_ad,
+                                    messenger_plan,
+                                    messenger_slot,
+                                    new_adset_id,
+                                    creative_id,
+                                    "MESSENGER",
+                                )
+                            if not ad_id:
+                                raise
                     elif (
                         adset_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
                         and self.meta.is_instagram_media_requirement_error(error_text)
