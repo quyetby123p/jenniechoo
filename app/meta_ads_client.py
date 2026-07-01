@@ -91,6 +91,8 @@ class MetaAdsClient:
         if not self.ad_account_id.startswith("act_"):
             self.ad_account_id = f"act_{self.ad_account_id}"
         self._page_token_owner_id: str | None = None
+        self._creative_access_token_checked = False
+        self._creative_access_token_cache = ""
 
     def _encode_data(self, payload: dict[str, Any]) -> dict[str, str]:
         encoded: dict[str, str] = {}
@@ -145,6 +147,63 @@ class MetaAdsClient:
             raise MetaApiError(f"Meta API loi ({response.status_code}): {error_message}")
 
         raise MetaApiError("Meta API loi khong xac dinh.")
+
+    def _get_creative_access_token(self) -> str | None:
+        if self._creative_access_token_checked:
+            return self._creative_access_token_cache or None
+
+        self._creative_access_token_checked = True
+        token = str(getattr(self.settings, "meta_creative_access_token", "") or "").strip()
+        if not token:
+            self._creative_access_token_cache = ""
+            return None
+
+        app_id = str(getattr(self.settings, "meta_app_id", "") or "").strip()
+        app_secret = str(getattr(self.settings, "meta_app_secret", "") or "").strip()
+        if app_id and app_secret:
+            try:
+                token = self._exchange_long_lived_user_token(token, app_id, app_secret)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(
+                    "Khong exchange duoc META_CREATIVE_ACCESS_TOKEN sang long-lived token; "
+                    "tiep tuc dung token hien tai: %s",
+                    exc,
+                )
+
+        self._creative_access_token_cache = token
+        return token or None
+
+    def _exchange_long_lived_user_token(
+        self,
+        token: str,
+        app_id: str,
+        app_secret: str,
+    ) -> str:
+        try:
+            response = requests.get(
+                f"{self.base_url}/oauth/access_token",
+                params={
+                    "grant_type": "fb_exchange_token",
+                    "client_id": app_id,
+                    "client_secret": app_secret,
+                    "fb_exchange_token": token,
+                },
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            raise MetaApiError(f"Loi ket noi Meta API khi exchange token: {exc}") from exc
+
+        if response.status_code >= 400:
+            error_message = self._extract_error_message(response.text)
+            raise MetaApiError(
+                f"Meta API loi ({response.status_code}) khi exchange token: {error_message}"
+            )
+
+        payload = self._json_or_raise(response.text)
+        exchanged = str(payload.get("access_token", "")).strip()
+        if not exchanged:
+            raise MetaApiError("Meta API khong tra ve access_token khi exchange token.")
+        return exchanged
 
     def _sleep_for_retry(self, attempt: int) -> None:
         import time
@@ -329,6 +388,9 @@ class MetaAdsClient:
             "is_instagram_eligible": False,
             "instagram_basic_granted": False,
             "instagram_account_count": 0,
+            "creative_token_present": bool(self._get_creative_access_token()),
+            "creative_instagram_basic_granted": False,
+            "creative_instagram_account_count": 0,
             "has_instagram_media_access": False,
             "errors": [],
         }
@@ -363,35 +425,60 @@ class MetaAdsClient:
             except Exception as exc:  # noqa: BLE001
                 diagnostics["errors"].append(f"post: {exc}")
 
-        try:
-            permissions = self._request(
-                "GET",
-                "/me/permissions",
-                access_token=self.settings.meta_access_token,
-            )
-            granted = {
-                str(item.get("permission", "")).strip()
-                for item in permissions.get("data", [])
-                if isinstance(item, dict)
-                and str(item.get("status", "")).strip().lower() == "granted"
-            }
-            diagnostics["instagram_basic_granted"] = bool(
-                {"instagram_basic", "instagram_business_basic"} & granted
-            )
-        except Exception as exc:  # noqa: BLE001
-            diagnostics["errors"].append(f"permissions: {exc}")
+        checked_tokens = [
+            ("ads", self.settings.meta_access_token),
+        ]
+        creative_token = self._get_creative_access_token()
+        if creative_token:
+            checked_tokens.append(("creative", creative_token))
 
-        try:
-            accounts = self._request(
-                "GET",
-                f"/{self.ad_account_id}/instagram_accounts",
-                params={"fields": "id,username", "limit": 100},
-                access_token=self.settings.meta_access_token,
+        for label, token in checked_tokens:
+            basic_granted = False
+            account_count = 0
+            try:
+                permissions = self._request(
+                    "GET",
+                    "/me/permissions",
+                    access_token=token,
+                )
+                granted = {
+                    str(item.get("permission", "")).strip()
+                    for item in permissions.get("data", [])
+                    if isinstance(item, dict)
+                    and str(item.get("status", "")).strip().lower() == "granted"
+                }
+                basic_granted = bool(
+                    {"instagram_basic", "instagram_business_basic"} & granted
+                )
+            except Exception as exc:  # noqa: BLE001
+                diagnostics["errors"].append(f"{label}_permissions: {exc}")
+
+            try:
+                accounts = self._request(
+                    "GET",
+                    f"/{self.ad_account_id}/instagram_accounts",
+                    params={"fields": "id,username", "limit": 100},
+                    access_token=token,
+                )
+                data = accounts.get("data", [])
+                account_count = len(data) if isinstance(data, list) else 0
+            except Exception as exc:  # noqa: BLE001
+                diagnostics["errors"].append(f"{label}_instagram_accounts: {exc}")
+
+            if label == "creative":
+                diagnostics["creative_instagram_basic_granted"] = bool(basic_granted)
+                diagnostics["creative_instagram_account_count"] = max(
+                    int(diagnostics["creative_instagram_account_count"]),
+                    account_count,
+                )
+
+            diagnostics["instagram_basic_granted"] = bool(
+                diagnostics["instagram_basic_granted"] or basic_granted
             )
-            data = accounts.get("data", [])
-            diagnostics["instagram_account_count"] = len(data) if isinstance(data, list) else 0
-        except Exception as exc:  # noqa: BLE001
-            diagnostics["errors"].append(f"instagram_accounts: {exc}")
+            diagnostics["instagram_account_count"] = max(
+                int(diagnostics["instagram_account_count"]),
+                account_count,
+            )
 
         diagnostics["has_instagram_media_access"] = bool(
             diagnostics["instagram_basic_granted"]
@@ -1402,6 +1489,7 @@ class MetaAdsClient:
             "POST",
             f"/{self.ad_account_id}/adcreatives",
             data=payload,
+            access_token=self._get_creative_access_token(),
         )
         creative_id = str(response.get("id", "")).strip()
         if not creative_id:
