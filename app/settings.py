@@ -85,6 +85,9 @@ class Settings:
     audiences_config_path_raw: str = "config/audiences.json"
     objective_config_path_raw: str = "config/objective.json"
     message_templates_path_raw: str = "config/message_templates.json"
+    meta_creative_access_token: str = ""
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
 
     @property
     def audiences_config_path(self) -> Path:
@@ -409,6 +412,24 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         default=os.getenv("META_API_VERSION", "v21.0"),
         allow_base_fallback=True,
     )
+    meta_creative_access_token = _profile_env(
+        "META_CREATIVE_ACCESS_TOKEN",
+        profile_name,
+        default="",
+        allow_base_fallback=is_default_profile,
+    )
+    meta_app_id = _profile_env(
+        "META_APP_ID",
+        profile_name,
+        default="",
+        allow_base_fallback=is_default_profile,
+    )
+    meta_app_secret = _profile_env(
+        "META_APP_SECRET",
+        profile_name,
+        default="",
+        allow_base_fallback=is_default_profile,
+    )
 
     app_timezone = os.getenv("APP_TIMEZONE", "Asia/Ho_Chi_Minh").strip()
     app_currency = os.getenv("APP_CURRENCY", "VND").strip()
@@ -724,6 +745,9 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         meta_ad_account_id=meta_ad_account_id,
         meta_page_id=meta_page_id,
         meta_api_version=meta_api_version,
+        meta_creative_access_token=meta_creative_access_token,
+        meta_app_id=meta_app_id,
+        meta_app_secret=meta_app_secret,
         app_timezone=app_timezone,
         app_currency=app_currency,
         retry_max=retry_max,

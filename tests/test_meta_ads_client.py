@@ -573,6 +573,51 @@ def test_create_ad_creative_strips_internal_template_keys() -> None:
     assert isinstance(captured.get("page_welcome_message"), dict)
 
 
+def test_create_ad_creative_uses_creative_access_token_when_configured() -> None:
+    settings = replace(_dummy_settings(), meta_creative_access_token="creative_token")
+    client = MetaAdsClient(settings=settings, logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = params, data
+        assert method == "POST"
+        assert path == "/act_1/adcreatives"
+        assert access_token == "creative_token"
+        return {"id": "creative_123"}
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    plan = PlannedCampaign(
+        version=1,
+        campaign_name="ADS:QUYET|MK:ThaiLan|JCV238",
+        sku_code_text="JCV238",
+        media_label="Video",
+        post_url="https://www.facebook.com/reel/123",
+        post_fingerprint="abc",
+        budget_daily_vnd=300000,
+        objective="OUTCOME_ENGAGEMENT",
+        conversion_location="MESSAGING_DESTINATION",
+        result_goal="MAXIMIZE_PURCHASES_VIA_MESSAGE",
+        message_template_name="Chào JC",
+        raw={"creative_payload_overrides": {}},
+    )
+    slot = AudienceSlot(
+        key="thoi_trang_saved_audience_id",
+        label="Thoi trang",
+        suffix="TS",
+        saved_audience_id="111",
+        adset_name="A",
+        ad_name="B",
+    )
+    resolved = ResolvedPost(
+        post_id="123",
+        page_id="61581440236157",
+        permalink_url="https://www.facebook.com/reel/123",
+        object_story_id="61581440236157_123",
+    )
+
+    assert client.create_ad_creative(plan=plan, slot=slot, resolved_post=resolved) == "creative_123"
+
+
 def test_create_ad_creative_applies_extra_overrides() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
     captured: dict[str, object] = {}
@@ -1212,6 +1257,48 @@ def test_diagnose_instagram_post_access_reports_missing_instagram_asset_access()
     assert diagnostics["instagram_basic_granted"] is False
     assert diagnostics["instagram_account_count"] == 0
     assert diagnostics["has_instagram_media_access"] is False
+
+
+def test_diagnose_instagram_post_access_uses_creative_token_for_media_access() -> None:
+    settings = replace(_dummy_settings(), meta_creative_access_token="creative_token")
+    client = MetaAdsClient(settings=settings, logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = params, data
+        assert method == "GET"
+        if path == "/61581440236157_123":
+            return {
+                "id": "61581440236157_123",
+                "admin_creator": {"name": "Instagram", "namespace": "instapp"},
+                "instagram_eligibility": "eligible",
+                "is_instagram_eligible": True,
+            }
+        if path == "/me/permissions":
+            if access_token == "creative_token":
+                return {
+                    "data": [
+                        {"permission": "ads_management", "status": "granted"},
+                        {"permission": "instagram_basic", "status": "granted"},
+                    ]
+                }
+            return {"data": [{"permission": "ads_management", "status": "granted"}]}
+        if path == "/act_1/instagram_accounts":
+            if access_token == "creative_token":
+                return {"data": [{"id": "17841443328764553", "username": "jenniechoo.th"}]}
+            return {"data": []}
+        raise AssertionError(f"Unexpected path: {path}")
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    diagnostics = client.diagnose_instagram_post_access("61581440236157_123")
+
+    assert diagnostics["is_instagram_origin"] is True
+    assert diagnostics["creative_token_present"] is True
+    assert diagnostics["creative_instagram_basic_granted"] is True
+    assert diagnostics["creative_instagram_account_count"] == 1
+    assert diagnostics["instagram_basic_granted"] is True
+    assert diagnostics["instagram_account_count"] == 1
+    assert diagnostics["has_instagram_media_access"] is True
 
 
 def test_check_token_health_success() -> None:
