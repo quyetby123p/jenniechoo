@@ -794,7 +794,7 @@ def test_existing_mode_creates_messenger_adset_for_ig_origin_reel_without_seed(m
             expected_call_to_action_type: str | None = None,  # noqa: ARG002
         ) -> str | None:
             self.reuse_lookups += 1
-            return None
+            return "stale_multi_destination_creative"
 
         def diagnose_instagram_post_access(self, object_story_id: str) -> dict[str, Any]:
             self.diagnostics_calls.append(object_story_id)
@@ -881,7 +881,7 @@ def test_existing_mode_creates_messenger_adset_for_ig_origin_reel_without_seed(m
         )
     )
 
-    assert meta.reuse_lookups == 1
+    assert meta.reuse_lookups == 0
     assert meta.diagnostics_calls == ["61581440236157_122137521279048007"]
     assert meta.created_adsets == [
         (

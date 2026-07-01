@@ -1557,12 +1557,14 @@ class TelegramAdsBot:
                     for item in adsets
                     if isinstance(item, dict)
                 )
-                if has_multi_destination_adsets and not await _get_reusable_story_creative_cached():
+                if has_multi_destination_adsets:
                     diagnostics = await _get_instagram_post_access_diagnostics_cached()
                     if (
                         diagnostics.get("is_instagram_origin")
                         and not diagnostics.get("has_instagram_media_access")
                     ):
+                        reusable_story_creative_checked = True
+                        reusable_story_creative_id = None
                         configured_existing_destination_type = "MESSENGER"
                         active_plan = self._plan_with_destination_override(active_plan, "MESSENGER")
                         active_destination_type = "MESSENGER"
@@ -1572,7 +1574,7 @@ class TelegramAdsBot:
                         )
                         self.logger.warning(
                             "Tu dong tao adset Messenger-only trong campaign cu %s vi post %s la IG-origin "
-                            "va khong co creative seed cung reel de tai su dung.",
+                            "va token cloud khong co quyen doc IG media.",
                             campaign_id,
                             resolved_post.object_story_id,
                         )
