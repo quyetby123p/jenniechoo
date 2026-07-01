@@ -4,6 +4,9 @@
   "result_goal": "MAXIMIZE_PURCHASES_VIA_MESSAGE",
   "message_template_name": "Mess Cơ bản",
   "sku_prefix": "VXV",
+  "collect_sku_page_posts": true,
+  "collect_sku_page_posts_max_scan": 1000,
+  "collect_sku_page_posts_max_posts": 20,
   "campaign_payload_overrides": {},
   "adset_payload_overrides": {
     "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",

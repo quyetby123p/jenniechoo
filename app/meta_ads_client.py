@@ -551,6 +551,108 @@ class MetaAdsClient:
 
         return self._resolve_post_from_page_posts(normalized_url)
 
+    def list_page_posts_by_sku(
+        self,
+        sku_codes: list[str],
+        *,
+        max_scan: int = 1000,
+        max_posts: int = 20,
+    ) -> list[ResolvedPost]:
+        normalized_codes: list[str] = []
+        seen_codes: set[str] = set()
+        for raw_code in sku_codes:
+            code = str(raw_code or "").strip().upper()
+            if not code or code in seen_codes:
+                continue
+            seen_codes.add(code)
+            normalized_codes.append(code)
+        if not normalized_codes:
+            return []
+        if not self.settings.meta_page_access_token:
+            raise ValidationError(
+                "Chưa cấu hình `META_PAGE_ACCESS_TOKEN`, nên bot chưa quét được các bài cùng SKU trên Page."
+            )
+
+        self._validate_page_access_token_owner()
+        patterns = [
+            re.compile(
+                rf"(?<![0-9A-Z])#?\s*{re.escape(code)}(?![0-9A-Z])",
+                re.IGNORECASE,
+            )
+            for code in normalized_codes
+        ]
+        next_path = f"/{self.settings.meta_page_id}/posts"
+        next_params: dict[str, Any] | None = {
+            "fields": (
+                "id,message,permalink_url,status_type,created_time,"
+                "attachments{media_type,type,subattachments{media_type,type}}"
+            ),
+            "limit": 100,
+        }
+        scanned = 0
+        posts: list[ResolvedPost] = []
+        seen_story_ids: set[str] = set()
+        try:
+            while next_path and scanned < max(1, int(max_scan)) and len(posts) < max(1, int(max_posts)):
+                payload = self._request(
+                    "GET",
+                    next_path,
+                    params=next_params,
+                    access_token=self.settings.meta_page_access_token,
+                )
+                data = payload.get("data", [])
+                if not isinstance(data, list):
+                    data = []
+
+                for item in data:
+                    if not isinstance(item, dict):
+                        continue
+                    scanned += 1
+                    message_text = str(item.get("message", "")).strip()
+                    if not message_text or not all(pattern.search(message_text) for pattern in patterns):
+                        continue
+                    post_node_id = str(item.get("id", "")).strip()
+                    if not post_node_id:
+                        continue
+                    if "_" in post_node_id:
+                        owner_page_id, post_id = post_node_id.split("_", 1)
+                    else:
+                        owner_page_id = self.settings.meta_page_id
+                        post_id = post_node_id
+                    self._validate_owner_page(owner_page_id)
+                    object_story_id = f"{owner_page_id}_{post_id}"
+                    if object_story_id in seen_story_ids:
+                        continue
+                    seen_story_ids.add(object_story_id)
+                    permalink = str(item.get("permalink_url", "")).strip()
+                    posts.append(
+                        ResolvedPost(
+                            post_id=post_id,
+                            page_id=owner_page_id,
+                            permalink_url=permalink,
+                            object_story_id=object_story_id,
+                            strategy="page_sku_scan",
+                            message_text=message_text,
+                            media_label=self._detect_media_label(permalink, item),
+                        )
+                    )
+                    if len(posts) >= max(1, int(max_posts)):
+                        break
+
+                paging = payload.get("paging", {}) if isinstance(payload, dict) else {}
+                next_url = str(paging.get("next", "")).strip()
+                if not next_url:
+                    break
+                next_path, next_params = self._path_and_params_from_next_url(next_url)
+        except MetaApiError as exc:
+            msg = str(exc).lower()
+            if "mã truy cập trang" in msg or "page access token" in msg or "user access token is not supported" in msg:
+                raise ValidationError(
+                    "Token hiện tại chưa có quyền đọc bài viết của Trang để quét các post cùng SKU."
+                ) from exc
+            raise
+        return posts
+
     def _resolve_post_from_url_patterns(self, post_url: str) -> ResolvedPost | None:
         parsed = urlparse(post_url)
         query = parse_qs(parsed.query)

@@ -99,6 +99,53 @@ def test_resolve_post_from_pageid_pfbid_path() -> None:
     assert resolved.strategy == "direct_pageid_pfbid"
 
 
+def test_list_page_posts_by_sku_returns_matching_posts_with_media_labels() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = data, access_token
+        assert method == "GET"
+        if path == "/me":
+            return {"id": "61581440236157", "name": "Page"}
+        if path == "/61581440236157/posts":
+            assert "attachments" in params["fields"]
+            return {
+                "data": [
+                    {
+                        "id": "61581440236157_101",
+                        "message": "First angle #VXV002",
+                        "permalink_url": "https://www.facebook.com/61581440236157/posts/101",
+                        "status_type": "added_photos",
+                        "attachments": {"data": [{"media_type": "photo"}]},
+                    },
+                    {
+                        "id": "61581440236157_102",
+                        "message": "Video angle #VXV002 #Sleepwears",
+                        "permalink_url": "https://www.facebook.com/reel/202/",
+                        "status_type": "added_video",
+                        "attachments": {"data": [{"media_type": "video"}]},
+                    },
+                    {
+                        "id": "61581440236157_103",
+                        "message": "Other sku #VXV003",
+                        "permalink_url": "https://www.facebook.com/61581440236157/posts/103",
+                        "status_type": "added_photos",
+                    },
+                ]
+            }
+        raise AssertionError(f"Unexpected path: {path}")
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    posts = client.list_page_posts_by_sku(["VXV002"], max_scan=100, max_posts=10)
+
+    assert [(post.object_story_id, post.media_label) for post in posts] == [
+        ("61581440236157_101", "Anh"),
+        ("61581440236157_102", "Video"),
+    ]
+    assert posts[0].message_text == "First angle #VXV002"
+
+
 def test_normalize_campaign_objective_alias() -> None:
     assert MetaAdsClient._normalize_campaign_objective("ENGAGEMENT") == "OUTCOME_ENGAGEMENT"
 

@@ -2924,6 +2924,206 @@ def test_new_mode_fallbacks_to_messenger_when_instagram_media_requirement_fails(
     assert "không có hình ảnh hoặc video" in payload["destination_fallback_reason"]
 
 
+def test_new_mode_collects_sku_page_posts_across_all_adsets(monkeypatch) -> None:  # noqa: ANN001
+    class NewModeCollectSkuMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.created_adsets: list[str] = []
+            self.created_creatives: list[tuple[str, str, dict[str, Any] | None]] = []
+            self.created_ads: list[tuple[str, str, str]] = []
+
+        @staticmethod
+        def effective_destination_type(plan: PlannedCampaign) -> str:
+            overrides = plan.raw.get("adset_payload_overrides", {}) if isinstance(plan.raw, dict) else {}
+            if isinstance(overrides, dict):
+                value = str(overrides.get("destination_type", "")).strip().upper()
+                if value:
+                    return value
+            return "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+
+        def resolve_post(self, post_url: str) -> ResolvedPost:
+            return ResolvedPost(
+                post_id="122179632116934207",
+                page_id="649228828282105",
+                permalink_url=post_url,
+                object_story_id="649228828282105_122179632116934207",
+                strategy="direct_numeric_post",
+                message_text="Not everything captivating needs to be dark. #VXV002",
+                media_label="Anh",
+            )
+
+        def list_page_posts_by_sku(
+            self,
+            sku_codes: list[str],
+            *,
+            max_scan: int = 1000,
+            max_posts: int = 20,
+        ) -> list[ResolvedPost]:
+            assert sku_codes == ["VXV002"]
+            assert max_scan == 1000
+            assert max_posts == 20
+            return [
+                ResolvedPost(
+                    post_id="122179632116934207",
+                    page_id="649228828282105",
+                    permalink_url="https://www.facebook.com/122187834464934207/posts/122179632116934207",
+                    object_story_id="649228828282105_122179632116934207",
+                    strategy="page_sku_scan",
+                    message_text="Not everything captivating needs to be dark. #VXV002",
+                    media_label="Anh",
+                ),
+                ResolvedPost(
+                    post_id="122179392776934207",
+                    page_id="649228828282105",
+                    permalink_url="https://www.facebook.com/122187834464934207/posts/122179392776934207",
+                    object_story_id="649228828282105_122179392776934207",
+                    strategy="page_sku_scan",
+                    message_text="There’s a different kind of confidence… #VXV002",
+                    media_label="Anh",
+                ),
+                ResolvedPost(
+                    post_id="122178119210934207",
+                    page_id="649228828282105",
+                    permalink_url="https://www.facebook.com/122187834464934207/posts/122178119210934207",
+                    object_story_id="649228828282105_122178119210934207",
+                    strategy="page_sku_scan",
+                    message_text="Not everything seductive needs to be loud. #VXV002",
+                    media_label="Anh",
+                ),
+                ResolvedPost(
+                    post_id="122177920574934207",
+                    page_id="649228828282105",
+                    permalink_url="https://www.facebook.com/reel/3442970492537153/",
+                    object_story_id="649228828282105_122177920574934207",
+                    strategy="page_sku_scan",
+                    message_text="You don’t wear it to be seen. #VXV002 #Sleepwears",
+                    media_label="Video",
+                ),
+            ]
+
+        def get_account_multi_destination_creative_overrides(
+            self,
+            *,
+            max_ads_scan: int = 200,  # noqa: ARG002
+            expected_call_to_action_type: str | None = None,
+        ) -> dict[str, Any]:
+            assert expected_call_to_action_type == "MESSAGE_PAGE"
+            return {
+                "asset_feed_spec": {
+                    "optimization_type": "DOF_MESSAGING_DESTINATION",
+                    "call_to_actions": [
+                        {"type": "MESSAGE_PAGE", "value": {"app_destination": "MESSENGER"}},
+                        {"type": "INSTAGRAM_MESSAGE", "value": {"app_destination": "INSTAGRAM_DIRECT"}},
+                    ],
+                    "additional_data": {"is_click_to_message": True},
+                },
+                "call_to_action_type": "MESSAGE_PAGE",
+                "page_welcome_message": '{"template_id":"962707759488898"}',
+                "instagram_user_id": "17841478128229539",
+            }
+
+        def create_campaign(self, plan: PlannedCampaign) -> str:  # noqa: ARG002
+            return "camp_vxv002_new"
+
+        def create_adset(self, plan: PlannedCampaign, campaign_id: str, slot: AudienceSlot) -> str:  # noqa: ARG002
+            adset_id = f"adset_{len(self.created_adsets) + 1}"
+            self.created_adsets.append(slot.adset_name)
+            return adset_id
+
+        def create_ad_creative(
+            self,
+            plan: PlannedCampaign,  # noqa: ARG002
+            slot: AudienceSlot,
+            resolved_post: ResolvedPost,
+            destination_type_override=None,  # noqa: ANN001, ARG002
+            extra_payload_overrides=None,  # noqa: ANN001
+        ) -> str:
+            self.created_creatives.append((slot.ad_name, resolved_post.object_story_id, extra_payload_overrides))
+            return f"cr_{len(self.created_creatives)}"
+
+        def create_ad(
+            self,
+            plan: PlannedCampaign,  # noqa: ARG002
+            slot: AudienceSlot,
+            adset_id: str,
+            creative_id: str,
+            destination_type_override=None,  # noqa: ANN001, ARG002
+        ) -> str:
+            self.created_ads.append((adset_id, creative_id, slot.ad_name))
+            return f"ad_{len(self.created_ads)}"
+
+    fake_plan = PlannedCampaign(
+        version=7,
+        campaign_name="ADS:QUYET|MK:ThaiLan|VXV002|Codex",
+        sku_code_text="VXV002",
+        media_label="Anh",
+        post_url="https://www.facebook.com/122187834464934207/posts/122179632116934207",
+        post_fingerprint="fp_vxv002",
+        budget_daily_vnd=235069,
+        objective="OUTCOME_ENGAGEMENT",
+        conversion_location="MESSAGING_DESTINATION",
+        result_goal="MAXIMIZE_PURCHASES_VIA_MESSAGE",
+        message_template_name="Mess Cơ bản",
+        audiences=[
+            AudienceSlot("thoi_trang_saved_audience_id", "Thời trang", "TS", "aud_1", "Camp - Thời trang", "unused"),
+            AudienceSlot("du_lich_saved_audience_id", "Du lịch", "DL", "aud_2", "Camp - Du lịch", "unused"),
+            AudienceSlot("tiec_saved_audience_id", "Tiệc", "TIEC", "aud_3", "Camp - Tiệc", "unused"),
+        ],
+        raw={"adset_payload_overrides": {"destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"}},
+    )
+
+    def fake_load_json(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        path_text = str(path)
+        if "objective" in path_text:
+            return {
+                "sku_prefix": "VXV",
+                "collect_sku_page_posts": True,
+                "collect_sku_page_posts_max_scan": 1000,
+                "collect_sku_page_posts_max_posts": 20,
+            }
+        return {}
+
+    monkeypatch.setattr(telegram_bot_module, "load_json", fake_load_json)
+    monkeypatch.setattr(telegram_bot_module, "build_campaign_plan", lambda **_kwargs: fake_plan)
+    meta = NewModeCollectSkuMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/122187834464934207/posts/122179632116934207",
+        budget_daily_vnd=235069,
+    )
+
+    asyncio.run(
+        bot._create_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_vxv002",
+            version=7,
+        )
+    )
+
+    assert len(meta.created_adsets) == 3
+    assert len(meta.created_creatives) == 12
+    assert len(meta.created_ads) == 12
+    assert {story for _, story, _ in meta.created_creatives} == {
+        "649228828282105_122179632116934207",
+        "649228828282105_122179392776934207",
+        "649228828282105_122178119210934207",
+        "649228828282105_122177920574934207",
+    }
+    assert all(
+        isinstance(overrides, dict) and overrides.get("call_to_action_type") == "MESSAGE_PAGE"
+        for _, _, overrides in meta.created_creatives
+    )
+    assert any(name.endswith("|MED:Video|Sleepwears") for name, _, _ in meta.created_creatives)
+    payload = storage.saved_jobs[-1][1]
+    assert payload["campaign_mode"] == "new"
+    assert payload["included_post_count"] == 4
+    assert payload["ad_ids"] == [f"ad_{index}" for index in range(1, 13)]
+
+
 def test_new_mode_fallback_retry_failure_rolls_back_fallback_adset_and_creative(monkeypatch) -> None:  # noqa: ANN001
     class NewModeFallbackRetryFailMeta(FakeMeta):
         def __init__(self) -> None:

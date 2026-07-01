@@ -822,6 +822,7 @@ class TelegramAdsBot:
         audiences = load_json(self.settings.audiences_config_path)
         objective = load_json(self.settings.objective_config_path)
         templates = load_json(self.settings.message_templates_path)
+        sku_prefix = resolve_sku_prefix(objective)
 
         campaign_id: str | None = None
         adset_ids: list[str] = []
@@ -848,6 +849,27 @@ class TelegramAdsBot:
             multi_destination_asset_feed_spec: dict[str, Any] | None = None
             multi_destination_creative_overrides: dict[str, Any] | None = None
             force_message_page_cta = self._should_force_message_page_cta_for_post(plan, resolved_post)
+            campaign_posts: list[Any] = [resolved_post]
+            if self._should_collect_sku_page_posts(objective):
+                try:
+                    sku_posts = await asyncio.to_thread(
+                        self.meta.list_page_posts_by_sku,
+                        [code for code in plan.sku_code_text.split("_") if code],
+                        max_scan=int(objective.get("collect_sku_page_posts_max_scan", 1000)),
+                        max_posts=int(objective.get("collect_sku_page_posts_max_posts", 20)),
+                    )
+                    campaign_posts = self._merge_resolved_posts(sku_posts, [resolved_post])
+                    self.logger.info(
+                        "Len moi gom %s post cung SKU %s cho campaign %s.",
+                        len(campaign_posts),
+                        plan.sku_code_text,
+                        plan.campaign_name,
+                    )
+                except (ValidationError, MetaApiError, ValueError, TypeError) as exc:
+                    self.logger.warning(
+                        "Khong quet duoc cac post cung SKU cho luong len moi, fallback 1 link: %s",
+                        exc,
+                    )
 
             if active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER":
                 try:
@@ -868,80 +890,52 @@ class TelegramAdsBot:
 
             campaign_id = await asyncio.to_thread(self.meta.create_campaign, active_plan)
 
-            for slot in active_plan.audiences:
-                adset_id: str | None = None
-                creative_id: str | None = None
-                ad_id: str | None = None
-                creative_extra_overrides: dict[str, Any] | None = None
-                if (
-                    active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
-                    and isinstance(multi_destination_creative_overrides, dict)
-                    and multi_destination_creative_overrides
-                ):
-                    creative_extra_overrides = dict(multi_destination_creative_overrides)
-                elif (
-                    active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
-                    and isinstance(multi_destination_asset_feed_spec, dict)
-                    and multi_destination_asset_feed_spec
-                ):
-                    creative_extra_overrides = {
-                        "asset_feed_spec": self._with_message_page_cta_preferred(
-                            multi_destination_asset_feed_spec
-                        )
-                    }
-                if (
-                    active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
-                    and force_message_page_cta
-                ):
-                    if creative_extra_overrides is None:
-                        creative_extra_overrides = {}
-                    creative_extra_overrides["call_to_action_type"] = "MESSAGE_PAGE"
-                try:
+            if len(campaign_posts) > 1:
+                for slot in active_plan.audiences:
                     adset_id = await asyncio.to_thread(self.meta.create_adset, active_plan, campaign_id, slot)
-                    creative_id = await asyncio.to_thread(
-                        self.meta.create_ad_creative,
+                    adset_ids.append(adset_id)
+                    for post_item in campaign_posts:
+                        post_slot = replace(
+                            slot,
+                            ad_name=self._new_campaign_ad_name_for_post(plan, post_item, sku_prefix),
+                        )
+                        creative_extra_overrides = self._new_campaign_creative_overrides(
+                            active_plan,
+                            post_item,
+                            active_destination_type,
+                            multi_destination_creative_overrides,
+                            multi_destination_asset_feed_spec,
+                        )
+                        creative_id = await asyncio.to_thread(
+                            self.meta.create_ad_creative,
+                            active_plan,
+                            post_slot,
+                            post_item,
+                            None,
+                            creative_extra_overrides,
+                        )
+                        creative_ids.append(creative_id)
+                        ad_id = await asyncio.to_thread(
+                            self.meta.create_ad,
+                            active_plan,
+                            post_slot,
+                            adset_id,
+                            creative_id,
+                        )
+                        ad_ids.append(ad_id)
+            else:
+                for slot in active_plan.audiences:
+                    adset_id: str | None = None
+                    creative_id: str | None = None
+                    ad_id: str | None = None
+                    creative_extra_overrides = self._new_campaign_creative_overrides(
                         active_plan,
-                        slot,
                         resolved_post,
-                        None,
-                        creative_extra_overrides,
+                        active_destination_type,
+                        multi_destination_creative_overrides,
+                        multi_destination_asset_feed_spec,
                     )
-                    ad_id = await asyncio.to_thread(
-                        self.meta.create_ad,
-                        active_plan,
-                        slot,
-                        adset_id,
-                        creative_id,
-                    )
-                except MetaApiError as exc:
-                    error_text = str(exc)
-                    if (
-                        active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
-                        and (
-                            self.meta.is_auto_destination_error(error_text)
-                            or self.meta.is_instagram_media_requirement_error(error_text)
-                        )
-                    ):
-                        if ad_id:
-                            await asyncio.to_thread(self.rollback.rollback, None, [], [ad_id], [])
-                        if creative_id:
-                            await asyncio.to_thread(self.rollback.rollback, None, [], [], [creative_id])
-                        if adset_id:
-                            await asyncio.to_thread(self.rollback.rollback, None, [adset_id], [], [])
-                        active_plan = self._plan_with_destination_override(active_plan, "MESSENGER")
-                        active_destination_type = "MESSENGER"
-                        destination_fallback_reason = error_text
-                        fallback_reason = (
-                            "media Instagram"
-                            if self.meta.is_instagram_media_requirement_error(error_text)
-                            else "auto-destination"
-                        )
-                        self.logger.warning(
-                            "Tu dong fallback destination sang MESSENGER do loi %s: %s",
-                            fallback_reason,
-                            exc,
-                        )
-
+                    try:
                         adset_id = await asyncio.to_thread(self.meta.create_adset, active_plan, campaign_id, slot)
                         creative_id = await asyncio.to_thread(
                             self.meta.create_ad_creative,
@@ -949,34 +943,99 @@ class TelegramAdsBot:
                             slot,
                             resolved_post,
                             None,
-                            None,
+                            creative_extra_overrides,
                         )
-                        try:
-                            ad_id = await asyncio.to_thread(
-                                self.meta.create_ad,
+                        ad_id = await asyncio.to_thread(
+                            self.meta.create_ad,
+                            active_plan,
+                            slot,
+                            adset_id,
+                            creative_id,
+                        )
+                    except MetaApiError as exc:
+                        error_text = str(exc)
+                        if (
+                            active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+                            and (
+                                self.meta.is_auto_destination_error(error_text)
+                                or self.meta.is_instagram_media_requirement_error(error_text)
+                            )
+                        ):
+                            if ad_id:
+                                await asyncio.to_thread(self.rollback.rollback, None, [], [ad_id], [])
+                            if creative_id:
+                                await asyncio.to_thread(self.rollback.rollback, None, [], [], [creative_id])
+                            if adset_id:
+                                await asyncio.to_thread(self.rollback.rollback, None, [adset_id], [], [])
+                            active_plan = self._plan_with_destination_override(active_plan, "MESSENGER")
+                            active_destination_type = "MESSENGER"
+                            destination_fallback_reason = error_text
+                            fallback_reason = (
+                                "media Instagram"
+                                if self.meta.is_instagram_media_requirement_error(error_text)
+                                else "auto-destination"
+                            )
+                            self.logger.warning(
+                                "Tu dong fallback destination sang MESSENGER do loi %s: %s",
+                                fallback_reason,
+                                exc,
+                            )
+
+                            adset_id = await asyncio.to_thread(self.meta.create_adset, active_plan, campaign_id, slot)
+                            creative_id = await asyncio.to_thread(
+                                self.meta.create_ad_creative,
                                 active_plan,
                                 slot,
-                                adset_id,
-                                creative_id,
+                                resolved_post,
+                                None,
+                                None,
                             )
-                        except MetaApiError as fallback_ad_exc:
-                            fallback_error_text = str(fallback_ad_exc)
-                            if self.meta.is_auto_destination_error(fallback_error_text):
-                                self.logger.warning(
-                                    "Retry fallback len moi voi payload ad MESSENGER cho slot %s do loi objective: %s",
-                                    slot.label,
-                                    fallback_ad_exc,
+                            try:
+                                ad_id = await asyncio.to_thread(
+                                    self.meta.create_ad,
+                                    active_plan,
+                                    slot,
+                                    adset_id,
+                                    creative_id,
                                 )
-                                try:
-                                    ad_id = await asyncio.to_thread(
-                                        self.meta.create_ad,
-                                        active_plan,
-                                        slot,
-                                        adset_id,
-                                        creative_id,
-                                        "MESSENGER",
+                            except MetaApiError as fallback_ad_exc:
+                                fallback_error_text = str(fallback_ad_exc)
+                                if self.meta.is_auto_destination_error(fallback_error_text):
+                                    self.logger.warning(
+                                        "Retry fallback len moi voi payload ad MESSENGER cho slot %s do loi objective: %s",
+                                        slot.label,
+                                        fallback_ad_exc,
                                     )
-                                except MetaApiError:
+                                    try:
+                                        ad_id = await asyncio.to_thread(
+                                            self.meta.create_ad,
+                                            active_plan,
+                                            slot,
+                                            adset_id,
+                                            creative_id,
+                                            "MESSENGER",
+                                        )
+                                    except MetaApiError:
+                                        if creative_id:
+                                            await asyncio.to_thread(
+                                                self.rollback.rollback,
+                                                None,
+                                                [],
+                                                [],
+                                                [creative_id],
+                                            )
+                                            creative_id = None
+                                        if adset_id:
+                                            await asyncio.to_thread(
+                                                self.rollback.rollback,
+                                                None,
+                                                [adset_id],
+                                                [],
+                                                [],
+                                            )
+                                            adset_id = None
+                                        raise
+                                else:
                                     if creative_id:
                                         await asyncio.to_thread(
                                             self.rollback.rollback,
@@ -996,31 +1055,11 @@ class TelegramAdsBot:
                                         )
                                         adset_id = None
                                     raise
-                            else:
-                                if creative_id:
-                                    await asyncio.to_thread(
-                                        self.rollback.rollback,
-                                        None,
-                                        [],
-                                        [],
-                                        [creative_id],
-                                    )
-                                    creative_id = None
-                                if adset_id:
-                                    await asyncio.to_thread(
-                                        self.rollback.rollback,
-                                        None,
-                                        [adset_id],
-                                        [],
-                                        [],
-                                    )
-                                    adset_id = None
-                                raise
-                    else:
-                        raise
-                adset_ids.append(adset_id)
-                creative_ids.append(creative_id)
-                ad_ids.append(ad_id)
+                        else:
+                            raise
+                    adset_ids.append(adset_id)
+                    creative_ids.append(creative_id)
+                    ad_ids.append(ad_id)
 
             job_id = await asyncio.to_thread(self.storage.generate_job_id)
             job_payload = {
@@ -1056,6 +1095,16 @@ class TelegramAdsBot:
                 "object_story_id": resolved_post.object_story_id,
                 "resolved_permalink_url": resolved_post.permalink_url,
                 "resolved_strategy": resolved_post.strategy,
+                "included_post_count": len(campaign_posts),
+                "included_posts": [
+                    {
+                        "post_id": post_item.post_id,
+                        "object_story_id": post_item.object_story_id,
+                        "media_label": post_item.media_label,
+                        "permalink_url": post_item.permalink_url,
+                    }
+                    for post_item in campaign_posts
+                ],
                 "ads_manager_url": self._build_ads_manager_url(campaign_id),
                 "created_at": now_utc_iso(),
             }
@@ -2569,6 +2618,79 @@ class TelegramAdsBot:
         normalized["additional_data"] = additional_data
         return normalized
 
+    @classmethod
+    def _new_campaign_creative_overrides(
+        cls,
+        plan: PlannedCampaign,
+        resolved_post: Any,
+        active_destination_type: str,
+        multi_destination_creative_overrides: dict[str, Any] | None,
+        multi_destination_asset_feed_spec: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        creative_extra_overrides: dict[str, Any] | None = None
+        if (
+            active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+            and isinstance(multi_destination_creative_overrides, dict)
+            and multi_destination_creative_overrides
+        ):
+            creative_extra_overrides = dict(multi_destination_creative_overrides)
+        elif (
+            active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+            and isinstance(multi_destination_asset_feed_spec, dict)
+            and multi_destination_asset_feed_spec
+        ):
+            creative_extra_overrides = {
+                "asset_feed_spec": cls._with_message_page_cta_preferred(
+                    multi_destination_asset_feed_spec
+                )
+            }
+        if (
+            active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+            and cls._should_force_message_page_cta_for_post(plan, resolved_post)
+        ):
+            if creative_extra_overrides is None:
+                creative_extra_overrides = {}
+            creative_extra_overrides["call_to_action_type"] = "MESSAGE_PAGE"
+        return creative_extra_overrides
+
+    @staticmethod
+    def _should_collect_sku_page_posts(objective_config: dict[str, Any]) -> bool:
+        value = objective_config.get(
+            "collect_sku_page_posts",
+            objective_config.get("new_campaign_collect_sku_page_posts", False),
+        )
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    @staticmethod
+    def _merge_resolved_posts(
+        primary_posts: list[Any],
+        fallback_posts: list[Any],
+    ) -> list[Any]:
+        merged: list[Any] = []
+        seen: set[str] = set()
+        for post_item in [*primary_posts, *fallback_posts]:
+            object_story_id = str(getattr(post_item, "object_story_id", "") or "").strip()
+            if not object_story_id or object_story_id in seen:
+                continue
+            seen.add(object_story_id)
+            merged.append(post_item)
+        return merged
+
+    @staticmethod
+    def _new_campaign_ad_name_for_post(
+        plan: PlannedCampaign,
+        resolved_post: Any,
+        sku_prefix: str,
+    ) -> str:
+        media_label = str(
+            getattr(resolved_post, "media_label", "") or plan.media_label or "Anh"
+        ).strip() or "Anh"
+        message_text = str(getattr(resolved_post, "message_text", "") or "")
+        non_sku_suffix = build_non_jc_hashtag_suffix(message_text, sku_prefix)
+        return f"ADS:QUYET|MK:ThaiLan|SKU:{plan.sku_code_text}|MED:{media_label}{non_sku_suffix}"
+
     @staticmethod
     def _should_force_message_page_cta_for_post(
         plan: PlannedCampaign,
@@ -2584,10 +2706,8 @@ class TelegramAdsBot:
         campaign_name = str(plan.campaign_name or "").strip().upper()
         if "VXV" not in sku_text and "VXV" not in campaign_name:
             return False
-        media_label = str(
-            getattr(resolved_post, "media_label", "") or plan.media_label or ""
-        ).strip().lower()
-        return media_label not in {"video"}
+        _ = resolved_post
+        return True
 
     @staticmethod
     def _extract_campaign_hint_keywords(campaign_hint: str) -> list[str]:
