@@ -753,6 +753,153 @@ def test_existing_mode_creates_messenger_adset_when_vayxa_campaign_has_only_mult
     assert "adset đa đích" in payload["destination_fallback_reason"]
 
 
+def test_existing_mode_creates_messenger_adset_for_ig_origin_reel_without_seed(monkeypatch) -> None:  # noqa: ANN001
+    class InstagramOriginNoSeedMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.created_adsets: list[tuple[str, str, str]] = []
+            self.created_creatives: list[tuple[str | None, dict[str, Any] | None]] = []
+            self.created_ads: list[tuple[str, str | None]] = []
+            self.reuse_lookups = 0
+            self.diagnostics_calls: list[str] = []
+
+        def resolve_post(self, post_url: str) -> ResolvedPost:
+            return ResolvedPost(
+                post_id="122137521279048007",
+                page_id="61581440236157",
+                permalink_url=post_url,
+                object_story_id="61581440236157_122137521279048007",
+                strategy="direct",
+                message_text="Morning Veil Top Combo #JCA250 #JCA248 #JCQ211",
+                media_label="Video",
+            )
+
+        def list_eligible_adsets(self, campaign_id: str, max_count: int) -> list[dict[str, str]]:  # noqa: ARG002
+            return [
+                {
+                    "id": "old_multi_adset_1",
+                    "name": "ADS:QUYET|MK:ThaiLan|JCA250_JCA248_JCQ211|Codex - Du lịch",
+                    "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                    "effective_status": "ACTIVE",
+                }
+            ]
+
+        def find_reusable_creative_id_by_story_ids(
+            self,
+            story_ids: list[str],  # noqa: ARG002
+            *,
+            adset_id: str | None = None,  # noqa: ARG002
+            max_ads_scan: int = 800,  # noqa: ARG002
+            expected_page_welcome_message=None,  # noqa: ANN001, ARG002
+            expected_call_to_action_type: str | None = None,  # noqa: ARG002
+        ) -> str | None:
+            self.reuse_lookups += 1
+            return None
+
+        def diagnose_instagram_post_access(self, object_story_id: str) -> dict[str, Any]:
+            self.diagnostics_calls.append(object_story_id)
+            return {
+                "is_instagram_origin": True,
+                "has_instagram_media_access": False,
+            }
+
+        def create_adset(self, plan: PlannedCampaign, campaign_id: str, slot: AudienceSlot) -> str:
+            self.created_adsets.append((campaign_id, slot.adset_name, slot.saved_audience_id))
+            assert plan.raw["adset_payload_overrides"]["destination_type"] == "MESSENGER"
+            return "new_msg_adset_1"
+
+        def create_ad_creative(
+            self,
+            plan,  # noqa: ANN001, ARG002
+            slot,  # noqa: ANN001, ARG002
+            resolved_post,  # noqa: ANN001, ARG002
+            destination_type_override=None,  # noqa: ANN001
+            extra_payload_overrides=None,  # noqa: ANN001
+        ) -> str:
+            self.created_creatives.append((destination_type_override, extra_payload_overrides))
+            return "cr_msg_1"
+
+        def create_ad(
+            self,
+            plan,  # noqa: ANN001, ARG002
+            slot,  # noqa: ANN001
+            adset_id: str,
+            creative_id: str,  # noqa: ARG002
+            destination_type_override=None,  # noqa: ANN001
+        ) -> str:
+            self.created_ads.append((adset_id, destination_type_override))
+            assert "ADSET:new_msg_adset_1" in slot.ad_name
+            return "ad_msg_1"
+
+    def fake_load_json(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        path_text = str(path)
+        if "audiences" in path_text:
+            return {
+                "thoi_trang_saved_audience_id": "aud_thoi_trang",
+                "du_lich_saved_audience_id": "aud_du_lich",
+                "tiec_saved_audience_id": "aud_tiec",
+            }
+        if "message_templates" in path_text:
+            return {
+                "templates": {
+                    "Chào JC": {
+                        "creative_patch": {"page_welcome_message": {"template_id": "jc_template"}},
+                        "adset_patch": {},
+                    }
+                }
+            }
+        return {
+            "sku_prefix": "JC",
+            "message_template_name": "Chào JC",
+            "adset_payload_overrides": {
+                "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                "billing_event": "IMPRESSIONS",
+                "optimization_goal": "MESSAGING_PURCHASE_CONVERSION",
+            },
+        }
+
+    monkeypatch.setattr(telegram_bot_module, "load_json", fake_load_json)
+    meta = InstagramOriginNoSeedMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/reel/2108376383217730",
+        budget_daily_vnd=0,
+        use_existing_campaign=True,
+        manual_sku_keywords=["JCA250", "JCA248", "JCQ211"],
+    )
+    asyncio.run(
+        bot._create_existing_campaign_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="ig_origin_reel",
+            version=1,
+            selected_campaign={"id": "camp_jca", "name": "ADS:QUYET|MK:ThaiLan|JCA250_JCA248_JCQ211|Codex"},
+            campaign_keywords=["JCA250", "JCA248", "JCQ211"],
+        )
+    )
+
+    assert meta.reuse_lookups == 1
+    assert meta.diagnostics_calls == ["61581440236157_122137521279048007"]
+    assert meta.created_adsets == [
+        (
+            "camp_jca",
+            "ADS:QUYET|MK:ThaiLan|JCA250_JCA248_JCQ211|Codex - Du lịch | Messenger-only",
+            "aud_du_lich",
+        )
+    ]
+    assert meta.created_creatives == [("MESSENGER", {})]
+    assert meta.created_ads == [("new_msg_adset_1", "MESSENGER")]
+    payload = storage.saved_jobs[-1][1]
+    assert payload["publish_scope"] == "adsets_ads"
+    assert payload["adset_ids"] == ["new_msg_adset_1"]
+    assert payload["selected_adset_ids"] == ["old_multi_adset_1"]
+    assert payload["active_destination_type"] == "MESSENGER"
+    assert "Instagram liên kết" in payload["destination_fallback_reason"]
+
+
 def test_existing_mode_image_post_uses_message_page_cta_in_multi_destination_adset(monkeypatch) -> None:  # noqa: ANN001
     class ImagePostMeta(FakeMeta):
         def __init__(self) -> None:
