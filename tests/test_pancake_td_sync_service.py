@@ -209,6 +209,12 @@ def _write_basic_sync_config(settings: Settings, **override: dict) -> None:
             "payment_method_paths": ["payment_method"],
             "transferred_amount_paths": ["transferred_amount", "transfer_money"],
             "deposit_amount_paths": ["deposit_amount"],
+            "exchange_original_amount_paths": [
+                "payment_from_customers_exchange_order",
+                "order_returned.order_to_returned.cod",
+            ],
+            "exchange_remaining_amount_paths": ["cod"],
+            "exchange_marker_paths": ["exchanged_returned_order_ids", "order_returned"],
             "total_amount_paths": ["total_price"],
             "money_minor_unit_factor": 100,
             "payment_method_transfer_keywords": ["chuyen khoan", "transfer", "prepaid"],
@@ -669,6 +675,109 @@ def test_sync_partial_transfer_keeps_total_cod_and_sets_deposit(tmp_path: Path) 
     assert payload["codTransferred"] == 10000
 
 
+def test_sync_exchange_order_uses_remaining_cod_from_pancake(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "270229035762216",
+                "custom_id": "JCT382",
+                "inserted_at_timestamp": 1_781_088_781,
+                "payment_method": "cod",
+                "payment_from_customers_exchange_order": 530000,
+                "cod": 122000,
+                "exchanged_returned_order_ids": [90085089709494],
+                "order_returned": {
+                    "order_to_returned": {
+                        "custom_id": "JCT334",
+                        "cod": 530000,
+                    }
+                },
+                "total_price": 652000,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "JC-V-238-TRANG-S",
+                            "color": "trắng",
+                            "retail_price": 640000,
+                            "name": "Lily of the Valley Dress JCV238",
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[
+            {
+                "id": 1,
+                "sku": "JCV238WHITES",
+                "color": "trắng",
+                "name": "Lily of the Valley Dress JCV238",
+            }
+        ]
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    payload = thai_duong.create_calls[0]
+    assert payload["paymentType"] == "COD"
+    assert payload["cod"] == 1220
+    assert payload["codTransferred"] == 0
+
+
+def test_sync_exchange_order_computes_remaining_cod_when_missing(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "pc_exchange_compute",
+                "custom_id": "JCTEX02",
+                "inserted_at_timestamp": 1_781_088_782,
+                "payment_method": "cod",
+                "payment_from_customers_exchange_order": 530000,
+                "exchanged_returned_order_ids": [90085089709494],
+                "total_price": 652000,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "JC-V-238-TRANG-S",
+                            "color": "trắng",
+                            "retail_price": 640000,
+                            "name": "Lily of the Valley Dress JCV238",
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[
+            {
+                "id": 1,
+                "sku": "JCV238WHITES",
+                "color": "trắng",
+                "name": "Lily of the Valley Dress JCV238",
+            }
+        ]
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    payload = thai_duong.create_calls[0]
+    assert payload["paymentType"] == "COD"
+    assert payload["cod"] == 1220
+    assert payload["codTransferred"] == 0
+
+
 def test_sync_transfer_amount_without_method_text_still_marks_transfer(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     _write_basic_sync_config(settings)
@@ -1067,6 +1176,185 @@ def test_sync_sku_mapping_handles_be_ao_ren_to_kem_variant(tmp_path: Path) -> No
     assert report["created"] == 1
     payload = thai_duong.create_calls[0]
     assert payload["products"][0]["sku"] == "THA356-JC-A-250-Kem-S"
+
+
+def test_sync_sku_mapping_selects_distinct_colors_for_jct383(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    dump_json(
+        settings.pancake_td_color_alias_config_path,
+        {
+            "be": "kem",
+            "kem": "trắng",
+            "trang": "trắng",
+        },
+    )
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "180157110313921",
+                "custom_id": "JCT383",
+                "inserted_at_timestamp": 1_781_094_546,
+                "transfer_money": 690000,
+                "total_price": 690000,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "JC-A-253-BE: AO BE-L",
+                            "color": "Be: Áo be",
+                            "retail_price": 190000,
+                            "name": "Oreo Latte Tanktop JCA253",
+                        },
+                    },
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "JC-A-250-BE: AO REN MAU BE-L",
+                            "color": "Áo Kem",
+                            "retail_price": 250000,
+                            "name": "Falling Cloud JCA250",
+                        },
+                    },
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "JC-A-250-AO DEN-L",
+                            "color": "Áo Đen",
+                            "retail_price": 250000,
+                            "name": "Falling Cloud JCA250",
+                        },
+                    },
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[
+            {"id": 1, "sku": "THA356-JC-A-250-Cam-L", "color": "", "name": "Falling Cloud JCA250"},
+            {"id": 2, "sku": "THA356-JC-A-250-Đen-L", "color": "", "name": "Falling Cloud JCA250"},
+            {"id": 3, "sku": "THA356-JC-A-250-Kem-L", "color": "", "name": "Falling Cloud JCA250"},
+            {"id": 4, "sku": "THA356-JC-A-253-Áo_be-L", "color": "", "name": "Oreo Latte Tanktop JCA253"},
+            {"id": 5, "sku": "THA356-JC-A-253-Áo_đen-L", "color": "", "name": "Oreo Latte Tanktop JCA253"},
+        ]
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    assert [item["sku"] for item in thai_duong.create_calls[0]["products"]] == [
+        "THA356-JC-A-253-Áo_be-L",
+        "THA356-JC-A-250-Kem-L",
+        "THA356-JC-A-250-Đen-L",
+    ]
+
+
+def test_sync_sku_mapping_handles_jca250_cam_dao_as_cam(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    dump_json(
+        settings.pancake_td_color_alias_config_path,
+        {
+            "cam đào": "cam",
+            "kem": "trắng",
+        },
+    )
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "10862084881",
+                "custom_id": "JCT388",
+                "inserted_at_timestamp": 1_781_342_087,
+                "payment_method": "cod",
+                "total_price": 250000,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "JC-A-250-AO CAM DAO-M",
+                            "color": "Áo Cam Đào",
+                            "retail_price": 250000,
+                            "name": "Falling Cloud JCA250",
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[
+            {"id": 1, "sku": "THA356-JC-A-250-Cam-S", "color": "", "name": "Falling Cloud JCA250"},
+            {"id": 2, "sku": "THA356-JC-A-250-Cam-M", "color": "", "name": "Falling Cloud JCA250"},
+            {"id": 3, "sku": "THA356-JC-A-250-Cam-L", "color": "", "name": "Falling Cloud JCA250"},
+            {"id": 4, "sku": "THA356-JC-A-250-Đen-M", "color": "", "name": "Falling Cloud JCA250"},
+        ]
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    assert thai_duong.create_calls[0]["products"][0]["sku"] == "THA356-JC-A-250-Cam-M"
+
+
+def test_sync_sku_mapping_keeps_jca248_be_and_cam_dao_distinct(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    dump_json(
+        settings.pancake_td_color_alias_config_path,
+        {
+            "be": "kem",
+            "cam đào": "cam",
+            "kem": "trắng",
+        },
+    )
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "jct388-jca248",
+                "custom_id": "JCT388A",
+                "inserted_at_timestamp": 1_781_342_087,
+                "payment_method": "cod",
+                "total_price": 440000,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "JC-A-248-BE: AO BE-M",
+                            "color": "Áo Kem",
+                            "retail_price": 220000,
+                            "name": "Falling Cloud Set JCA248",
+                        },
+                    },
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "JC-A-248-AO CAM DAO-M",
+                            "color": "Áo Cam Đào",
+                            "retail_price": 220000,
+                            "name": "Falling Cloud Set JCA248",
+                        },
+                    },
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[
+            {"id": 1, "sku": "THA356-JC-A-248-Áo_be-M", "color": "", "name": "Falling Cloud Set JCA248"},
+            {"id": 2, "sku": "THA356-JC-A-248-Cam_Đào-M", "color": "", "name": "Falling Cloud Set JCA248"},
+        ]
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    assert [item["sku"] for item in thai_duong.create_calls[0]["products"]] == [
+        "THA356-JC-A-248-Áo_be-M",
+        "THA356-JC-A-248-Cam_Đào-M",
+    ]
 
 
 def test_sync_sku_mapping_handles_nude_beige_to_hong_variant(tmp_path: Path) -> None:
