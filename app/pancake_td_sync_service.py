@@ -1116,7 +1116,11 @@ class PancakeToThaiDuongSyncService:
                     candidates.extend(td_index.get(f"{code_key}|", []))
             if not candidates:
                 raise ValueError(f"Không tìm thấy SKU '{code_raw}' màu '{color_raw or 'trống'}' trên Thái Dương.")
-            pick = candidates[0]
+            pick = self._select_product_candidate(
+                candidates,
+                source_sku=code_raw,
+                color_keys=color_keys,
+            )
             mapped_items.append(
                 {
                     "product_id": pick.get("product_id"),
@@ -1129,6 +1133,123 @@ class PancakeToThaiDuongSyncService:
                 }
             )
         return mapped_items
+
+    def _select_product_candidate(
+        self,
+        candidates: list[dict[str, Any]],
+        *,
+        source_sku: str,
+        color_keys: list[str],
+    ) -> dict[str, Any]:
+        unique_candidates: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            signature = (
+                str(candidate.get("product_id") or ""),
+                str(candidate.get("variant_id") or ""),
+                str(candidate.get("sku") or ""),
+            )
+            if signature in seen:
+                continue
+            seen.add(signature)
+            unique_candidates.append(candidate)
+        if not unique_candidates:
+            raise ValueError(f"Không có biến thể Thái Dương hợp lệ cho SKU '{source_sku}'.")
+
+        source_size = self._extract_size_key(source_sku)
+        ignored_color_keys = {
+            "ao",
+            "vay",
+            "dam",
+            "quan",
+            "chan",
+            "mau",
+            "ren",
+            "color",
+            "dress",
+            "shirt",
+            "skirt",
+        }
+        preferred_colors = sorted(
+            {
+                self._normalize_compare_text(key)
+                for key in color_keys
+                if self._normalize_compare_text(key)
+                and self._normalize_compare_text(key) not in ignored_color_keys
+            },
+            key=len,
+            reverse=True,
+        )
+        source_color_tokens = self._sku_color_tokens(source_sku)
+
+        def _score(candidate: dict[str, Any]) -> tuple[int, int]:
+            candidate_sku = str(candidate.get("sku") or "")
+            normalized_sku = self._normalize_compare_text(candidate_sku)
+            score = 0
+            candidate_size = self._extract_size_key(candidate_sku)
+            if source_size and candidate_size:
+                score += 100 if source_size == candidate_size else -100
+            matched_color_length = 0
+            for color_key in preferred_colors:
+                if len(color_key) < 2 or color_key not in normalized_sku:
+                    continue
+                matched_color_length = max(matched_color_length, len(color_key))
+            if matched_color_length:
+                score += 30 + matched_color_length
+            candidate_color_tokens = self._sku_color_tokens(candidate_sku)
+            shared_source_colors = source_color_tokens & candidate_color_tokens
+            if shared_source_colors:
+                score += 20 + sum(len(token) for token in shared_source_colors)
+            return score, matched_color_length
+
+        return max(unique_candidates, key=_score)
+
+    @classmethod
+    def _sku_color_tokens(cls, value: str) -> set[str]:
+        known_colors = {
+            "be",
+            "beige",
+            "black",
+            "blue",
+            "brown",
+            "cam",
+            "cream",
+            "dao",
+            "den",
+            "do",
+            "ghi",
+            "green",
+            "hong",
+            "kem",
+            "mint",
+            "nau",
+            "nude",
+            "pink",
+            "red",
+            "tim",
+            "trang",
+            "vang",
+            "white",
+            "xam",
+            "xanh",
+            "yellow",
+        }
+        result: set[str] = set()
+        for token in re.split(r"[-_:/\s]+", str(value or "")):
+            normalized = cls._normalize_compare_text(token)
+            if normalized in known_colors:
+                result.add(normalized)
+        return result
+
+    @staticmethod
+    def _extract_size_key(value: str) -> str:
+        text = str(value or "").strip().upper()
+        match = re.search(r"(?:^|[-_:/\s])((?:XX?L)|[SML])\s*$", text)
+        if not match:
+            return ""
+        return match.group(1)
 
     def _extract_item_color(self, item: dict[str, Any], color_paths: list[str]) -> str:
         direct = str(self._extract_first_value(item, color_paths) or "").strip()
@@ -1192,6 +1313,13 @@ class PancakeToThaiDuongSyncService:
         method_paths = self._as_list(pancake_cfg.get("payment_method_paths"))
         transferred_paths = self._as_list(pancake_cfg.get("transferred_amount_paths"))
         deposit_paths = self._as_list(pancake_cfg.get("deposit_amount_paths"))
+        exchange_original_amount_paths = self._as_list(
+            pancake_cfg.get("exchange_original_amount_paths")
+        )
+        exchange_remaining_amount_paths = self._as_list(
+            pancake_cfg.get("exchange_remaining_amount_paths")
+        )
+        exchange_marker_paths = self._as_list(pancake_cfg.get("exchange_marker_paths"))
         total_paths = self._as_list(pancake_cfg.get("total_amount_paths"))
         transfer_keywords = self._to_keyword_set(pancake_cfg.get("payment_method_transfer_keywords"))
         deposit_keywords = self._to_keyword_set(pancake_cfg.get("payment_method_deposit_keywords"))
@@ -1208,6 +1336,25 @@ class PancakeToThaiDuongSyncService:
             transferred_paths = ["transferred_amount", "paid_amount", "codTransferred"]
         if not deposit_paths:
             deposit_paths = ["deposit_amount", "deposit", "codTransferred"]
+        if not exchange_original_amount_paths:
+            exchange_original_amount_paths = [
+                "payment_from_customers_exchange_order",
+                "order_returned.order_to_returned.payment_from_customers_order_returned",
+                "order_returned.order_to_returned.cod",
+            ]
+        if not exchange_remaining_amount_paths:
+            exchange_remaining_amount_paths = [
+                "cod",
+                "cod_amount",
+                "payment.remaining_amount",
+                "payment.cod",
+            ]
+        if not exchange_marker_paths:
+            exchange_marker_paths = [
+                "exchanged_returned_order_ids",
+                "order_returned",
+                "order_returned.order_id_to_returned",
+            ]
         if not total_paths:
             total_paths = ["total_price", "total", "cod"]
         if not transfer_keywords:
@@ -1220,9 +1367,24 @@ class PancakeToThaiDuongSyncService:
         method_text = self._normalize_compare_text(str(self._extract_first_value(order, method_paths) or ""))
         transferred_amount = self._to_optional_float(self._extract_first_value(order, transferred_paths))
         deposit_amount = self._to_optional_float(self._extract_first_value(order, deposit_paths))
+        exchange_original_amount = self._to_optional_float(
+            self._extract_first_value(order, exchange_original_amount_paths)
+        )
+        exchange_remaining_amount = self._to_optional_float(
+            self._extract_first_value(order, exchange_remaining_amount_paths)
+        )
+        exchange_marker = self._extract_first_value(order, exchange_marker_paths)
         total_amount = self._to_optional_float(self._extract_first_value(order, total_paths))
         transferred_amount = self._scale_money_to_major_unit(transferred_amount, money_minor_unit_factor)
         deposit_amount = self._scale_money_to_major_unit(deposit_amount, money_minor_unit_factor)
+        exchange_original_amount = self._scale_money_to_major_unit(
+            exchange_original_amount,
+            money_minor_unit_factor,
+        )
+        exchange_remaining_amount = self._scale_money_to_major_unit(
+            exchange_remaining_amount,
+            money_minor_unit_factor,
+        )
         total_amount = self._scale_money_to_major_unit(total_amount, money_minor_unit_factor)
         if total_amount is None:
             total_amount = self._scale_money_to_major_unit(
@@ -1238,6 +1400,21 @@ class PancakeToThaiDuongSyncService:
         has_transfer_amount = transferred_amount is not None and transferred_amount > 0
         has_transfer = has_transfer_keyword or (has_transfer_amount and not has_cod_keyword and not has_deposit_keyword)
         has_deposit = has_deposit_keyword
+        has_exchange_marker = self._has_meaningful_value(exchange_marker)
+        has_exchange_amount = exchange_original_amount is not None and exchange_original_amount > 0
+        if has_exchange_marker or has_exchange_amount:
+            original_amount = max(0.0, exchange_original_amount or 0.0)
+            remaining_amount = exchange_remaining_amount
+            if remaining_amount is None:
+                remaining_amount = max(0.0, float(total_amount) - original_amount)
+            else:
+                remaining_amount = max(0.0, remaining_amount)
+            return {
+                "payment_type": "COD",
+                "deposit_amount": 0.0,
+                "cod_amount": self._round_money(float(remaining_amount)),
+                "rule": "exchange",
+            }
         if has_transfer:
             transferred = transferred_amount if transferred_amount is not None else total_amount
             return {
@@ -1617,6 +1794,7 @@ class PancakeToThaiDuongSyncService:
                 "hong",
                 "vang",
                 "cam",
+                "dao",
                 "tim",
                 "xam",
                 "ghi",
@@ -1925,6 +2103,22 @@ class PancakeToThaiDuongSyncService:
                     "codTransferred",
                 ],
                 "deposit_amount_paths": ["deposit_amount", "deposit", "codTransferred"],
+                "exchange_original_amount_paths": [
+                    "payment_from_customers_exchange_order",
+                    "order_returned.order_to_returned.payment_from_customers_order_returned",
+                    "order_returned.order_to_returned.cod",
+                ],
+                "exchange_remaining_amount_paths": [
+                    "cod",
+                    "cod_amount",
+                    "payment.remaining_amount",
+                    "payment.cod",
+                ],
+                "exchange_marker_paths": [
+                    "exchanged_returned_order_ids",
+                    "order_returned",
+                    "order_returned.order_id_to_returned",
+                ],
                 "total_amount_paths": ["total_price", "total", "cod"],
                 "money_minor_unit_factor": 1,
                 "payment_method_transfer_keywords": [
@@ -2128,7 +2322,7 @@ class PancakeToThaiDuongSyncService:
     @staticmethod
     def _normalize_compare_text(value: str) -> str:
         folded = unicodedata.normalize("NFD", str(value or "").lower())
-        no_accents = "".join(ch for ch in folded if unicodedata.category(ch) != "Mn")
+        no_accents = "".join(ch for ch in folded if unicodedata.category(ch) != "Mn").replace("đ", "d")
         return re.sub(r"[\s\-_]+", "", no_accents).strip()
 
     @staticmethod
@@ -2179,6 +2373,17 @@ class PancakeToThaiDuongSyncService:
             return float(cleaned)
         except ValueError:
             return None
+
+    @staticmethod
+    def _has_meaningful_value(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, (list, dict, tuple, set)):
+            return bool(value)
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        return text not in {"", "0", "false", "none", "null"}
 
     @staticmethod
     def _scale_money_to_major_unit(value: float | None, factor: int) -> float | None:

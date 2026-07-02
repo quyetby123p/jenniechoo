@@ -44,6 +44,22 @@
     "payment_method_paths": ["payment_method", "paymentType", "payment.type"],
     "transferred_amount_paths": ["transferred_amount", "transfer_money", "paid_amount", "codTransferred", "payment.transferred_amount"],
     "deposit_amount_paths": ["deposit_amount", "deposit", "codTransferred", "payment.deposit_amount"],
+    "exchange_original_amount_paths": [
+      "payment_from_customers_exchange_order",
+      "order_returned.order_to_returned.payment_from_customers_order_returned",
+      "order_returned.order_to_returned.cod"
+    ],
+    "exchange_remaining_amount_paths": [
+      "cod",
+      "cod_amount",
+      "payment.remaining_amount",
+      "payment.cod"
+    ],
+    "exchange_marker_paths": [
+      "exchanged_returned_order_ids",
+      "order_returned",
+      "order_returned.order_id_to_returned"
+    ],
     "total_amount_paths": ["total_price", "total", "cod"],
     "money_minor_unit_factor": 100,
     "payment_method_transfer_keywords": [
