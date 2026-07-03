@@ -94,6 +94,35 @@ def build_non_jc_hashtag_suffix(message_text: str, sku_prefix: str = _DEFAULT_SK
     return f"|{'_'.join(hashtags)}"
 
 
+def _config_bool(value: object, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized:
+            return default
+        return normalized in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _format_plan_template(template: object, *, campaign_name: str, sku_code_text: str) -> str:
+    text = str(template or "").strip()
+    if not text:
+        return ""
+    return text.format(
+        campaign_name=campaign_name,
+        sku_code_text=sku_code_text,
+    )
+
+
+def _adset_overrides_have_targeting(objective_config: dict) -> bool:
+    overrides = objective_config.get("adset_payload_overrides", {})
+    if not isinstance(overrides, dict):
+        return False
+    targeting = overrides.get("targeting")
+    return isinstance(targeting, dict) and bool(targeting)
+
+
 def build_campaign_plan(
     command: AdsCommand,
     resolved_post: ResolvedPost,
@@ -115,7 +144,15 @@ def build_campaign_plan(
         )
     sku_code_text = "_".join(sku_codes)
 
-    campaign_name = f"ADS:QUYET|MK:ThaiLan|{sku_code_text}|Codex"
+    campaign_name_template = str(
+        objective_config.get("campaign_name_template", "ADS:QUYET|MK:ThaiLan|{sku_code_text}|Codex")
+        or "ADS:QUYET|MK:ThaiLan|{sku_code_text}|Codex"
+    )
+    campaign_name = _format_plan_template(
+        campaign_name_template,
+        campaign_name="",
+        sku_code_text=sku_code_text,
+    )
     media_label = (resolved_post.media_label or "Anh").strip() or "Anh"
     non_sku_suffix = build_non_jc_hashtag_suffix(resolved_post.message_text, sku_prefix)
     ad_name = f"ADS:QUYET|MK:ThaiLan|SKU:{sku_code_text}|MED:{media_label}{non_sku_suffix}"
@@ -123,23 +160,55 @@ def build_campaign_plan(
     template_name, templates = _resolve_template_name(objective_config, template_config)
 
     slots: list[AudienceSlot] = []
-    for key, label, suffix in _AUDIENCE_LAYOUT:
-        audience_id = str(audiences_config.get(key, "")).strip()
-        if not audience_id or audience_id == "replace_me":
+    if _config_bool(objective_config.get("new_campaign_single_adset"), default=False):
+        audience_id = str(
+            objective_config.get("new_campaign_single_adset_saved_audience_id", "")
+            or audiences_config.get("new_campaign_single_adset_saved_audience_id", "")
+        ).strip()
+        if (not audience_id or audience_id == "replace_me") and not _adset_overrides_have_targeting(
+            objective_config
+        ):
             raise ValueError(
-                f"Saved Audience ID cho '{label}' chua duoc cau hinh trong audiences.json."
+                "new_campaign_single_adset đang bật nhưng chưa có saved audience hoặc targeting "
+                "trong objective_config.adset_payload_overrides."
             )
-        adset_name = f"{campaign_name} - {label}"
+        adset_name_template = str(
+            objective_config.get("new_campaign_adset_name_template", "{campaign_name}")
+            or "{campaign_name}"
+        )
+        adset_name = _format_plan_template(
+            adset_name_template,
+            campaign_name=campaign_name,
+            sku_code_text=sku_code_text,
+        )
         slots.append(
             AudienceSlot(
-                key=key,
-                label=label,
-                suffix=suffix,
+                key="new_campaign_single_adset",
+                label=str(objective_config.get("new_campaign_single_adset_label", "Broad") or "Broad"),
+                suffix=str(objective_config.get("new_campaign_single_adset_suffix", "BROAD") or "BROAD"),
                 saved_audience_id=audience_id,
                 adset_name=adset_name,
                 ad_name=ad_name,
             )
         )
+    else:
+        for key, label, suffix in _AUDIENCE_LAYOUT:
+            audience_id = str(audiences_config.get(key, "")).strip()
+            if not audience_id or audience_id == "replace_me":
+                raise ValueError(
+                    f"Saved Audience ID cho '{label}' chua duoc cau hinh trong audiences.json."
+                )
+            adset_name = f"{campaign_name} - {label}"
+            slots.append(
+                AudienceSlot(
+                    key=key,
+                    label=label,
+                    suffix=suffix,
+                    saved_audience_id=audience_id,
+                    adset_name=adset_name,
+                    ad_name=ad_name,
+                )
+            )
 
     objective, conversion_location, result_goal = _resolve_objective_meta(objective_config)
     raw = _build_payload_overrides(objective_config, templates[template_name])

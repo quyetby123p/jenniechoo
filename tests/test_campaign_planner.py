@@ -153,6 +153,46 @@ def test_build_campaign_plan_uses_configured_vxv_prefix() -> None:
     assert plan.audiences[0].ad_name == "ADS:QUYET|MK:ThaiLan|SKU:VXV238_VXV239|MED:Anh|Sale"
 
 
+def test_build_campaign_plan_supports_single_broad_adset_layout() -> None:
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/permalink.php?story_fbid=1001&id=1002",
+        budget_daily_vnd=235014,
+    )
+    objective = _base_objective()
+    objective.update(
+        {
+            "sku_prefix": "VXV",
+            "campaign_name_template": "ADS:QUYET|MK:ThaiLan|{sku_code_text}",
+            "new_campaign_single_adset": True,
+            "new_campaign_adset_name_template": "{campaign_name}",
+            "adset_payload_overrides": {
+                "targeting": {
+                    "age_min": 20,
+                    "age_max": 65,
+                    "genders": [2],
+                    "geo_locations": {"countries": ["TH"]},
+                }
+            },
+        }
+    )
+    resolved = _resolved_post()
+    resolved.message_text = "Noi dung post #VXV011"
+    plan = build_campaign_plan(
+        command=cmd,
+        resolved_post=resolved,
+        post_fingerprint="abc123",
+        version=1,
+        timezone_name="Asia/Ho_Chi_Minh",
+        audiences_config={},
+        objective_config=objective,
+        template_config=_base_templates(),
+    )
+    assert plan.campaign_name == "ADS:QUYET|MK:ThaiLan|VXV011"
+    assert len(plan.audiences) == 1
+    assert plan.audiences[0].adset_name == "ADS:QUYET|MK:ThaiLan|VXV011"
+    assert plan.audiences[0].saved_audience_id == ""
+
+
 def test_build_campaign_plan_missing_jc_code() -> None:
     cmd = AdsCommand(
         post_url="https://www.facebook.com/permalink.php?story_fbid=1001&id=1002",

@@ -2924,6 +2924,187 @@ def test_new_mode_fallbacks_to_messenger_when_instagram_media_requirement_fails(
     assert "không có hình ảnh hoặc video" in payload["destination_fallback_reason"]
 
 
+def test_new_mode_clones_source_adset_ads_for_single_broad_adset(monkeypatch) -> None:  # noqa: ANN001
+    class NewModeCloneSourceMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.campaign_candidates = [
+                {
+                    "id": "camp_newer_sample",
+                    "name": "ADS:QUYET|MK:ThaiLan|VXV011",
+                    "effective_status": "ACTIVE",
+                    "updated_time": "2026-07-03T03:00:00+0000",
+                },
+                {
+                    "id": "camp_source",
+                    "name": "ADS:QUYET|MK:ThaiLan|VXV011|Codex",
+                    "effective_status": "ACTIVE",
+                    "updated_time": "2026-07-02T03:00:00+0000",
+                },
+            ]
+            self.created_adsets: list[str] = []
+            self.duplicate_calls: list[tuple[str, str | None, str | None, str]] = []
+
+        @staticmethod
+        def effective_destination_type(plan: PlannedCampaign) -> str:
+            overrides = plan.raw.get("adset_payload_overrides", {}) if isinstance(plan.raw, dict) else {}
+            if isinstance(overrides, dict):
+                value = str(overrides.get("destination_type", "")).strip().upper()
+                if value:
+                    return value
+            return "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+
+        def resolve_post(self, post_url: str) -> ResolvedPost:
+            return ResolvedPost(
+                post_id="122187966374934207",
+                page_id="649228828282105",
+                permalink_url=post_url,
+                object_story_id="649228828282105_122187966374934207",
+                strategy="direct_numeric_post",
+                message_text="Softness, in its purest form. #VXV011",
+                media_label="Anh",
+            )
+
+        def list_eligible_adsets(self, campaign_id: str, max_count: int) -> list[dict[str, str]]:  # noqa: ARG002
+            assert campaign_id == "camp_source"
+            return [
+                {
+                    "id": "120251078976670316",
+                    "name": "ADS:QUYET|MK:ThaiLan|VXV011|Codex - Thời trang",
+                    "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                },
+                {
+                    "id": "du_lich",
+                    "name": "ADS:QUYET|MK:ThaiLan|VXV011|Codex - Du lịch",
+                    "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                },
+            ]
+
+        def list_adset_ads_for_copy(
+            self,
+            adset_id: str,
+            *,
+            max_ads: int = 50,
+            include_statuses: list[str] | None = None,
+            name_contains: str | None = None,
+        ) -> list[dict[str, str]]:
+            assert adset_id == "120251078976670316"
+            assert max_ads == 20
+            assert include_statuses == ["ACTIVE", "PAUSED"]
+            assert name_contains == "SKU:VXV011"
+            return [
+                {"id": f"source_ad_{index}", "name": f"ADS:QUYET|MK:ThaiLan|SKU:VXV011|MED:Video|{index}"}
+                for index in range(1, 6)
+            ]
+
+        def list_page_posts_by_sku(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise AssertionError("Không được scan page khi đã có source ads.")
+
+        def create_campaign(self, plan: PlannedCampaign) -> str:
+            assert plan.campaign_name == "ADS:QUYET|MK:ThaiLan|VXV011"
+            return "camp_new_vxv011"
+
+        def create_adset(self, plan: PlannedCampaign, campaign_id: str, slot: AudienceSlot) -> str:  # noqa: ARG002
+            assert campaign_id == "camp_new_vxv011"
+            self.created_adsets.append(slot.adset_name)
+            return "adset_broad_new"
+
+        def create_ad_creative(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise AssertionError("Không được tạo creative mới khi clone source ads.")
+
+        def create_ad(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise AssertionError("Không được tạo ad mới thủ công khi clone source ads.")
+
+        def duplicate_ad_from_source(
+            self,
+            source_ad_id: str,
+            target_ad_name: str | None = None,
+            *,
+            target_adset_id: str | None = None,
+            status_option: str = "PAUSED",
+        ) -> str:
+            self.duplicate_calls.append((source_ad_id, target_ad_name, target_adset_id, status_option))
+            return f"copied_{source_ad_id}"
+
+    fake_plan = PlannedCampaign(
+        version=8,
+        campaign_name="ADS:QUYET|MK:ThaiLan|VXV011",
+        sku_code_text="VXV011",
+        media_label="Anh",
+        post_url="https://www.facebook.com/122187834464934207/posts/122187966374934207",
+        post_fingerprint="fp_vxv011",
+        budget_daily_vnd=235014,
+        objective="OUTCOME_ENGAGEMENT",
+        conversion_location="MESSAGING_DESTINATION",
+        result_goal="MAXIMIZE_PURCHASES_VIA_MESSAGE",
+        message_template_name="Mess Cơ bản",
+        audiences=[
+            AudienceSlot(
+                "new_campaign_single_adset",
+                "Broad",
+                "BROAD",
+                "",
+                "ADS:QUYET|MK:ThaiLan|VXV011",
+                "unused",
+            )
+        ],
+        raw={
+            "adset_payload_overrides": {
+                "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                "targeting": {"geo_locations": {"countries": ["TH"]}},
+            }
+        },
+    )
+
+    def fake_load_json(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        path_text = str(path)
+        if "objective" in path_text:
+            return {
+                "sku_prefix": "VXV",
+                "new_campaign_clone_source_adset_ads": True,
+                "new_campaign_source_campaign_name_template": "ADS:QUYET|MK:ThaiLan|{sku_code_text}|Codex",
+                "new_campaign_source_adset_name_template": "{source_campaign_name} - Thời trang",
+                "new_campaign_source_ad_name_contains": "SKU:{sku_code_text}",
+                "new_campaign_source_ad_statuses": ["ACTIVE", "PAUSED"],
+                "new_campaign_source_max_ads": 20,
+                "collect_sku_page_posts": True,
+            }
+        return {}
+
+    monkeypatch.setattr(telegram_bot_module, "load_json", fake_load_json)
+    monkeypatch.setattr(telegram_bot_module, "build_campaign_plan", lambda **_kwargs: fake_plan)
+    meta = NewModeCloneSourceMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/122187834464934207/posts/122187966374934207",
+        budget_daily_vnd=235014,
+    )
+
+    asyncio.run(
+        bot._create_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_vxv011",
+            version=8,
+        )
+    )
+
+    assert meta.find_active_campaigns_calls == [["VXV011"]]
+    assert meta.created_adsets == ["ADS:QUYET|MK:ThaiLan|VXV011"]
+    assert len(meta.duplicate_calls) == 5
+    assert all(call[2] == "adset_broad_new" and call[3] == "PAUSED" for call in meta.duplicate_calls)
+    payload = storage.saved_jobs[-1][1]
+    assert payload["campaign_name"] == "ADS:QUYET|MK:ThaiLan|VXV011"
+    assert payload["source_campaign_id"] == "camp_source"
+    assert payload["source_adset_id"] == "120251078976670316"
+    assert payload["source_ad_count"] == 5
+    assert payload["ad_ids"] == [f"copied_source_ad_{index}" for index in range(1, 6)]
+    assert "Source ad count: 5" in bot._bot.messages[-1]["text"]
+
+
 def test_new_mode_collects_sku_page_posts_across_all_adsets(monkeypatch) -> None:  # noqa: ANN001
     class NewModeCollectSkuMeta(FakeMeta):
         def __init__(self) -> None:

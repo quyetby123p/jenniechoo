@@ -1435,6 +1435,91 @@ class MetaAdsClient:
         )
         return candidates[0]
 
+    def list_adset_ads_for_copy(
+        self,
+        adset_id: str,
+        *,
+        max_ads: int = 50,
+        include_statuses: list[str] | None = None,
+        name_contains: str | None = None,
+    ) -> list[dict[str, str]]:
+        normalized_adset_id = str(adset_id or "").strip()
+        if not normalized_adset_id:
+            raise ValidationError("Thiếu adset ID nguồn để lấy ads copy.")
+
+        allowed_statuses = {
+            str(item).strip().upper()
+            for item in (include_statuses or ["ACTIVE", "PAUSED"])
+            if str(item).strip()
+        }
+        name_filter = str(name_contains or "").strip().upper()
+        next_path = f"/{normalized_adset_id}/ads"
+        next_params: dict[str, Any] | None = {
+            "fields": (
+                "id,name,status,effective_status,updated_time,issues_info,"
+                "creative{"
+                "id,object_story_id,effective_object_story_id,"
+                "page_welcome_message,call_to_action_type"
+                "}"
+            ),
+            "limit": 100,
+        }
+        scanned = 0
+        ads: list[dict[str, str]] = []
+
+        while next_path and scanned < max(1, int(max_ads)):
+            payload = self._request("GET", next_path, params=next_params)
+            data = payload.get("data", [])
+            if not isinstance(data, list):
+                data = []
+
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                scanned += 1
+                ad_id = str(item.get("id", "")).strip()
+                ad_name = str(item.get("name", "")).strip()
+                status = str(item.get("status", "")).strip().upper()
+                effective_status = str(item.get("effective_status", "")).strip().upper()
+                if not ad_id:
+                    continue
+                if allowed_statuses and status not in allowed_statuses:
+                    continue
+                if effective_status == "WITH_ISSUES":
+                    continue
+                if item.get("issues_info"):
+                    continue
+                if name_filter and name_filter not in ad_name.upper():
+                    continue
+                creative = item.get("creative")
+                if not isinstance(creative, dict):
+                    creative = {}
+                ads.append(
+                    {
+                        "id": ad_id,
+                        "name": ad_name,
+                        "status": status,
+                        "effective_status": effective_status,
+                        "updated_time": str(item.get("updated_time", "")).strip(),
+                        "creative_id": str(creative.get("id", "")).strip(),
+                        "call_to_action_type": str(creative.get("call_to_action_type", "")).strip(),
+                        "object_story_id": str(creative.get("object_story_id", "")).strip(),
+                        "effective_object_story_id": str(
+                            creative.get("effective_object_story_id", "")
+                        ).strip(),
+                    }
+                )
+                if scanned >= max(1, int(max_ads)):
+                    break
+
+            paging = payload.get("paging", {}) if isinstance(payload, dict) else {}
+            next_url = str(paging.get("next", "")).strip()
+            if not next_url or scanned >= max(1, int(max_ads)):
+                break
+            next_path, next_params = self._path_and_params_from_next_url(next_url)
+
+        return ads
+
     @classmethod
     def _page_welcome_message_matches_expected(cls, actual: Any, expected: Any | None) -> bool:
         if expected is None:
@@ -1510,7 +1595,20 @@ class MetaAdsClient:
         campaign_id: str,
         slot: AudienceSlot,
     ) -> str:
-        targeting = self.get_saved_audience_targeting(slot.saved_audience_id)
+        adset_overrides = plan.raw.get("adset_payload_overrides", {})
+        override_targeting = (
+            adset_overrides.get("targeting")
+            if isinstance(adset_overrides, dict)
+            else None
+        )
+        if str(slot.saved_audience_id or "").strip():
+            targeting = self.get_saved_audience_targeting(slot.saved_audience_id)
+        elif isinstance(override_targeting, dict) and override_targeting:
+            targeting = override_targeting
+        else:
+            raise ValidationError(
+                f"Adset {slot.adset_name} thiếu saved audience hoặc targeting override."
+            )
         payload = {
             "name": slot.adset_name,
             "campaign_id": campaign_id,

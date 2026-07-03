@@ -850,7 +850,28 @@ class TelegramAdsBot:
             multi_destination_creative_overrides: dict[str, Any] | None = None
             force_message_page_cta = self._should_force_message_page_cta_for_post(plan, resolved_post)
             campaign_posts: list[Any] = [resolved_post]
-            if self._should_collect_sku_page_posts(objective):
+            source_ads_package: dict[str, Any] | None = None
+            if self._should_clone_new_campaign_source_ads(objective):
+                try:
+                    source_ads_package = await asyncio.to_thread(
+                        self._find_new_campaign_source_ads,
+                        active_plan,
+                        objective,
+                    )
+                    if source_ads_package:
+                        self.logger.info(
+                            "Len moi se copy %s ads tu source adset %s cho campaign %s.",
+                            len(source_ads_package.get("ads", [])),
+                            source_ads_package.get("adset_id", ""),
+                            plan.campaign_name,
+                        )
+                except (ValidationError, MetaApiError, ValueError, TypeError) as exc:
+                    self.logger.warning(
+                        "Khong lay duoc source ads cho luong len moi, fallback scan page: %s",
+                        exc,
+                    )
+
+            if source_ads_package is None and self._should_collect_sku_page_posts(objective):
                 try:
                     sku_posts = await asyncio.to_thread(
                         self.meta.list_page_posts_by_sku,
@@ -890,7 +911,29 @@ class TelegramAdsBot:
 
             campaign_id = await asyncio.to_thread(self.meta.create_campaign, active_plan)
 
-            if len(campaign_posts) > 1:
+            if source_ads_package is not None:
+                source_ads = [
+                    item
+                    for item in source_ads_package.get("ads", [])
+                    if isinstance(item, dict) and str(item.get("id", "")).strip()
+                ]
+                if not source_ads:
+                    raise ValidationError("Không tìm thấy source ads hợp lệ để copy sang campaign mới.")
+                for slot in active_plan.audiences:
+                    adset_id = await asyncio.to_thread(self.meta.create_adset, active_plan, campaign_id, slot)
+                    adset_ids.append(adset_id)
+                    for source_ad in source_ads:
+                        source_ad_id = str(source_ad.get("id", "")).strip()
+                        target_ad_name = str(source_ad.get("name", "")).strip()
+                        ad_id = await asyncio.to_thread(
+                            self.meta.duplicate_ad_from_source,
+                            source_ad_id,
+                            target_ad_name,
+                            target_adset_id=adset_id,
+                            status_option="PAUSED",
+                        )
+                        ad_ids.append(ad_id)
+            elif len(campaign_posts) > 1:
                 for slot in active_plan.audiences:
                     adset_id = await asyncio.to_thread(self.meta.create_adset, active_plan, campaign_id, slot)
                     adset_ids.append(adset_id)
@@ -1105,6 +1148,31 @@ class TelegramAdsBot:
                     }
                     for post_item in campaign_posts
                 ],
+                "source_campaign_id": (
+                    str(source_ads_package.get("campaign_id", "")).strip()
+                    if isinstance(source_ads_package, dict)
+                    else ""
+                ),
+                "source_campaign_name": (
+                    str(source_ads_package.get("campaign_name", "")).strip()
+                    if isinstance(source_ads_package, dict)
+                    else ""
+                ),
+                "source_adset_id": (
+                    str(source_ads_package.get("adset_id", "")).strip()
+                    if isinstance(source_ads_package, dict)
+                    else ""
+                ),
+                "source_adset_name": (
+                    str(source_ads_package.get("adset_name", "")).strip()
+                    if isinstance(source_ads_package, dict)
+                    else ""
+                ),
+                "source_ad_count": (
+                    len(source_ads_package.get("ads", []))
+                    if isinstance(source_ads_package, dict)
+                    else 0
+                ),
                 "ads_manager_url": self._build_ads_manager_url(campaign_id),
                 "created_at": now_utc_iso(),
             }
@@ -2662,6 +2730,150 @@ class TelegramAdsBot:
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
+
+    @staticmethod
+    def _should_clone_new_campaign_source_ads(objective_config: dict[str, Any]) -> bool:
+        value = objective_config.get("new_campaign_clone_source_adset_ads", False)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    @staticmethod
+    def _config_list(value: Any, default: list[str] | None = None) -> list[str]:
+        if value is None:
+            return list(default or [])
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        text = str(value).strip()
+        if not text:
+            return list(default or [])
+        return [part.strip() for part in text.split(",") if part.strip()]
+
+    @staticmethod
+    def _config_int(value: Any, default: int) -> int:
+        try:
+            parsed = int(str(value).strip())
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+
+    @staticmethod
+    def _format_new_campaign_template(
+        template: Any,
+        plan: PlannedCampaign,
+        *,
+        source_campaign_name: str = "",
+    ) -> str:
+        text = str(template or "").strip()
+        if not text:
+            return ""
+        return text.format(
+            campaign_name=plan.campaign_name,
+            sku_code_text=plan.sku_code_text,
+            source_campaign_name=source_campaign_name,
+        ).strip()
+
+    @staticmethod
+    def _normalized_text(value: Any) -> str:
+        return str(value or "").strip().upper()
+
+    def _find_new_campaign_source_ads(
+        self,
+        plan: PlannedCampaign,
+        objective_config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        keywords = [code for code in str(plan.sku_code_text or "").split("_") if code]
+        if not keywords:
+            return None
+
+        source_campaign_template = objective_config.get(
+            "new_campaign_source_campaign_name_template",
+            "ADS:QUYET|MK:ThaiLan|{sku_code_text}|Codex",
+        )
+        source_campaign_name = self._format_new_campaign_template(
+            source_campaign_template,
+            plan,
+        )
+        source_campaign_contains = self._format_new_campaign_template(
+            objective_config.get("new_campaign_source_campaign_name_contains", ""),
+            plan,
+        )
+        source_adset_template = objective_config.get(
+            "new_campaign_source_adset_name_template",
+            "{source_campaign_name} - Thời trang",
+        )
+        source_adset_contains = self._format_new_campaign_template(
+            objective_config.get("new_campaign_source_adset_name_contains", ""),
+            plan,
+            source_campaign_name=source_campaign_name,
+        )
+        source_ad_name_contains = self._format_new_campaign_template(
+            objective_config.get("new_campaign_source_ad_name_contains", "SKU:{sku_code_text}"),
+            plan,
+            source_campaign_name=source_campaign_name,
+        )
+        max_campaigns = self._config_int(objective_config.get("new_campaign_source_max_campaigns"), 20)
+        max_ads = self._config_int(objective_config.get("new_campaign_source_max_ads"), 50)
+        include_statuses = self._config_list(
+            objective_config.get("new_campaign_source_ad_statuses"),
+            ["ACTIVE", "PAUSED"],
+        )
+
+        campaigns = self.meta.find_active_campaigns_by_keywords(keywords)
+        campaign_checks = 0
+        normalized_source_campaign_name = self._normalized_text(source_campaign_name)
+        normalized_source_campaign_contains = self._normalized_text(source_campaign_contains)
+        normalized_source_adset_contains = self._normalized_text(source_adset_contains)
+
+        for campaign in campaigns:
+            if campaign_checks >= max_campaigns:
+                break
+            campaign_name = str(campaign.get("name", "")).strip()
+            normalized_campaign_name = self._normalized_text(campaign_name)
+            if normalized_source_campaign_name and normalized_campaign_name != normalized_source_campaign_name:
+                continue
+            if (
+                normalized_source_campaign_contains
+                and normalized_source_campaign_contains not in normalized_campaign_name
+            ):
+                continue
+            campaign_id = str(campaign.get("id", "")).strip()
+            if not campaign_id:
+                continue
+            campaign_checks += 1
+            adsets = self.meta.list_eligible_adsets(campaign_id, 20)
+            expected_adset_name = self._format_new_campaign_template(
+                source_adset_template,
+                plan,
+                source_campaign_name=campaign_name,
+            )
+            normalized_expected_adset_name = self._normalized_text(expected_adset_name)
+            for adset in adsets:
+                adset_id = str(adset.get("id", "")).strip()
+                adset_name = str(adset.get("name", "")).strip()
+                normalized_adset_name = self._normalized_text(adset_name)
+                if normalized_expected_adset_name and normalized_adset_name != normalized_expected_adset_name:
+                    continue
+                if normalized_source_adset_contains and normalized_source_adset_contains not in normalized_adset_name:
+                    continue
+                if not adset_id:
+                    continue
+                ads = self.meta.list_adset_ads_for_copy(
+                    adset_id,
+                    max_ads=max_ads,
+                    include_statuses=include_statuses,
+                    name_contains=source_ad_name_contains,
+                )
+                if not ads:
+                    continue
+                return {
+                    "campaign_id": campaign_id,
+                    "campaign_name": campaign_name,
+                    "adset_id": adset_id,
+                    "adset_name": adset_name,
+                    "ads": ads,
+                }
+        return None
 
     @staticmethod
     def _merge_resolved_posts(
@@ -4294,6 +4506,13 @@ class TelegramAdsBot:
                 + fallback_note
                 + "\n\nAnh bấm Duyệt để publish, hoặc Hủy để rollback adset/ads/creative mới tạo."
             )
+        source_copy_note = ""
+        if str(job.get("source_adset_id", "")).strip():
+            source_copy_note = (
+                f"- Source copy: {job.get('source_campaign_name', '')} | "
+                f"{job.get('source_adset_name', '')}\n"
+                f"- Source ad count: {job.get('source_ad_count', 0)}\n"
+            )
         return (
             "Đã tạo nháp campaign thành công.\n"
             f"- Job ID: {job['job_id']}\n"
@@ -4308,6 +4527,7 @@ class TelegramAdsBot:
             f"- Message template: {job['message_template_name']}\n"
             f"- Destination type: {job.get('active_destination_type', '')}\n"
             f"- Post map dùng để chạy ads: {job.get('resolved_permalink_url', job.get('post_url', ''))}\n"
+            f"{source_copy_note}"
             f"- Campaign ID: {job['campaign_id']}\n"
             f"- Adset IDs:\n{adset_lines}\n"
             f"- Ad IDs:\n{ad_lines}\n"

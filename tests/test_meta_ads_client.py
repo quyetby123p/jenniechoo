@@ -562,6 +562,58 @@ def test_create_adset_retries_with_simple_payload_when_bid_amount_required() -> 
     assert sent_payloads[1]["destination_type"] == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
 
 
+def test_create_adset_uses_targeting_override_without_saved_audience() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+    captured: dict[str, object] = {}
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = params, access_token
+        assert method == "POST"
+        assert path == "/act_1/adsets"
+        captured.update(data or {})
+        return {"id": "adset_broad_1"}
+
+    client._request = fake_request  # type: ignore[method-assign]
+    plan = PlannedCampaign(
+        version=1,
+        campaign_name="ADS:QUYET|MK:ThaiLan|VXV011",
+        sku_code_text="VXV011",
+        media_label="Anh",
+        post_url="https://www.facebook.com/post",
+        post_fingerprint="abc",
+        budget_daily_vnd=235014,
+        objective="OUTCOME_ENGAGEMENT",
+        conversion_location="MESSAGING_DESTINATION",
+        result_goal="MAXIMIZE_PURCHASES_VIA_MESSAGE",
+        message_template_name="Mess Cơ bản",
+        raw={
+            "adset_payload_overrides": {
+                "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                "targeting": {
+                    "age_min": 20,
+                    "age_max": 65,
+                    "genders": [2],
+                    "geo_locations": {"countries": ["TH"], "location_types": ["home", "recent"]},
+                    "targeting_automation": {"advantage_audience": 1},
+                },
+            }
+        },
+    )
+    slot = AudienceSlot(
+        key="new_campaign_single_adset",
+        label="Broad",
+        suffix="BROAD",
+        saved_audience_id="",
+        adset_name="ADS:QUYET|MK:ThaiLan|VXV011",
+        ad_name="ADS:QUYET|MK:ThaiLan|SKU:VXV011|MED:Anh",
+    )
+
+    adset_id = client.create_adset(plan=plan, campaign_id="camp_1", slot=slot)
+
+    assert adset_id == "adset_broad_1"
+    assert captured["targeting"] == plan.raw["adset_payload_overrides"]["targeting"]
+
+
 def test_create_ad_creative_strips_internal_template_keys() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
     captured: dict[str, object] = {}
@@ -1036,6 +1088,70 @@ def test_duplicate_ad_from_source_supports_target_adset_override() -> None:
         "/120249992082570728/copies",
         {"status_option": "PAUSED", "adset_id": "120248804559660728"},
     )
+
+
+def test_list_adset_ads_for_copy_filters_issues_and_name() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = data, access_token
+        assert method == "GET"
+        assert path == "/adset_source/ads"
+        assert "issues_info" in params["fields"]
+        return {
+            "data": [
+                {
+                    "id": "ad_active",
+                    "name": "ADS:QUYET|MK:ThaiLan|SKU:VXV011|MED:Video",
+                    "status": "ACTIVE",
+                    "effective_status": "ACTIVE",
+                    "updated_time": "2026-07-03T01:00:00+0000",
+                    "creative": {
+                        "id": "cr_1",
+                        "object_story_id": "649_1",
+                        "call_to_action_type": "INSTAGRAM_MESSAGE",
+                    },
+                },
+                {
+                    "id": "ad_paused",
+                    "name": "ADS:QUYET|MK:ThaiLan|SKU:VXV011|MED:Anh",
+                    "status": "PAUSED",
+                    "effective_status": "PAUSED",
+                    "updated_time": "2026-07-03T02:00:00+0000",
+                    "creative": {
+                        "id": "cr_2",
+                        "object_story_id": "649_2",
+                        "call_to_action_type": "MESSAGE_PAGE",
+                    },
+                },
+                {
+                    "id": "ad_issue",
+                    "name": "ADS:QUYET|MK:ThaiLan|SKU:VXV011|MED:Anh",
+                    "status": "ACTIVE",
+                    "effective_status": "WITH_ISSUES",
+                    "issues_info": [{"error_code": 1}],
+                    "creative": {"id": "cr_bad"},
+                },
+                {
+                    "id": "ad_other_sku",
+                    "name": "ADS:QUYET|MK:ThaiLan|SKU:VXV099|MED:Anh",
+                    "status": "ACTIVE",
+                    "effective_status": "ACTIVE",
+                    "creative": {"id": "cr_other"},
+                },
+            ]
+        }
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    ads = client.list_adset_ads_for_copy(
+        "adset_source",
+        name_contains="SKU:VXV011",
+        include_statuses=["ACTIVE", "PAUSED"],
+    )
+
+    assert [ad["id"] for ad in ads] == ["ad_active", "ad_paused"]
+    assert ads[1]["object_story_id"] == "649_2"
 
 
 def test_extract_copied_ad_id_supports_list_shape() -> None:
