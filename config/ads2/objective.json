@@ -13,7 +13,7 @@
   "new_campaign_source_ad_name_contains": "SKU:{sku_code_text}",
   "new_campaign_source_ad_statuses": ["ACTIVE", "PAUSED"],
   "new_campaign_source_max_ads": 20,
-  "collect_sku_page_posts": true,
+  "collect_sku_page_posts": false,
   "collect_sku_page_posts_max_scan": 1000,
   "collect_sku_page_posts_max_posts": 20,
   "campaign_payload_overrides": {},
