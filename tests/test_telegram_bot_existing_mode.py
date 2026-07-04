@@ -3105,6 +3105,216 @@ def test_new_mode_clones_source_adset_ads_for_single_broad_adset(monkeypatch) ->
     assert "Source ad count: 5" in bot._bot.messages[-1]["text"]
 
 
+def test_new_mode_falls_back_to_messenger_asset_feed_for_multi_post_without_source(monkeypatch) -> None:  # noqa: ANN001
+    class NewModeMultiPostMessengerFallbackMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.created_adsets: list[tuple[str, str]] = []
+            self.created_creatives: list[tuple[str, str, dict[str, Any] | None]] = []
+            self.created_ads: list[tuple[str, str, str | None]] = []
+
+        @staticmethod
+        def effective_destination_type(plan: PlannedCampaign) -> str:
+            overrides = plan.raw.get("adset_payload_overrides", {}) if isinstance(plan.raw, dict) else {}
+            if isinstance(overrides, dict):
+                value = str(overrides.get("destination_type", "")).strip().upper()
+                if value:
+                    return value
+            return "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+
+        @staticmethod
+        def is_auto_destination_error(error_message: str) -> bool:
+            message = str(error_message).lower()
+            return "application does not have the capability" in message or "#3" in message
+
+        def resolve_post(self, post_url: str) -> ResolvedPost:
+            return ResolvedPost(
+                post_id="122188434764934207",
+                page_id="649228828282105",
+                permalink_url=post_url,
+                object_story_id="649228828282105_122188434764934207",
+                strategy="matched_page_permalink",
+                message_text="Cloud Veil #VXV008",
+                media_label="Video",
+            )
+
+        def find_active_campaigns_by_keywords(self, keywords: list[str]) -> list[dict[str, str]]:
+            self.find_active_campaigns_calls.append(list(keywords))
+            return []
+
+        def list_page_posts_by_sku(
+            self,
+            sku_codes: list[str],
+            *,
+            max_scan: int = 1000,  # noqa: ARG002
+            max_posts: int = 20,  # noqa: ARG002
+        ) -> list[ResolvedPost]:
+            assert sku_codes == ["VXV008"]
+            return [
+                ResolvedPost(
+                    post_id="122188434764934207",
+                    page_id="649228828282105",
+                    permalink_url="https://www.facebook.com/reel/1330016946004805/",
+                    object_story_id="649228828282105_122188434764934207",
+                    strategy="page_sku_scan",
+                    message_text="Cloud Veil #VXV008",
+                    media_label="Video",
+                ),
+                ResolvedPost(
+                    post_id="122177948468934207",
+                    page_id="649228828282105",
+                    permalink_url="https://www.facebook.com/122187834464934207/posts/122177948468934207",
+                    object_story_id="649228828282105_122177948468934207",
+                    strategy="page_sku_scan",
+                    message_text="Cloud Veil image #VXV008",
+                    media_label="Anh",
+                ),
+            ]
+
+        def get_account_multi_destination_creative_overrides(
+            self,
+            *,
+            max_ads_scan: int = 200,  # noqa: ARG002
+            expected_call_to_action_type: str | None = None,
+        ) -> dict[str, Any]:
+            assert expected_call_to_action_type == "MESSAGE_PAGE"
+            return {
+                "asset_feed_spec": {
+                    "optimization_type": "DOF_MESSAGING_DESTINATION",
+                    "call_to_actions": [
+                        {
+                            "type": "MESSAGE_PAGE",
+                            "value": {"app_destination": "MESSENGER", "link": "https://fb.com/messenger_doc/"},
+                        },
+                        {
+                            "type": "INSTAGRAM_MESSAGE",
+                            "value": {"app_destination": "INSTAGRAM_DIRECT", "link": "http://www.instagram.com/"},
+                        },
+                    ],
+                    "additional_data": {"multi_share_end_card": False},
+                },
+                "call_to_action_type": "MESSAGE_PAGE",
+                "page_welcome_message": '{"template_id":"962707759488898"}',
+                "instagram_user_id": "17841478128229539",
+            }
+
+        def create_campaign(self, plan: PlannedCampaign) -> str:  # noqa: ARG002
+            return "camp_vxv008"
+
+        def create_adset(self, plan: PlannedCampaign, campaign_id: str, slot: AudienceSlot) -> str:  # noqa: ARG002
+            destination = self.effective_destination_type(plan)
+            adset_id = f"adset_{destination.lower()}_{len(self.created_adsets) + 1}"
+            self.created_adsets.append((adset_id, destination))
+            return adset_id
+
+        def create_ad_creative(
+            self,
+            plan: PlannedCampaign,
+            slot: AudienceSlot,
+            resolved_post: ResolvedPost,
+            destination_type_override=None,  # noqa: ANN001, ARG002
+            extra_payload_overrides=None,  # noqa: ANN001
+        ) -> str:
+            destination = self.effective_destination_type(plan)
+            overrides = dict(extra_payload_overrides or {})
+            self.created_creatives.append((destination, resolved_post.object_story_id, overrides))
+            if destination == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER":
+                raise MetaApiError("(#3) Application does not have the capability to make this API call.")
+            assert "call_to_action_type" not in overrides
+            asset_feed_spec = overrides["asset_feed_spec"]
+            assert [item["type"] for item in asset_feed_spec["call_to_actions"]] == ["MESSAGE_PAGE"]
+            assert asset_feed_spec["link_urls"] == [{"website_url": "https://m.me/61581440236157"}]
+            assert overrides["page_welcome_message"] == '{"template_id":"962707759488898"}'
+            assert overrides["instagram_user_id"] == "17841478128229539"
+            return f"cr_{len(self.created_creatives)}"
+
+        def create_ad(
+            self,
+            plan: PlannedCampaign,  # noqa: ARG002
+            slot: AudienceSlot,
+            adset_id: str,
+            creative_id: str,
+            destination_type_override=None,  # noqa: ANN001
+        ) -> str:
+            self.created_ads.append((adset_id, creative_id, destination_type_override))
+            assert destination_type_override == "MESSENGER"
+            return f"ad_{len(self.created_ads)}"
+
+    fake_plan = PlannedCampaign(
+        version=9,
+        campaign_name="ADS:QUYET|MK:ThaiLan|VXV008",
+        sku_code_text="VXV008",
+        media_label="Video",
+        post_url="https://www.facebook.com/reel/1330016946004805/",
+        post_fingerprint="fp_vxv008",
+        budget_daily_vnd=235699,
+        objective="OUTCOME_ENGAGEMENT",
+        conversion_location="MESSAGING_DESTINATION",
+        result_goal="MAXIMIZE_PURCHASES_VIA_MESSAGE",
+        message_template_name="Mess Cơ bản",
+        audiences=[
+            AudienceSlot(
+                "new_campaign_single_adset",
+                "Broad",
+                "BROAD",
+                "",
+                "ADS:QUYET|MK:ThaiLan|VXV008",
+                "unused",
+            )
+        ],
+        raw={
+            "adset_payload_overrides": {
+                "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+                "targeting": {"geo_locations": {"countries": ["TH"]}},
+            }
+        },
+    )
+
+    def fake_load_json(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        path_text = str(path)
+        if "objective" in path_text:
+            return {
+                "sku_prefix": "VXV",
+                "new_campaign_clone_source_adset_ads": True,
+                "collect_sku_page_posts": True,
+            }
+        return {}
+
+    monkeypatch.setattr(telegram_bot_module, "load_json", fake_load_json)
+    monkeypatch.setattr(telegram_bot_module, "build_campaign_plan", lambda **_kwargs: fake_plan)
+    meta = NewModeMultiPostMessengerFallbackMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/reel/1330016946004805/",
+        budget_daily_vnd=235699,
+    )
+
+    asyncio.run(
+        bot._create_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_vxv008",
+            version=9,
+        )
+    )
+
+    assert meta.created_adsets == [
+        ("adset_messaging_instagram_direct_messenger_1", "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"),
+        ("adset_messenger_2", "MESSENGER"),
+    ]
+    assert (None, ["adset_messaging_instagram_direct_messenger_1"], [], []) in rollback.calls
+    assert len(meta.created_ads) == 2
+    payload = storage.saved_jobs[-1][1]
+    assert payload["campaign_mode"] == "new"
+    assert payload["active_destination_type"] == "MESSENGER"
+    assert "(#3)" in payload["destination_fallback_reason"]
+    assert payload["included_post_count"] == 2
+    assert payload["ad_ids"] == ["ad_1", "ad_2"]
+
+
 def test_new_mode_collects_sku_page_posts_across_all_adsets(monkeypatch) -> None:  # noqa: ANN001
     class NewModeCollectSkuMeta(FakeMeta):
         def __init__(self) -> None:

@@ -911,6 +911,76 @@ class TelegramAdsBot:
 
             campaign_id = await asyncio.to_thread(self.meta.create_campaign, active_plan)
 
+            async def _rollback_created_since(
+                adset_start: int,
+                ad_start: int,
+                creative_start: int,
+            ) -> None:
+                rollback_adset_ids = adset_ids[adset_start:]
+                rollback_ad_ids = ad_ids[ad_start:]
+                rollback_creative_ids = creative_ids[creative_start:]
+                if rollback_adset_ids or rollback_ad_ids or rollback_creative_ids:
+                    await asyncio.to_thread(
+                        self.rollback.rollback,
+                        None,
+                        rollback_adset_ids,
+                        rollback_ad_ids,
+                        rollback_creative_ids,
+                    )
+                del adset_ids[adset_start:]
+                del ad_ids[ad_start:]
+                del creative_ids[creative_start:]
+
+            async def _create_fresh_ads_for_posts(
+                plan_to_use: PlannedCampaign,
+                destination_type: str,
+                posts_to_create: list[Any],
+                *,
+                messenger_retry_overrides: dict[str, Any] | None = None,
+            ) -> None:
+                for slot in plan_to_use.audiences:
+                    adset_id = await asyncio.to_thread(
+                        self.meta.create_adset,
+                        plan_to_use,
+                        campaign_id,
+                        slot,
+                    )
+                    adset_ids.append(adset_id)
+                    for post_item in posts_to_create:
+                        post_slot = replace(
+                            slot,
+                            ad_name=self._new_campaign_ad_name_for_post(plan, post_item, sku_prefix),
+                        )
+                        creative_extra_overrides = (
+                            dict(messenger_retry_overrides)
+                            if isinstance(messenger_retry_overrides, dict)
+                            else self._new_campaign_creative_overrides(
+                                plan_to_use,
+                                post_item,
+                                destination_type,
+                                multi_destination_creative_overrides,
+                                multi_destination_asset_feed_spec,
+                            )
+                        )
+                        creative_id = await asyncio.to_thread(
+                            self.meta.create_ad_creative,
+                            plan_to_use,
+                            post_slot,
+                            post_item,
+                            None,
+                            creative_extra_overrides,
+                        )
+                        creative_ids.append(creative_id)
+                        ad_id = await asyncio.to_thread(
+                            self.meta.create_ad,
+                            plan_to_use,
+                            post_slot,
+                            adset_id,
+                            creative_id,
+                            "MESSENGER" if destination_type == "MESSENGER" else None,
+                        )
+                        ad_ids.append(ad_id)
+
             if source_ads_package is not None:
                 source_ads = [
                     item
@@ -934,38 +1004,46 @@ class TelegramAdsBot:
                         )
                         ad_ids.append(ad_id)
             elif len(campaign_posts) > 1:
-                for slot in active_plan.audiences:
-                    adset_id = await asyncio.to_thread(self.meta.create_adset, active_plan, campaign_id, slot)
-                    adset_ids.append(adset_id)
-                    for post_item in campaign_posts:
-                        post_slot = replace(
-                            slot,
-                            ad_name=self._new_campaign_ad_name_for_post(plan, post_item, sku_prefix),
+                adset_start = len(adset_ids)
+                ad_start = len(ad_ids)
+                creative_start = len(creative_ids)
+                try:
+                    await _create_fresh_ads_for_posts(
+                        active_plan,
+                        active_destination_type,
+                        campaign_posts,
+                    )
+                except MetaApiError as exc:
+                    error_text = str(exc)
+                    if (
+                        active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+                        and (
+                            self.meta.is_auto_destination_error(error_text)
+                            or self.meta.is_instagram_media_requirement_error(error_text)
                         )
-                        creative_extra_overrides = self._new_campaign_creative_overrides(
-                            active_plan,
-                            post_item,
-                            active_destination_type,
+                    ):
+                        await _rollback_created_since(adset_start, ad_start, creative_start)
+                        active_plan = self._plan_with_destination_override(active_plan, "MESSENGER")
+                        active_destination_type = "MESSENGER"
+                        destination_fallback_reason = error_text
+                        messenger_retry_overrides = self._new_campaign_messenger_retry_overrides(
+                            self.settings.meta_page_id,
                             multi_destination_creative_overrides,
                             multi_destination_asset_feed_spec,
                         )
-                        creative_id = await asyncio.to_thread(
-                            self.meta.create_ad_creative,
-                            active_plan,
-                            post_slot,
-                            post_item,
-                            None,
-                            creative_extra_overrides,
+                        self.logger.warning(
+                            "Tu dong fallback len moi nhieu post sang MESSENGER asset_feed_spec "
+                            "do Meta chan multi-destination: %s",
+                            exc,
                         )
-                        creative_ids.append(creative_id)
-                        ad_id = await asyncio.to_thread(
-                            self.meta.create_ad,
+                        await _create_fresh_ads_for_posts(
                             active_plan,
-                            post_slot,
-                            adset_id,
-                            creative_id,
+                            active_destination_type,
+                            campaign_posts,
+                            messenger_retry_overrides=messenger_retry_overrides,
                         )
-                        ad_ids.append(ad_id)
+                    else:
+                        raise
             else:
                 for slot in active_plan.audiences:
                     adset_id: str | None = None
@@ -1025,13 +1103,18 @@ class TelegramAdsBot:
                             )
 
                             adset_id = await asyncio.to_thread(self.meta.create_adset, active_plan, campaign_id, slot)
+                            messenger_retry_overrides = self._new_campaign_messenger_retry_overrides(
+                                self.settings.meta_page_id,
+                                multi_destination_creative_overrides,
+                                multi_destination_asset_feed_spec,
+                            )
                             creative_id = await asyncio.to_thread(
                                 self.meta.create_ad_creative,
                                 active_plan,
                                 slot,
                                 resolved_post,
                                 None,
-                                None,
+                                messenger_retry_overrides,
                             )
                             try:
                                 ad_id = await asyncio.to_thread(
@@ -2720,6 +2803,33 @@ class TelegramAdsBot:
                 creative_extra_overrides = {}
             creative_extra_overrides["call_to_action_type"] = "MESSAGE_PAGE"
         return creative_extra_overrides
+
+    @classmethod
+    def _new_campaign_messenger_retry_overrides(
+        cls,
+        page_id: str,
+        multi_destination_creative_overrides: dict[str, Any] | None,
+        multi_destination_asset_feed_spec: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        seed = (
+            dict(multi_destination_creative_overrides)
+            if isinstance(multi_destination_creative_overrides, dict)
+            else {}
+        )
+        asset_feed_spec = seed.get("asset_feed_spec")
+        if not isinstance(asset_feed_spec, dict) or not asset_feed_spec:
+            asset_feed_spec = multi_destination_asset_feed_spec
+        if not isinstance(asset_feed_spec, dict) or not asset_feed_spec:
+            return None
+
+        retry_overrides: dict[str, Any] = {
+            "asset_feed_spec": cls._as_messenger_only_asset_feed_spec(asset_feed_spec, page_id),
+        }
+        for field in ("page_welcome_message", "instagram_user_id", "instagram_actor_id"):
+            value = seed.get(field)
+            if value not in (None, "", {}, []):
+                retry_overrides[field] = value
+        return retry_overrides
 
     @staticmethod
     def _should_collect_sku_page_posts(objective_config: dict[str, Any]) -> bool:
