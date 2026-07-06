@@ -694,7 +694,6 @@ class MetaAdsClient:
         next_path = page_path
         next_params = params
         scanned = 0
-        latest_non_reel: ResolvedPost | None = None
 
         try:
             while next_path and scanned < 1000:
@@ -714,12 +713,6 @@ class MetaAdsClient:
                     permalink = str(item.get("permalink_url", "")).strip()
                     if not post_node_id:
                         continue
-                    if latest_non_reel is None and "/posts/" in permalink:
-                        latest_non_reel = self._to_resolved_post(
-                            post_node_id,
-                            permalink or post_url,
-                            strategy="fallback_latest_non_reel",
-                        )
                     if self._is_permalink_match(post_url, permalink, pfbid_token):
                         return self._to_resolved_post(
                             post_node_id,
@@ -741,16 +734,10 @@ class MetaAdsClient:
                 ) from exc
             raise
 
-        if latest_non_reel:
-            self.logger.warning(
-                "Không map được pfbid URL sang permalink. Tạm dùng bài post thường mới nhất: %s",
-                latest_non_reel.permalink_url,
-            )
-            return latest_non_reel
-
         raise ValidationError(
-            "Không tìm thấy bài viết tương ứng trong feed của Trang.\n"
-            "Anh thử gửi link permalink đầy đủ hoặc kiểm tra lại quyền Page Access Token."
+            "Không map được link pfbid sang đúng Post ID trong feed của Trang.\n"
+            "Để tránh lên nhầm bài, em đã dừng tạo camp thay vì tự lấy bài mới nhất.\n"
+            "Anh gửi giúp em link permalink dạng `/posts/<post_id>` hoặc `permalink.php?story_fbid=...&id=...`."
         )
 
     def _resolve_post_from_pageid_pfbid(self, post_url: str) -> ResolvedPost | None:

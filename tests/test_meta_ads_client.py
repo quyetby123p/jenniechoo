@@ -99,6 +99,31 @@ def test_resolve_post_from_pageid_pfbid_path() -> None:
     assert resolved.strategy == "direct_pageid_pfbid"
 
 
+def test_resolve_pfbid_does_not_fallback_to_latest_post_when_unmatched() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+    client._validate_page_access_token_owner = lambda: None  # type: ignore[method-assign]
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = method, params, data, access_token
+        if path == "/61581440236157/posts":
+            return {
+                "data": [
+                    {
+                        "id": "61581440236157_999",
+                        "permalink_url": "https://www.facebook.com/61581440236157/posts/999",
+                    }
+                ]
+            }
+        raise AssertionError(f"Unexpected path: {path}")
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    with pytest.raises(ValidationError, match="tránh lên nhầm bài"):
+        client._resolve_post_from_page_posts(
+            "https://www.facebook.com/jenniechoo.bangkok/posts/pfbid0abc123"
+        )
+
+
 def test_list_page_posts_by_sku_returns_matching_posts_with_media_labels() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
 

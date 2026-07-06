@@ -1371,7 +1371,8 @@ class TelegramAdsBot:
                     user_guidance = (
                         "Meta API đang chặn tạo creative mới cho Đích đến tự động.\n"
                         "Em không tự chuyển sang Messenger-only nữa để giữ đúng target anh yêu cầu.\n"
-                        "Bài này cần có một ad mẫu cùng post/reel để em duplicate, hoặc anh tạo qua Ads Manager UI một lần."
+                        "Bài này cần có một ad mẫu cùng post/reel để em duplicate, "
+                        "hoặc cần cấp creative token/user token có quyền Instagram asset cho Bot 2."
                     )
                 else:
                     user_guidance = (
@@ -4740,12 +4741,6 @@ class TelegramAdsBot:
             f"- Adset IDs:\n{adset_lines}\n"
             f"- Ad IDs:\n{ad_lines}\n"
             f"- Link Ads Manager: {job['ads_manager_url']}\n"
-            + (
-                "\n\nLưu ý: Link pfbid không map trực tiếp được, em tạm dùng bài post thường mới nhất của page. "
-                "Anh kiểm tra kỹ link post map rồi hãy bấm Duyệt."
-                if job.get("resolved_strategy") == "fallback_latest_non_reel"
-                else ""
-            )
             + fallback_note
             + "\n\nAnh bấm Duyệt để publish, hoặc Hủy để rollback."
         )
