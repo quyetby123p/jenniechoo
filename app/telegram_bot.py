@@ -829,6 +829,7 @@ class TelegramAdsBot:
         ad_ids: list[str] = []
         creative_ids: list[str] = []
 
+        fallback_destination_type = "MESSENGER"
         try:
             resolved_post = await asyncio.to_thread(self.meta.resolve_post, command.post_url)
             await asyncio.to_thread(self.meta.ensure_ads_token_can_access_page)
@@ -846,11 +847,20 @@ class TelegramAdsBot:
             active_plan = plan
             active_destination_type = requested_destination_type
             destination_fallback_reason = ""
+            fallback_destination_type = self._new_campaign_fallback_destination_type(objective)
             multi_destination_asset_feed_spec: dict[str, Any] | None = None
             multi_destination_creative_overrides: dict[str, Any] | None = None
             force_message_page_cta = self._should_force_message_page_cta_for_post(plan, resolved_post)
+            creative_payload_overrides = plan.raw.get("creative_payload_overrides", {})
+            expected_page_welcome_message = (
+                creative_payload_overrides.get("page_welcome_message")
+                if isinstance(creative_payload_overrides, dict)
+                else None
+            )
+            expected_reusable_call_to_action_type = "MESSAGE_PAGE" if force_message_page_cta else None
             campaign_posts: list[Any] = [resolved_post]
             source_ads_package: dict[str, Any] | None = None
+            same_story_source_ad: dict[str, str] | None = None
             if self._should_clone_new_campaign_source_ads(objective):
                 try:
                     source_ads_package = await asyncio.to_thread(
@@ -892,7 +902,42 @@ class TelegramAdsBot:
                         exc,
                     )
 
-            if active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER":
+            if (
+                source_ads_package is None
+                and len(campaign_posts) == 1
+                and self._should_reuse_same_story_ad_for_new_campaign(objective)
+            ):
+                try:
+                    same_story_source_ad = await asyncio.to_thread(
+                        self.meta.find_latest_ad_by_story_ids,
+                        self._build_story_id_candidates(resolved_post, command.post_url),
+                        max_ads_scan=self._config_int(
+                            objective.get("new_campaign_same_story_ad_max_scan"),
+                            1600,
+                        ),
+                        expected_page_welcome_message=expected_page_welcome_message,
+                        expected_call_to_action_type=expected_reusable_call_to_action_type,
+                        expected_adset_destination_type=active_destination_type
+                        if active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+                        else None,
+                    )
+                    if same_story_source_ad:
+                        self.logger.info(
+                            "Len moi se duplicate same-story ad %s cho post %s.",
+                            same_story_source_ad.get("id", ""),
+                            resolved_post.object_story_id,
+                        )
+                except (ValidationError, MetaApiError, ValueError, TypeError) as exc:
+                    self.logger.warning(
+                        "Khong tra cuu duoc same-story ad cho luong len moi, tiep tuc tao fresh: %s",
+                        exc,
+                    )
+
+            if (
+                active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+                and source_ads_package is None
+                and same_story_source_ad is None
+            ):
                 try:
                     if force_message_page_cta:
                         multi_destination_creative_overrides = await asyncio.to_thread(
@@ -1003,6 +1048,20 @@ class TelegramAdsBot:
                             status_option="PAUSED",
                         )
                         ad_ids.append(ad_id)
+            elif same_story_source_ad is not None and str(same_story_source_ad.get("id", "")).strip():
+                source_ad_id = str(same_story_source_ad.get("id", "")).strip()
+                for slot in active_plan.audiences:
+                    adset_id = await asyncio.to_thread(self.meta.create_adset, active_plan, campaign_id, slot)
+                    adset_ids.append(adset_id)
+                    target_ad_name = self._new_campaign_ad_name_for_post(plan, resolved_post, sku_prefix)
+                    ad_id = await asyncio.to_thread(
+                        self.meta.duplicate_ad_from_source,
+                        source_ad_id,
+                        target_ad_name,
+                        target_adset_id=adset_id,
+                        status_option="PAUSED",
+                    )
+                    ad_ids.append(ad_id)
             elif len(campaign_posts) > 1:
                 adset_start = len(adset_ids)
                 ad_start = len(ad_ids)
@@ -1017,14 +1076,15 @@ class TelegramAdsBot:
                     error_text = str(exc)
                     if (
                         active_destination_type == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+                        and fallback_destination_type
                         and (
                             self.meta.is_auto_destination_error(error_text)
                             or self.meta.is_instagram_media_requirement_error(error_text)
                         )
                     ):
                         await _rollback_created_since(adset_start, ad_start, creative_start)
-                        active_plan = self._plan_with_destination_override(active_plan, "MESSENGER")
-                        active_destination_type = "MESSENGER"
+                        active_plan = self._plan_with_destination_override(active_plan, fallback_destination_type)
+                        active_destination_type = fallback_destination_type
                         destination_fallback_reason = error_text
                         messenger_retry_overrides = self._new_campaign_messenger_retry_overrides(
                             self.settings.meta_page_id,
@@ -1088,8 +1148,10 @@ class TelegramAdsBot:
                                 await asyncio.to_thread(self.rollback.rollback, None, [], [], [creative_id])
                             if adset_id:
                                 await asyncio.to_thread(self.rollback.rollback, None, [adset_id], [], [])
-                            active_plan = self._plan_with_destination_override(active_plan, "MESSENGER")
-                            active_destination_type = "MESSENGER"
+                            if not fallback_destination_type:
+                                raise
+                            active_plan = self._plan_with_destination_override(active_plan, fallback_destination_type)
+                            active_destination_type = fallback_destination_type
                             destination_fallback_reason = error_text
                             fallback_reason = (
                                 "media Instagram"
@@ -1256,6 +1318,12 @@ class TelegramAdsBot:
                     if isinstance(source_ads_package, dict)
                     else 0
                 ),
+                "source_ad_id": str(same_story_source_ad.get("id", "")).strip()
+                if isinstance(same_story_source_ad, dict)
+                else "",
+                "source_ad_name": str(same_story_source_ad.get("name", "")).strip()
+                if isinstance(same_story_source_ad, dict)
+                else "",
                 "ads_manager_url": self._build_ads_manager_url(campaign_id),
                 "created_at": now_utc_iso(),
             }
@@ -1299,11 +1367,18 @@ class TelegramAdsBot:
                 raise RuntimeError("Telegram bot chua duoc khoi tao.")
             error_text = str(exc)
             if self.meta.is_instagram_media_requirement_error(error_text) or self.meta.is_auto_destination_error(error_text):
-                user_guidance = (
-                    "Bài post/reel này không tương thích với mục tiêu/đích chạy hiện tại trên Meta API.\n"
-                    "Em đã thử fallback destination tự động nhưng Meta vẫn từ chối.\n"
-                    "Anh đổi sang bài khác hoặc xử lý qua Ads Manager UI cho bài này."
-                )
+                if not fallback_destination_type:
+                    user_guidance = (
+                        "Meta API đang chặn tạo creative mới cho Đích đến tự động.\n"
+                        "Em không tự chuyển sang Messenger-only nữa để giữ đúng target anh yêu cầu.\n"
+                        "Bài này cần có một ad mẫu cùng post/reel để em duplicate, hoặc anh tạo qua Ads Manager UI một lần."
+                    )
+                else:
+                    user_guidance = (
+                        "Bài post/reel này không tương thích với mục tiêu/đích chạy hiện tại trên Meta API.\n"
+                        "Em đã thử fallback destination tự động nhưng Meta vẫn từ chối.\n"
+                        "Anh đổi sang bài khác hoặc xử lý qua Ads Manager UI cho bài này."
+                    )
             else:
                 user_guidance = "Anh kiểm tra lại token/quyền Meta API, audiences và message template."
             await self._bot.send_message(
@@ -2840,6 +2915,24 @@ class TelegramAdsBot:
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
+
+    @staticmethod
+    def _should_reuse_same_story_ad_for_new_campaign(objective_config: dict[str, Any]) -> bool:
+        value = objective_config.get(
+            "new_campaign_reuse_same_story_ad",
+            objective_config.get("reuse_same_story_ad", False),
+        )
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    @staticmethod
+    def _new_campaign_fallback_destination_type(objective_config: dict[str, Any]) -> str:
+        value = objective_config.get("new_campaign_fallback_destination_type", "MESSENGER")
+        normalized = str(value or "").strip().upper()
+        if normalized in {"", "0", "FALSE", "NO", "NONE", "DISABLED", "OFF"}:
+            return ""
+        return normalized
 
     @staticmethod
     def _should_clone_new_campaign_source_ads(objective_config: dict[str, Any]) -> bool:
@@ -4622,6 +4715,11 @@ class TelegramAdsBot:
                 f"- Source copy: {job.get('source_campaign_name', '')} | "
                 f"{job.get('source_adset_name', '')}\n"
                 f"- Source ad count: {job.get('source_ad_count', 0)}\n"
+            )
+        elif str(job.get("source_ad_id", "")).strip():
+            source_copy_note = (
+                f"- Source copy: same post ad {job.get('source_ad_id', '')}"
+                f" ({job.get('source_ad_name', '')})\n"
             )
         return (
             "Đã tạo nháp campaign thành công.\n"

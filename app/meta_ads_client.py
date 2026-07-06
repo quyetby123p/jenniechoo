@@ -1350,6 +1350,7 @@ class MetaAdsClient:
         max_ads_scan: int = 800,
         expected_page_welcome_message: Any | None = None,
         expected_call_to_action_type: str | None = None,
+        expected_adset_destination_type: str | None = None,
     ) -> dict[str, str] | None:
         normalized_ids: set[str] = {
             str(item).strip()
@@ -1359,6 +1360,7 @@ class MetaAdsClient:
         if not normalized_ids:
             return None
         expected_cta = str(expected_call_to_action_type or "").strip().upper()
+        expected_destination = str(expected_adset_destination_type or "").strip().upper()
 
         if adset_id and str(adset_id).strip():
             next_path = f"/{str(adset_id).strip()}/ads"
@@ -1366,7 +1368,8 @@ class MetaAdsClient:
             next_path = f"/{self.ad_account_id}/ads"
         next_params: dict[str, Any] | None = {
             "fields": (
-                "id,name,status,effective_status,updated_time,"
+                "id,name,status,effective_status,updated_time,issues_info,"
+                "adset{id,destination_type},"
                 "creative{"
                 "id,object_story_id,effective_object_story_id,"
                 "page_welcome_message,call_to_action_type"
@@ -1391,6 +1394,18 @@ class MetaAdsClient:
                 if not isinstance(item, dict):
                     continue
                 scanned += 1
+                effective_status = str(item.get("effective_status", "")).strip().upper()
+                if effective_status == "WITH_ISSUES":
+                    continue
+                if item.get("issues_info"):
+                    continue
+                adset = item.get("adset")
+                if expected_destination and not isinstance(adset, dict):
+                    continue
+                if expected_destination and isinstance(adset, dict):
+                    actual_destination = str(adset.get("destination_type", "")).strip().upper()
+                    if actual_destination != expected_destination:
+                        continue
                 creative = item.get("creative")
                 if not isinstance(creative, dict):
                     continue
@@ -1412,12 +1427,20 @@ class MetaAdsClient:
                         "id": str(item.get("id", "")).strip(),
                         "name": str(item.get("name", "")).strip(),
                         "status": str(item.get("status", "")).strip(),
-                        "effective_status": str(item.get("effective_status", "")).strip(),
+                        "effective_status": effective_status,
                         "updated_time": str(item.get("updated_time", "")).strip(),
                         "creative_id": str(creative.get("id", "")).strip(),
                         "call_to_action_type": str(creative.get("call_to_action_type", "")).strip(),
                         "object_story_id": object_story_id,
                         "effective_object_story_id": effective_object_story_id,
+                        "adset_id": str((adset or {}).get("id", "")).strip()
+                        if isinstance(adset, dict)
+                        else "",
+                        "adset_destination_type": str(
+                            (adset or {}).get("destination_type", "")
+                        ).strip()
+                        if isinstance(adset, dict)
+                        else "",
                     }
                 )
 

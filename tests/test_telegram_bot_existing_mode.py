@@ -178,6 +178,7 @@ class FakeMeta:
         max_ads_scan: int = 800,  # noqa: ARG002
         expected_page_welcome_message=None,  # noqa: ANN001, ARG002
         expected_call_to_action_type: str | None = None,  # noqa: ARG002
+        expected_adset_destination_type: str | None = None,  # noqa: ARG002
     ) -> dict[str, str] | None:
         return None
 
@@ -3103,6 +3104,278 @@ def test_new_mode_clones_source_adset_ads_for_single_broad_adset(monkeypatch) ->
     assert payload["source_ad_count"] == 5
     assert payload["ad_ids"] == [f"copied_source_ad_{index}" for index in range(1, 6)]
     assert "Source ad count: 5" in bot._bot.messages[-1]["text"]
+
+
+def test_new_mode_reuses_same_story_ad_before_fresh_auto_destination(monkeypatch) -> None:  # noqa: ANN001
+    class NewModeSameStoryReuseMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.created_adsets: list[tuple[str, str]] = []
+            self.duplicate_calls: list[tuple[str, str, str | None, str]] = []
+            self.find_latest_calls: list[dict[str, Any]] = []
+
+        @staticmethod
+        def effective_destination_type(plan: PlannedCampaign) -> str:
+            overrides = plan.raw.get("adset_payload_overrides", {}) if isinstance(plan.raw, dict) else {}
+            if isinstance(overrides, dict):
+                value = str(overrides.get("destination_type", "")).strip().upper()
+                if value:
+                    return value
+            return "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+
+        def resolve_post(self, post_url: str) -> ResolvedPost:
+            return ResolvedPost(
+                post_id="122188434764934207",
+                page_id="649228828282105",
+                permalink_url=post_url,
+                object_story_id="649228828282105_122188434764934207",
+                strategy="matched_page_permalink",
+                message_text="Cloud Veil #VXV008",
+                media_label="Video",
+            )
+
+        def find_active_campaigns_by_keywords(self, keywords: list[str]) -> list[dict[str, str]]:
+            self.find_active_campaigns_calls.append(list(keywords))
+            return []
+
+        def find_latest_ad_by_story_ids(
+            self,
+            story_ids: list[str],
+            *,
+            adset_id: str | None = None,
+            max_ads_scan: int = 800,
+            expected_page_welcome_message=None,  # noqa: ANN001
+            expected_call_to_action_type: str | None = None,
+            expected_adset_destination_type: str | None = None,
+        ) -> dict[str, str] | None:
+            self.find_latest_calls.append(
+                {
+                    "story_ids": list(story_ids),
+                    "adset_id": adset_id,
+                    "max_ads_scan": max_ads_scan,
+                    "expected_page_welcome_message": expected_page_welcome_message,
+                    "expected_call_to_action_type": expected_call_to_action_type,
+                    "expected_adset_destination_type": expected_adset_destination_type,
+                }
+            )
+            return {
+                "id": "manual_same_story_ad",
+                "name": "ADS:QUYET|MK:ThaiLan|SKU:VXV008|MED:Video",
+            }
+
+        def create_campaign(self, plan: PlannedCampaign) -> str:  # noqa: ARG002
+            return "camp_vxv008_auto"
+
+        def create_adset(self, plan: PlannedCampaign, campaign_id: str, slot: AudienceSlot) -> str:  # noqa: ARG002
+            destination = self.effective_destination_type(plan)
+            self.created_adsets.append((slot.adset_name, destination))
+            return "adset_vxv008_auto"
+
+        def create_ad_creative(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise AssertionError("Không được tạo creative fresh khi đã có same-story ad mẫu.")
+
+        def duplicate_ad_from_source(
+            self,
+            source_ad_id: str,
+            target_ad_name: str | None = None,
+            *,
+            target_adset_id: str | None = None,
+            status_option: str = "PAUSED",
+        ) -> str:
+            self.duplicate_calls.append(
+                (source_ad_id, str(target_ad_name or ""), target_adset_id, status_option)
+            )
+            return "copied_same_story_ad"
+
+    fake_plan = PlannedCampaign(
+        version=11,
+        campaign_name="ADS:QUYET|MK:ThaiLan|VXV008",
+        sku_code_text="VXV008",
+        media_label="Video",
+        post_url="https://www.facebook.com/reel/1330016946004805/",
+        post_fingerprint="fp_vxv008",
+        budget_daily_vnd=135699,
+        objective="OUTCOME_ENGAGEMENT",
+        conversion_location="MESSAGING_DESTINATION",
+        result_goal="MAXIMIZE_PURCHASES_VIA_MESSAGE",
+        message_template_name="Mess Cơ bản",
+        audiences=[
+            AudienceSlot(
+                "new_campaign_single_adset",
+                "Broad",
+                "BROAD",
+                "",
+                "ADS:QUYET|MK:ThaiLan|VXV008",
+                "unused",
+            )
+        ],
+        raw={
+            "adset_payload_overrides": {"destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"},
+            "creative_payload_overrides": {"page_welcome_message": {"template_id": "962707759488898"}},
+        },
+    )
+
+    def fake_load_json(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        path_text = str(path)
+        if "objective" in path_text:
+            return {
+                "sku_prefix": "VXV",
+                "new_campaign_clone_source_adset_ads": True,
+                "new_campaign_reuse_same_story_ad": True,
+                "new_campaign_same_story_ad_max_scan": 1600,
+                "new_campaign_fallback_destination_type": "",
+                "collect_sku_page_posts": False,
+            }
+        return {}
+
+    monkeypatch.setattr(telegram_bot_module, "load_json", fake_load_json)
+    monkeypatch.setattr(telegram_bot_module, "build_campaign_plan", lambda **_kwargs: fake_plan)
+    meta = NewModeSameStoryReuseMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/reel/1330016946004805/",
+        budget_daily_vnd=135699,
+    )
+
+    asyncio.run(
+        bot._create_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_vxv008",
+            version=11,
+        )
+    )
+
+    assert meta.find_latest_calls[0]["expected_call_to_action_type"] == "MESSAGE_PAGE"
+    assert (
+        meta.find_latest_calls[0]["expected_adset_destination_type"]
+        == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+    )
+    assert meta.created_adsets == [
+        ("ADS:QUYET|MK:ThaiLan|VXV008", "MESSAGING_INSTAGRAM_DIRECT_MESSENGER")
+    ]
+    assert meta.duplicate_calls == [
+        (
+            "manual_same_story_ad",
+            "ADS:QUYET|MK:ThaiLan|SKU:VXV008|MED:Video",
+            "adset_vxv008_auto",
+            "PAUSED",
+        )
+    ]
+    payload = storage.saved_jobs[-1][1]
+    assert payload["active_destination_type"] == "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+    assert payload["source_ad_id"] == "manual_same_story_ad"
+    assert payload["ad_ids"] == ["copied_same_story_ad"]
+
+
+def test_new_mode_auto_destination_failure_can_disable_messenger_fallback(monkeypatch) -> None:  # noqa: ANN001
+    class NewModeNoMessengerFallbackMeta(FakeMeta):
+        def __init__(self) -> None:
+            super().__init__()
+            self.created_adsets: list[str] = []
+
+        @staticmethod
+        def effective_destination_type(plan: PlannedCampaign) -> str:
+            overrides = plan.raw.get("adset_payload_overrides", {}) if isinstance(plan.raw, dict) else {}
+            if isinstance(overrides, dict):
+                value = str(overrides.get("destination_type", "")).strip().upper()
+                if value:
+                    return value
+            return "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+
+        @staticmethod
+        def is_auto_destination_error(error_message: str) -> bool:
+            return "#3" in str(error_message)
+
+        def find_active_campaigns_by_keywords(self, keywords: list[str]) -> list[dict[str, str]]:
+            self.find_active_campaigns_calls.append(list(keywords))
+            return []
+
+        def create_campaign(self, plan: PlannedCampaign) -> str:  # noqa: ARG002
+            return "camp_auto_fail"
+
+        def create_adset(self, plan: PlannedCampaign, campaign_id: str, slot: AudienceSlot) -> str:  # noqa: ARG002
+            self.created_adsets.append(self.effective_destination_type(plan))
+            return f"adset_auto_fail_{len(self.created_adsets)}"
+
+        def create_ad_creative(
+            self,
+            plan: PlannedCampaign,  # noqa: ARG002
+            slot: AudienceSlot,  # noqa: ARG002
+            resolved_post: ResolvedPost,  # noqa: ARG002
+            destination_type_override=None,  # noqa: ANN001, ARG002
+            extra_payload_overrides=None,  # noqa: ANN001, ARG002
+        ) -> str:
+            raise MetaApiError("(#3) Application does not have the capability to make this API call.")
+
+    fake_plan = PlannedCampaign(
+        version=12,
+        campaign_name="ADS:QUYET|MK:ThaiLan|VXV009",
+        sku_code_text="VXV009",
+        media_label="Video",
+        post_url="https://www.facebook.com/reel/999/",
+        post_fingerprint="fp_vxv009",
+        budget_daily_vnd=135699,
+        objective="OUTCOME_ENGAGEMENT",
+        conversion_location="MESSAGING_DESTINATION",
+        result_goal="MAXIMIZE_PURCHASES_VIA_MESSAGE",
+        message_template_name="Mess Cơ bản",
+        audiences=[
+            AudienceSlot(
+                "new_campaign_single_adset",
+                "Broad",
+                "BROAD",
+                "",
+                "ADS:QUYET|MK:ThaiLan|VXV009",
+                "unused",
+            )
+        ],
+        raw={"adset_payload_overrides": {"destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"}},
+    )
+
+    def fake_load_json(path, *args, **kwargs):  # noqa: ANN001, ARG001
+        path_text = str(path)
+        if "objective" in path_text:
+            return {
+                "sku_prefix": "VXV",
+                "new_campaign_clone_source_adset_ads": True,
+                "new_campaign_reuse_same_story_ad": False,
+                "new_campaign_fallback_destination_type": "",
+                "collect_sku_page_posts": False,
+            }
+        return {}
+
+    monkeypatch.setattr(telegram_bot_module, "load_json", fake_load_json)
+    monkeypatch.setattr(telegram_bot_module, "build_campaign_plan", lambda **_kwargs: fake_plan)
+    meta = NewModeNoMessengerFallbackMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+
+    cmd = AdsCommand(
+        post_url="https://www.facebook.com/reel/999/",
+        budget_daily_vnd=135699,
+    )
+
+    asyncio.run(
+        bot._create_draft_and_send_review(
+            chat_id=1,
+            command=cmd,
+            post_fingerprint="fp_vxv009",
+            version=12,
+        )
+    )
+
+    assert meta.created_adsets == ["MESSAGING_INSTAGRAM_DIRECT_MESSENGER"]
+    assert (None, ["adset_auto_fail_1"], [], []) in rollback.calls
+    assert ("camp_auto_fail", [], [], []) in rollback.calls
+    status, payload = storage.saved_jobs[-1]
+    assert status == "failed"
+    assert payload["ad_ids"] == []
+    assert "không tự chuyển sang Messenger-only" in bot._bot.messages[-1]["text"]
 
 
 def test_new_mode_falls_back_to_messenger_asset_feed_for_multi_post_without_source(monkeypatch) -> None:  # noqa: ANN001
