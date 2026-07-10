@@ -274,6 +274,25 @@ def _profile_env(
     return str(default or "").strip()
 
 
+def _profile_env_first(
+    keys: tuple[str, ...],
+    profile: str,
+    *,
+    default: str = "",
+    allow_base_fallback: bool = True,
+) -> str:
+    for key in keys:
+        value = _profile_env(
+            key,
+            profile,
+            default="",
+            allow_base_fallback=allow_base_fallback,
+        )
+        if value:
+            return value
+    return str(default or "").strip()
+
+
 def _resolve_project_path(project_root: Path, raw: str, default: str) -> Path:
     text = str(raw or default).strip() or default
     path = Path(text)
@@ -412,8 +431,12 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         default=os.getenv("META_API_VERSION", "v21.0"),
         allow_base_fallback=True,
     )
-    meta_creative_access_token = _profile_env(
-        "META_CREATIVE_ACCESS_TOKEN",
+    meta_creative_access_token = _profile_env_first(
+        (
+            "META_CREATIVE_ACCESS_TOKEN",
+            "META_INSTAGRAM_ACCESS_TOKEN",
+            "META_IG_ACCESS_TOKEN",
+        ),
         profile_name,
         default="",
         allow_base_fallback=is_default_profile,
