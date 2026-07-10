@@ -28,6 +28,14 @@ on:
         description: "Optional report date YYYY-MM-DD"
         required: false
         default: ""
+      profile:
+        description: "Ads profile for scheduled task"
+        required: false
+        default: "main"
+        type: choice
+        options:
+          - main
+          - ads2
       pancake_notify:
         description: "Pancake sync notification mode"
         required: false
