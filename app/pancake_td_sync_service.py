@@ -1227,6 +1227,7 @@ class PancakeToThaiDuongSyncService:
             "nau",
             "nude",
             "pink",
+            "purple",
             "red",
             "tim",
             "trang",
@@ -1246,6 +1247,8 @@ class PancakeToThaiDuongSyncService:
                 result.add(normalized)
         if result & {"xanhla", "xanhlacay", "green"}:
             result.update({"xanhla", "xanhlacay", "green"})
+        if result & {"tim", "purple"}:
+            result.update({"tim", "purple"})
         return result
 
     @staticmethod
@@ -1803,6 +1806,7 @@ class PancakeToThaiDuongSyncService:
                 "cam",
                 "dao",
                 "tim",
+                "purple",
                 "xam",
                 "ghi",
                 "mint",

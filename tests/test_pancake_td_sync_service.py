@@ -1404,6 +1404,53 @@ def test_sync_sku_mapping_handles_vxv002_xanh_la_as_green(tmp_path: Path) -> Non
     assert thai_duong.create_calls[0]["products"][0]["sku"] == "THA356-VXV002-Green-XL"
 
 
+def test_sync_sku_mapping_handles_vxv010_tim_as_purple(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    dump_json(
+        settings.pancake_td_color_alias_config_path,
+        {
+            "tím": "purple",
+            "tim": "purple",
+        },
+    )
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "ads2_order_126",
+                "custom_id": "126",
+                "inserted_at_timestamp": 1_781_342_088,
+                "payment_method": "cod",
+                "total_price": 114900,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "VXV010-TIM-XL",
+                            "color": "Tím",
+                            "retail_price": 114900,
+                            "name": "Velour Contrast",
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[
+            {"id": 1, "sku": "THA356-VXV010-White-XL", "color": "", "name": "VXV010"},
+            {"id": 2, "sku": "THA356-VXV010-Purple-M", "color": "", "name": "VXV010"},
+            {"id": 3, "sku": "THA356-VXV010-Purple-XL", "color": "", "name": "VXV010"},
+        ]
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    assert thai_duong.create_calls[0]["products"][0]["sku"] == "THA356-VXV010-Purple-XL"
+
+
 def test_sync_sku_mapping_handles_nude_beige_to_hong_variant(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     _write_basic_sync_config(settings)
