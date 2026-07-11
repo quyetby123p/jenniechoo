@@ -1237,10 +1237,15 @@ class PancakeToThaiDuongSyncService:
             "yellow",
         }
         result: set[str] = set()
+        normalized_value = cls._normalize_compare_text(str(value or ""))
+        if "xanhla" in normalized_value or "xanhlacay" in normalized_value:
+            result.update({"xanhla", "xanhlacay", "green"})
         for token in re.split(r"[-_:/\s]+", str(value or "")):
             normalized = cls._normalize_compare_text(token)
             if normalized in known_colors:
                 result.add(normalized)
+        if result & {"xanhla", "xanhlacay", "green"}:
+            result.update({"xanhla", "xanhlacay", "green"})
         return result
 
     @staticmethod
@@ -1790,6 +1795,8 @@ class PancakeToThaiDuongSyncService:
                 "den",
                 "be",
                 "xanh",
+                "xanhla",
+                "xanhlacay",
                 "do",
                 "hong",
                 "vang",

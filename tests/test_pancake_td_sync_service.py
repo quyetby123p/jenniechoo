@@ -1357,6 +1357,53 @@ def test_sync_sku_mapping_keeps_jca248_be_and_cam_dao_distinct(tmp_path: Path) -
     ]
 
 
+def test_sync_sku_mapping_handles_vxv002_xanh_la_as_green(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    dump_json(
+        settings.pancake_td_color_alias_config_path,
+        {
+            "xanh lá": "green",
+            "xanh la": "green",
+        },
+    )
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "ads2_order_126",
+                "custom_id": "126",
+                "inserted_at_timestamp": 1_781_342_088,
+                "payment_method": "cod",
+                "total_price": 390000,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "VXV002-XANH LA-XL",
+                            "color": "Xanh lá",
+                            "retail_price": 390000,
+                            "name": "VXV002",
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[
+            {"id": 1, "sku": "THA356-VXV002-Green-L", "color": "", "name": "VXV002"},
+            {"id": 2, "sku": "THA356-VXV002-Green-XL", "color": "", "name": "VXV002"},
+            {"id": 3, "sku": "THA356-VXV002-Blue-XL", "color": "", "name": "VXV002"},
+        ]
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    assert thai_duong.create_calls[0]["products"][0]["sku"] == "THA356-VXV002-Green-XL"
+
+
 def test_sync_sku_mapping_handles_nude_beige_to_hong_variant(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     _write_basic_sync_config(settings)
