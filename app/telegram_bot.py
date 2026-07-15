@@ -3205,13 +3205,16 @@ class TelegramAdsBot:
         self,
         *,
         task: str,
+        profile: str | None = None,
         slot: str | None = None,
         run_date: date | None = None,
         bucket: str | None = None,
     ) -> None:
+        profile_name = profile if profile is not None else str(getattr(self.settings, "profile", "default"))
         await asyncio.to_thread(
             self.cloud_schedule_guard.mark_completed,
             task=task,
+            profile=profile_name,
             slot=slot,
             run_date=run_date,
             bucket=bucket,

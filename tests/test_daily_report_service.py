@@ -164,6 +164,33 @@ def test_generate_report_partial_when_ads_fail(tmp_path: Path) -> None:
     assert "Chi phí Ads: chưa có dữ liệu." in text
 
 
+def test_build_message_prefixes_ads2_report(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path, profile="ads2")
+    service = DailyReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(),
+        meta_client=_FakeMetaClient(),
+    )
+    text = service.build_message(
+        {
+            "ok": True,
+            "report_date": "2026-05-15",
+            "generated_at": "2026-05-15T01:00:00+00:00",
+            "pos": None,
+            "ads": None,
+            "top_products": [],
+            "warnings": [],
+            "errors": {},
+        },
+        trigger_label="Báo cáo tự động sáng",
+    )
+    lines = text.splitlines()
+
+    assert lines[0] == "ADS2/VAYXA | Báo cáo tự động sáng"
+    assert lines[1].startswith("ADS2/VAYXA | Báo cáo ngày 15/05/2026")
+
+
 def test_generate_report_prefers_aggs_revenue_over_order_total(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     pancake = _FakePancakeClient(

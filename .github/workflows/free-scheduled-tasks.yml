@@ -101,6 +101,11 @@ jobs:
       ADS2_AUDIENCES_CONFIG_PATH: ${{ secrets.ADS2_AUDIENCES_CONFIG_PATH }}
       ADS2_OBJECTIVE_CONFIG_PATH: ${{ secrets.ADS2_OBJECTIVE_CONFIG_PATH }}
       ADS2_MESSAGE_TEMPLATES_PATH: ${{ secrets.ADS2_MESSAGE_TEMPLATES_PATH }}
+      ADS2_PANCAKE_API_BASE_URL: ${{ secrets.ADS2_PANCAKE_API_BASE_URL || secrets.PANCAKE_API_BASE_URL }}
+      ADS2_PANCAKE_API_KEY: ${{ secrets.ADS2_PANCAKE_API_KEY || secrets.PANCAKE_API_KEY }}
+      ADS2_PANCAKE_ACCESS_TOKEN: ${{ secrets.ADS2_PANCAKE_ACCESS_TOKEN || secrets.PANCAKE_ACCESS_TOKEN }}
+      ADS2_PANCAKE_SHOP_ID: ${{ secrets.ADS2_PANCAKE_SHOP_ID }}
+      ADS2_PANCAKE_PAGE_SIZE: ${{ secrets.ADS2_PANCAKE_PAGE_SIZE || secrets.PANCAKE_PAGE_SIZE }}
       PANCAKE_API_BASE_URL: ${{ secrets.PANCAKE_API_BASE_URL }}
       PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
       PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
@@ -113,6 +118,8 @@ jobs:
       DAILY_REPORT_MINUTE: ${{ secrets.DAILY_REPORT_MINUTE }}
       DAILY_REPORT_HISTORY_DAYS: ${{ secrets.DAILY_REPORT_HISTORY_DAYS }}
       DAILY_REPORT_NOTIFY_CHAT_ID: ${{ secrets.DAILY_REPORT_NOTIFY_CHAT_ID }}
+      ADS2_DAILY_REPORT_ENABLED: ${{ secrets.ADS2_DAILY_REPORT_ENABLED || '1' }}
+      ADS2_DAILY_REPORT_NOTIFY_CHAT_ID: ${{ secrets.ADS2_DAILY_REPORT_NOTIFY_CHAT_ID || secrets.DAILY_REPORT_NOTIFY_CHAT_ID }}
       RECONCILE_COD_ENABLED: ${{ secrets.RECONCILE_COD_ENABLED }}
       RECONCILE_COD_AUTO_ENABLED: ${{ secrets.RECONCILE_COD_AUTO_ENABLED }}
       RECONCILE_COD_HOUR: ${{ secrets.RECONCILE_COD_HOUR }}
@@ -223,6 +230,7 @@ jobs:
           echo "task=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
           echo "slot=${{ inputs.slot }}" >> "$GITHUB_OUTPUT"
           echo "date=${{ inputs.date }}" >> "$GITHUB_OUTPUT"
+          echo "profile=${{ inputs.profile || 'main' }}" >> "$GITHUB_OUTPUT"
           echo "pancake_notify=${{ inputs.pancake_notify }}" >> "$GITHUB_OUTPUT"
           echo "source=${{ inputs.source }}" >> "$GITHUB_OUTPUT"
           echo "bot=${{ inputs.bot }}" >> "$GITHUB_OUTPUT"
@@ -231,25 +239,55 @@ jobs:
         shell: bash
         run: |
           missing=()
-          for key in TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USER_ID META_ACCESS_TOKEN META_AD_ACCOUNT_ID META_PAGE_ID; do
-            if [ -z "${!key}" ]; then
-              missing+=("$key")
-            fi
-          done
-          if [ -z "$PANCAKE_ACCESS_TOKEN" ] && [ -z "$PANCAKE_API_KEY" ]; then
-            missing+=("PANCAKE_ACCESS_TOKEN or PANCAKE_API_KEY")
-          fi
-          if [ -z "$PANCAKE_SHOP_ID" ]; then
-            missing+=("PANCAKE_SHOP_ID")
-          fi
           task="${{ steps.task.outputs.task }}"
+          profile="${{ steps.task.outputs.profile || 'main' }}"
           bot="${{ steps.task.outputs.bot || 'main' }}"
+          if [ "$task" = "skip" ]; then
+            echo "Skipping secret validation for unsupported non-dispatch event."
+            exit 0
+          fi
+          needs_main_ads_config=1
+          if [ "$task" = "bot3-daily-checkin" ]; then
+            needs_main_ads_config=0
+          fi
+          if [ "$task" = "telegram-update" ] && { [ "$bot" = "ads2" ] || [ "$bot" = "bot3" ]; }; then
+            needs_main_ads_config=0
+          fi
+          if [ "$task" = "daily-report" ] && [ "$profile" = "ads2" ]; then
+            needs_main_ads_config=0
+          fi
+          if [ "$needs_main_ads_config" = "1" ]; then
+            for key in TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USER_ID META_ACCESS_TOKEN META_AD_ACCOUNT_ID META_PAGE_ID; do
+              if [ -z "${!key}" ]; then
+                missing+=("$key")
+              fi
+            done
+            if [ -z "$PANCAKE_ACCESS_TOKEN" ] && [ -z "$PANCAKE_API_KEY" ]; then
+              missing+=("PANCAKE_ACCESS_TOKEN or PANCAKE_API_KEY")
+            fi
+            if [ -z "$PANCAKE_SHOP_ID" ]; then
+              missing+=("PANCAKE_SHOP_ID")
+            fi
+          fi
           if [ "$task" = "bot3-daily-checkin" ] || { [ "$task" = "telegram-update" ] && [ "$bot" = "bot3" ]; }; then
             for key in BOT3_TELEGRAM_TOKEN BOT3_ALLOWED_USER_ID; do
               if [ -z "${!key}" ]; then
                 missing+=("$key")
               fi
             done
+          fi
+          if [ "$task" = "daily-report" ] && [ "$profile" = "ads2" ]; then
+            for key in ADS2_TELEGRAM_BOT_TOKEN ADS2_TELEGRAM_ALLOWED_USER_ID ADS2_META_ACCESS_TOKEN ADS2_META_PAGE_ACCESS_TOKEN ADS2_META_AD_ACCOUNT_ID ADS2_META_PAGE_ID ADS2_PANCAKE_SHOP_ID; do
+              if [ -z "${!key}" ]; then
+                missing+=("$key")
+              fi
+            done
+            if [ -z "$ADS2_PANCAKE_ACCESS_TOKEN" ] && [ -z "$ADS2_PANCAKE_API_KEY" ] && [ -z "$PANCAKE_ACCESS_TOKEN" ] && [ -z "$PANCAKE_API_KEY" ]; then
+              missing+=("ADS2_PANCAKE_ACCESS_TOKEN or ADS2_PANCAKE_API_KEY")
+            fi
+            if [ -z "$ADS2_DAILY_REPORT_NOTIFY_CHAT_ID" ] && [ -z "$DAILY_REPORT_NOTIFY_CHAT_ID" ]; then
+              missing+=("ADS2_DAILY_REPORT_NOTIFY_CHAT_ID or DAILY_REPORT_NOTIFY_CHAT_ID")
+            fi
           fi
           if [ "$task" = "telegram-update" ] && [ "$bot" = "ads2" ]; then
             for key in ADS2_TELEGRAM_BOT_TOKEN ADS2_TELEGRAM_ALLOWED_USER_ID ADS2_META_ACCESS_TOKEN ADS2_META_PAGE_ACCESS_TOKEN ADS2_META_AD_ACCOUNT_ID ADS2_META_PAGE_ID; do
@@ -272,6 +310,11 @@ jobs:
             echo "Skipping unsupported non-dispatch event."
             exit 0
           fi
+          profile="${{ steps.task.outputs.profile || 'main' }}"
+          runtime_profile="$profile"
+          if [ "$runtime_profile" = "main" ]; then
+            runtime_profile="default"
+          fi
           args=("$task")
           if [ "$task" = "daily-report" ]; then
             args+=("--slot" "${{ steps.task.outputs.slot || 'morning' }}")
@@ -292,7 +335,7 @@ jobs:
             python -c 'import json, os, sys; event=json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8")); update_b64=(event.get("inputs") or {}).get("update_b64", ""); sys.exit("Missing update_b64 for telegram-update.") if not update_b64 else open("telegram_update.b64", "w", encoding="utf-8").write(update_b64)'
             python -m app.telegram_update_runner --bot "${{ steps.task.outputs.bot || 'main' }}" --update-b64-file telegram_update.b64
           else
-            python -m app.scheduled_tasks "${args[@]}"
+            python -m app.scheduled_tasks --profile "$runtime_profile" "${args[@]}"
           fi
 
       - name: Save runtime state

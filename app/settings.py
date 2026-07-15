@@ -384,6 +384,7 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         load_dotenv(env_file, override=True)
 
     is_default_profile = profile_name == "default"
+    is_ads2_profile = profile_name == "ads2"
     telegram_bot_token = _profile_env(
         "TELEGRAM_BOT_TOKEN",
         profile_name,
@@ -479,8 +480,13 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         default=True,
     )
     daily_report_enabled = _parse_bool(
-        os.getenv("DAILY_REPORT_ENABLED", "1"),
-        default=True,
+        _profile_env(
+            "DAILY_REPORT_ENABLED",
+            profile_name,
+            default="1" if is_default_profile or is_ads2_profile else "0",
+            allow_base_fallback=is_default_profile,
+        ),
+        default=is_default_profile or is_ads2_profile,
     )
     daily_report_hour = _parse_int_with_range(
         os.getenv("DAILY_REPORT_HOUR", "8"),
@@ -505,7 +511,12 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         default=True,
     )
     daily_report_notify_chat_id = _parse_optional_int(
-        os.getenv("DAILY_REPORT_NOTIFY_CHAT_ID", ""),
+        _profile_env(
+            "DAILY_REPORT_NOTIFY_CHAT_ID",
+            profile_name,
+            default="",
+            allow_base_fallback=True,
+        ),
         default=0,
     )
     daily_report_task_summary_enabled = _parse_bool(
@@ -522,12 +533,40 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         "DAILY_REPORT_TASK_DB_PATH",
         os.getenv("BOT3_TASK_DB_PATH", "storage/assistant_bot/tasks.db"),
     ).strip()
-    pancake_api_base_url = os.getenv("PANCAKE_API_BASE_URL", "https://pos.pancake.vn/api/v1").strip().rstrip("/")
-    pancake_api_key = os.getenv("PANCAKE_API_KEY", "").strip()
-    pancake_access_token = os.getenv("PANCAKE_ACCESS_TOKEN", "").strip()
-    pancake_shop_id = _parse_optional_int(os.getenv("PANCAKE_SHOP_ID", ""), default=0)
+    pancake_api_base_url = _profile_env(
+        "PANCAKE_API_BASE_URL",
+        profile_name,
+        default="https://pos.pancake.vn/api/v1",
+        allow_base_fallback=True,
+    ).rstrip("/")
+    pancake_api_key = _profile_env(
+        "PANCAKE_API_KEY",
+        profile_name,
+        default="",
+        allow_base_fallback=True,
+    )
+    pancake_access_token = _profile_env(
+        "PANCAKE_ACCESS_TOKEN",
+        profile_name,
+        default="",
+        allow_base_fallback=True,
+    )
+    pancake_shop_id = _parse_optional_int(
+        _profile_env(
+            "PANCAKE_SHOP_ID",
+            profile_name,
+            default="",
+            allow_base_fallback=is_default_profile,
+        ),
+        default=0,
+    )
     pancake_page_size = _parse_int_with_range(
-        os.getenv("PANCAKE_PAGE_SIZE", "200"),
+        _profile_env(
+            "PANCAKE_PAGE_SIZE",
+            profile_name,
+            default="200",
+            allow_base_fallback=True,
+        ),
         default=200,
         min_value=1,
         max_value=500,

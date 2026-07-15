@@ -213,6 +213,12 @@ function scheduleGuardVariableName(env) {
   return String(env.SCHEDULE_GUARD_VARIABLE_NAME || "LOCAL_SCHEDULE_MARKS").trim();
 }
 
+function normalizeScheduleProfile(profile, fallback = "default") {
+  const normalized = String(profile || fallback).trim().toLowerCase();
+  if (!normalized || normalized === "main") return "default";
+  return normalized;
+}
+
 function pad2(value) {
   return String(value).padStart(2, "0");
 }
@@ -243,9 +249,11 @@ function scheduleMarkKey(parts) {
   const task = String(parts.task || "").trim();
   if (!task) return "";
   if (task === "daily-report" || task === "bot3-daily-checkin") {
+    const fallbackProfile = task === "bot3-daily-checkin" ? "bot3" : "main";
+    const profile = normalizeScheduleProfile(parts.profile, fallbackProfile);
     const slot = String(parts.slot || "").trim();
     const runDate = String(parts.run_date || "").trim();
-    return slot && runDate ? `${task}:${slot}:${runDate}` : "";
+    return profile && slot && runDate ? `${task}:${profile}:${slot}:${runDate}` : "";
   }
   if (task === "pancake-td-sync") {
     const bucket = String(parts.bucket || "").trim();
@@ -258,8 +266,10 @@ function scheduleMarkKey(parts) {
 function scheduleMarkPartsFromCloud(inputs, scheduledTime) {
   const task = String(inputs.task || "").trim();
   if (task === "daily-report" || task === "bot3-daily-checkin") {
+    const fallbackProfile = task === "bot3-daily-checkin" ? "bot3" : "main";
     return {
       task,
+      profile: String(inputs.profile || fallbackProfile).trim(),
       slot: String(inputs.slot || "").trim(),
       run_date: localRunDate(scheduledTime),
     };
@@ -371,6 +381,7 @@ async function handleScheduleMark(request, env) {
   }
   const parts = {
     task: String(body.task || "").trim(),
+    profile: String(body.profile || "").trim(),
     slot: String(body.slot || "").trim(),
     run_date: String(body.run_date || "").trim(),
     bucket: String(body.bucket || "").trim(),
@@ -413,11 +424,20 @@ function scheduledInputsFromCron(cron, scheduledTime) {
       return inputs;
     }
     case "5 1 * * *":
-      return [{
-        task: "daily-report",
-        slot: "morning",
-        source: "cloudflare-cron",
-      }];
+      return [
+        {
+          task: "daily-report",
+          profile: "main",
+          slot: "morning",
+          source: "cloudflare-cron",
+        },
+        {
+          task: "daily-report",
+          profile: "ads2",
+          slot: "morning",
+          source: "cloudflare-cron",
+        },
+      ];
     case "5 2 * * *":
       return [
         {
@@ -444,11 +464,20 @@ function scheduledInputsFromCron(cron, scheduledTime) {
       }];
     }
     case "5 14 * * *":
-      return [{
-        task: "daily-report",
-        slot: "evening",
-        source: "cloudflare-cron",
-      }];
+      return [
+        {
+          task: "daily-report",
+          profile: "main",
+          slot: "evening",
+          source: "cloudflare-cron",
+        },
+        {
+          task: "daily-report",
+          profile: "ads2",
+          slot: "evening",
+          source: "cloudflare-cron",
+        },
+      ];
     default:
       return [];
   }

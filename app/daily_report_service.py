@@ -100,10 +100,10 @@ class DailyReportService:
 
         lines: list[str] = []
         if trigger_label:
-            lines.append(trigger_label)
+            lines.append(self._format_trigger_label(trigger_label))
         lines.extend(
             [
-                f"Báo cáo ngày {report_date.strftime('%d/%m/%Y')} ({self.settings.app_timezone})",
+                f"{self._report_title_prefix()}Báo cáo ngày {report_date.strftime('%d/%m/%Y')} ({self.settings.app_timezone})",
                 f"Thời gian tạo: {generated_at_text}",
                 f"Tổng quan: {self._status_text(report)}",
                 "",
@@ -163,6 +163,24 @@ class DailyReportService:
     def default_report_date(self) -> date:
         now_local = datetime.now(self._resolve_timezone())
         return (now_local - timedelta(days=1)).date()
+
+    def _profile_report_label(self) -> str:
+        profile = str(getattr(self.settings, "profile", "default")).strip().lower()
+        if profile == "ads2":
+            return "ADS2/VAYXA"
+        return ""
+
+    def _format_trigger_label(self, trigger_label: str) -> str:
+        label = self._profile_report_label()
+        if not label:
+            return trigger_label
+        return f"{label} | {trigger_label}"
+
+    def _report_title_prefix(self) -> str:
+        label = self._profile_report_label()
+        if not label:
+            return ""
+        return f"{label} | "
 
     def _aggregate_pos(
         self,

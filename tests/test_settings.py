@@ -47,3 +47,27 @@ def test_load_settings_accepts_profile_instagram_token_alias(monkeypatch, tmp_pa
     settings = load_settings(project_root=tmp_path, profile="ads2")
 
     assert settings.meta_creative_access_token == "ig_user_token_ads2"
+
+
+def test_ads2_daily_report_uses_profile_pancake_and_chat_fallback(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    _write_required_config(tmp_path, "ads2")
+    _set_default_required_env(monkeypatch)
+    monkeypatch.setenv("ADS2_TELEGRAM_BOT_TOKEN", "telegram_ads2")
+    monkeypatch.setenv("ADS2_META_ACCESS_TOKEN", "meta_ads2")
+    monkeypatch.setenv("ADS2_META_PAGE_ACCESS_TOKEN", "page_token_ads2")
+    monkeypatch.setenv("ADS2_META_AD_ACCOUNT_ID", "act_2")
+    monkeypatch.setenv("ADS2_META_PAGE_ID", "page_2")
+    monkeypatch.setenv("DAILY_REPORT_NOTIFY_CHAT_ID", "-5153224852")
+    monkeypatch.delenv("ADS2_DAILY_REPORT_NOTIFY_CHAT_ID", raising=False)
+    monkeypatch.setenv("PANCAKE_ACCESS_TOKEN", "pancake_main")
+    monkeypatch.setenv("PANCAKE_SHOP_ID", "111")
+    monkeypatch.setenv("ADS2_PANCAKE_ACCESS_TOKEN", "pancake_ads2")
+    monkeypatch.setenv("ADS2_PANCAKE_SHOP_ID", "222")
+
+    settings = load_settings(project_root=tmp_path, profile="ads2")
+
+    assert settings.profile == "ads2"
+    assert settings.daily_report_enabled is True
+    assert settings.daily_report_notify_chat_id == -5153224852
+    assert settings.pancake_access_token == "pancake_ads2"
+    assert settings.pancake_shop_id == 222

@@ -44,3 +44,22 @@ def test_mark_completed_posts_payload_and_dedupes(monkeypatch) -> None:
         "slot": "morning",
         "run_date": "2026-06-04",
     }
+
+
+def test_mark_completed_includes_profile_when_provided(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_post(url, json, headers, timeout):  # noqa: ANN001
+        calls.append({"url": url, "json": dict(json), "headers": dict(headers), "timeout": timeout})
+        return SimpleNamespace(raise_for_status=lambda: None)
+
+    monkeypatch.setattr("app.cloud_schedule_guard.requests.post", fake_post)
+    client = CloudScheduleGuardClient(
+        mark_url="https://worker.example/schedule/mark",
+        secret="secret",
+        logger=logging.getLogger("test"),
+    )
+
+    assert client.mark_completed(task="daily-report", profile="ads2", slot="evening", run_date=date(2026, 6, 4)) is True
+
+    assert calls[0]["json"]["profile"] == "ads2"

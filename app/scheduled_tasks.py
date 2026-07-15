@@ -307,7 +307,7 @@ async def run_task(args: argparse.Namespace) -> int:
         finally:
             await assistant_runtime.telegram.session.close()
 
-    runtime = build_runtime()
+    runtime = build_runtime(profile=args.profile)
     try:
         task = str(args.task).strip()
         if task == "token-health":
@@ -338,6 +338,7 @@ async def run_task(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run one scheduled cloud task.")
+    parser.add_argument("--profile", default="", help="Ads profile for scheduled tasks.")
     subparsers = parser.add_subparsers(dest="task", required=True)
 
     subparsers.add_parser("token-health", help="Send Meta/Thai Duong token health report.")

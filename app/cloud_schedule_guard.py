@@ -55,6 +55,7 @@ class CloudScheduleGuardClient:
         self,
         *,
         task: str,
+        profile: str | None = None,
         slot: str | None = None,
         run_date: date | str | None = None,
         bucket: str | None = None,
@@ -67,6 +68,8 @@ class CloudScheduleGuardClient:
             "task": str(task).strip(),
             "source": str(source).strip() or "local",
         }
+        if profile:
+            body["profile"] = str(profile).strip()
         if slot:
             body["slot"] = str(slot).strip()
         if run_date:
@@ -74,7 +77,7 @@ class CloudScheduleGuardClient:
         if bucket:
             body["bucket"] = str(bucket).strip()
 
-        local_key = "|".join(str(body.get(name, "")) for name in ("task", "slot", "run_date", "bucket"))
+        local_key = "|".join(str(body.get(name, "")) for name in ("task", "profile", "slot", "run_date", "bucket"))
         if local_key in self._marked_keys:
             return True
 
