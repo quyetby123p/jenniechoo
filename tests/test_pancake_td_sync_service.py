@@ -1357,6 +1357,157 @@ def test_sync_sku_mapping_keeps_jca248_be_and_cam_dao_distinct(tmp_path: Path) -
     ]
 
 
+def test_sync_sku_mapping_handles_vxv011_tim_pastel_as_purple_xl(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    dump_json(
+        settings.pancake_td_color_alias_config_path,
+        {
+            "tím": "purple",
+            "tim": "purple",
+            "tím pastel": "purple",
+            "tim pastel": "purple",
+        },
+    )
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "ads2_order_138",
+                "custom_id": "138",
+                "inserted_at_timestamp": 1_783_926_656,
+                "payment_method": "cod",
+                "total_price": 129900,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "VXV011-TIM PASTEL-XL",
+                            "color": "Tím Pastel",
+                            "retail_price": 129900,
+                            "name": "Lumiere",
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[
+            {"id": 1, "sku": "THA356-VXV011-White-XL", "color": "", "name": "VXV011"},
+            {"id": 2, "sku": "THA356-VXV011-Purple-L", "color": "", "name": "VXV011"},
+            {"id": 3, "sku": "THA356-VXV011-Purple-XL", "color": "", "name": "VXV011"},
+        ]
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    assert thai_duong.create_calls[0]["products"][0]["sku"] == "THA356-VXV011-Purple-XL"
+
+
+def test_sync_sku_mapping_handles_vayxa_vxv_color_table(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    dump_json(settings.pancake_td_color_alias_config_path, {})
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "ads2_vxv_color_table",
+                "custom_id": "131",
+                "inserted_at_timestamp": 1_783_926_700,
+                "payment_method": "cod",
+                "total_price": 500000,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "VXV001-DEN-M",
+                            "color": "Đen",
+                            "retail_price": 100000,
+                            "name": "VXV001",
+                        },
+                    },
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "VXV002-XANH MINT-L",
+                            "color": "Xanh mint",
+                            "retail_price": 100000,
+                            "name": "VXV002",
+                        },
+                    },
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "VXV003-XANH LA-XL",
+                            "color": "Xanh lá",
+                            "retail_price": 100000,
+                            "name": "VXV003",
+                        },
+                    },
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "VXV004-KEM-S",
+                            "color": "Kem",
+                            "retail_price": 100000,
+                            "name": "VXV004",
+                        },
+                    },
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "VXV005-TRANG-M",
+                            "color": "Trắng",
+                            "retail_price": 100000,
+                            "name": "VXV005",
+                        },
+                    },
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "VXV006-DO-L",
+                            "color": "Đỏ",
+                            "retail_price": 100000,
+                            "name": "VXV006",
+                        },
+                    },
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[
+            {"id": 1, "sku": "THA356-VXV001-White-M", "color": "", "name": "VXV001"},
+            {"id": 2, "sku": "THA356-VXV001-Black-M", "color": "", "name": "VXV001"},
+            {"id": 3, "sku": "THA356-VXV002-Green-L", "color": "", "name": "VXV002"},
+            {"id": 4, "sku": "THA356-VXV002-Blue-L", "color": "", "name": "VXV002"},
+            {"id": 5, "sku": "THA356-VXV003-Blue-XL", "color": "", "name": "VXV003"},
+            {"id": 6, "sku": "THA356-VXV003-Green-XL", "color": "", "name": "VXV003"},
+            {"id": 7, "sku": "THA356-VXV004-Purple-S", "color": "", "name": "VXV004"},
+            {"id": 8, "sku": "THA356-VXV004-White-S", "color": "", "name": "VXV004"},
+            {"id": 9, "sku": "THA356-VXV005-Black-M", "color": "", "name": "VXV005"},
+            {"id": 10, "sku": "THA356-VXV005-White-M", "color": "", "name": "VXV005"},
+            {"id": 11, "sku": "THA356-VXV006-Black-L", "color": "", "name": "VXV006"},
+            {"id": 12, "sku": "THA356-VXV006-Red-L", "color": "", "name": "VXV006"},
+        ]
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    assert [item["sku"] for item in thai_duong.create_calls[0]["products"]] == [
+        "THA356-VXV001-Black-M",
+        "THA356-VXV002-Blue-L",
+        "THA356-VXV003-Green-XL",
+        "THA356-VXV004-White-S",
+        "THA356-VXV005-White-M",
+        "THA356-VXV006-Red-L",
+    ]
+
+
 def test_sync_sku_mapping_handles_nude_beige_to_hong_variant(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     _write_basic_sync_config(settings)

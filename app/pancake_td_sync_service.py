@@ -1105,7 +1105,7 @@ class PancakeToThaiDuongSyncService:
             code_keys = self._candidate_sku_keys(code_raw)
             if not code_keys:
                 raise ValueError("SKU Pancake không hợp lệ.")
-            color_keys = self._color_candidate_keys(color_raw, color_alias)
+            color_keys = self._color_candidate_keys(color_raw, color_alias, sku=code_raw)
 
             candidates: list[dict[str, Any]] = []
             for code_key in code_keys:
@@ -1227,6 +1227,7 @@ class PancakeToThaiDuongSyncService:
             "nau",
             "nude",
             "pink",
+            "purple",
             "red",
             "tim",
             "trang",
@@ -1237,10 +1238,24 @@ class PancakeToThaiDuongSyncService:
             "yellow",
         }
         result: set[str] = set()
+        normalized_value = cls._normalize_compare_text(str(value or ""))
+        if "xanhla" in normalized_value or "xanhlacay" in normalized_value:
+            result.update({"xanhla", "xanhlacay", "green"})
         for token in re.split(r"[-_:/\s]+", str(value or "")):
             normalized = cls._normalize_compare_text(token)
             if normalized in known_colors:
                 result.add(normalized)
+        equivalent_groups = (
+            {"kem", "cream", "trang", "white"},
+            {"den", "black"},
+            {"do", "red"},
+            {"xanhla", "xanhlacay", "green"},
+            {"mint", "blue"},
+            {"tim", "purple"},
+        )
+        for group in equivalent_groups:
+            if result & group:
+                result.update(group)
         return result
 
     @staticmethod
@@ -1266,7 +1281,13 @@ class PancakeToThaiDuongSyncService:
                 return value
         return ""
 
-    def _color_candidate_keys(self, color_raw: str, alias_map: dict[str, str]) -> list[str]:
+    def _color_candidate_keys(
+        self,
+        color_raw: str,
+        alias_map: dict[str, str],
+        *,
+        sku: str = "",
+    ) -> list[str]:
         text = str(color_raw or "").strip()
         if not text:
             return [""]
@@ -1285,6 +1306,29 @@ class PancakeToThaiDuongSyncService:
         direct_alias = alias_map.get(normalized_text)
         if direct_alias:
             _add(direct_alias)
+
+        normalized_sku = self._normalize_compare_text(sku)
+        if "vxv" in normalized_sku:
+            vxv_alias_map = {
+                "den": "black",
+                "black": "black",
+                "do": "red",
+                "red": "red",
+                "tim": "purple",
+                "timpastel": "purple",
+                "purple": "purple",
+                "xanhmint": "blue",
+                "blue": "blue",
+                "xanhla": "green",
+                "xanhlacay": "green",
+                "green": "green",
+                "kem": "white",
+                "trang": "white",
+                "white": "white",
+            }
+            for alias_key, alias_value in vxv_alias_map.items():
+                if alias_key and alias_key in normalized_text:
+                    _add(alias_value)
 
         for alias_key, alias_value in alias_map.items():
             if alias_key and alias_key in normalized_text:
@@ -1790,12 +1834,16 @@ class PancakeToThaiDuongSyncService:
                 "den",
                 "be",
                 "xanh",
+                "la",
+                "cay",
                 "do",
                 "hong",
                 "vang",
                 "cam",
                 "dao",
                 "tim",
+                "pastel",
+                "purple",
                 "xam",
                 "ghi",
                 "mint",
