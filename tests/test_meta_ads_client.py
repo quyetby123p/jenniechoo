@@ -1657,6 +1657,26 @@ def test_get_ad_insights_for_range_requests_ad_level_action_values() -> None:
     assert captured["access_token"] == "dummy"
 
 
+def test_get_ad_insights_for_range_retries_page_token_when_ads_token_expired() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+    used_tokens: list[str | None] = []
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = method, params, data
+        used_tokens.append(access_token)
+        assert path == "/act_1/insights"
+        if access_token == "dummy":
+            raise MetaApiError("Meta API loi (400): The token has expired.")
+        return {"data": [{"ad_id": "ad_1", "spend": "100000"}]}
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    rows = client.get_ad_insights_for_range(date(2026, 7, 1), date(2026, 7, 7), "Asia/Ho_Chi_Minh")
+
+    assert rows == [{"ad_id": "ad_1", "spend": "100000"}]
+    assert used_tokens == ["dummy", "page_dummy"]
+
+
 def test_find_active_campaigns_by_keywords_returns_sorted_matches() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
 

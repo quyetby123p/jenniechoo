@@ -205,6 +205,70 @@ class MetaAdsClient:
             raise MetaApiError("Meta API khong tra ve access_token khi exchange token.")
         return exchanged
 
+    def _media_read_access_tokens(self) -> list[str]:
+        candidates = [
+            str(self.settings.meta_access_token or "").strip(),
+            str(self.settings.meta_page_access_token or "").strip(),
+        ]
+        creative_token = self._get_creative_access_token()
+        if creative_token:
+            candidates.append(str(creative_token).strip())
+
+        tokens: list[str] = []
+        seen: set[str] = set()
+        for token in candidates:
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            tokens.append(token)
+        return tokens
+
+    @staticmethod
+    def _should_retry_media_read_token(error: Exception) -> bool:
+        text = str(error).lower()
+        return any(
+            marker in text
+            for marker in (
+                "token has expired",
+                "session has expired",
+                "error validating access token",
+                "invalid oauth access token",
+                "access token",
+                "permissions error",
+                "requires ads_read",
+                "does not have permission",
+            )
+        )
+
+    def _request_media_read(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        tokens = self._media_read_access_tokens()
+        if not tokens:
+            return self._request("GET", path, params=params, access_token=self.settings.meta_access_token)
+
+        last_error: MetaApiError | None = None
+        for index, token in enumerate(tokens):
+            try:
+                return self._request("GET", path, params=params, access_token=token)
+            except MetaApiError as exc:
+                last_error = exc
+                has_next_token = index < len(tokens) - 1
+                if not has_next_token or not self._should_retry_media_read_token(exc):
+                    raise
+                self.logger.warning(
+                    "Meta read token failed for %s; retrying with fallback token: %s",
+                    path,
+                    self._short_error(str(exc)),
+                )
+
+        if last_error is not None:
+            raise last_error
+        raise MetaApiError("Meta API loi khong xac dinh khi doc media.")
+
     def _sleep_for_retry(self, attempt: int) -> None:
         import time
 
@@ -234,6 +298,13 @@ class MetaAdsClient:
         except json.JSONDecodeError:
             pass
         return raw_text[:500]
+
+    @staticmethod
+    def _short_error(error: str, max_len: int = 220) -> str:
+        normalized = " ".join(str(error).split())
+        if len(normalized) <= max_len:
+            return normalized
+        return normalized[: max_len - 3] + "..."
 
     def check_token_health(self) -> dict[str, Any]:
         report: dict[str, Any] = {
@@ -577,11 +648,9 @@ class MetaAdsClient:
         }
         rows: list[dict[str, Any]] = []
         while next_path and len(rows) < max(1, int(max_rows)):
-            payload = self._request(
-                "GET",
+            payload = self._request_media_read(
                 next_path,
                 params=next_params,
-                access_token=self.settings.meta_access_token,
             )
             data = payload.get("data", [])
             if isinstance(data, list):
@@ -606,8 +675,7 @@ class MetaAdsClient:
                 continue
             seen.add(normalized_ad_id)
             try:
-                payload = self._request(
-                    "GET",
+                payload = self._request_media_read(
                     f"/{normalized_ad_id}",
                     params={
                         "fields": (
@@ -617,7 +685,6 @@ class MetaAdsClient:
                             "issues_info"
                         ),
                     },
-                    access_token=self.settings.meta_access_token,
                 )
             except Exception as exc:  # noqa: BLE001
                 self.logger.warning("Khong doc duoc metadata ad %s: %s", normalized_ad_id, exc)
