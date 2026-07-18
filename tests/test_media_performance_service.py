@@ -629,7 +629,7 @@ def test_empty_media_bucket_falls_back_to_story_permalink(tmp_path: Path) -> Non
     )
 
 
-def test_format_sheet_data_rows_alternates_week_background(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+def test_format_sheet_data_rows_alternates_weekly_period_background(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
     service = MediaPerformanceService(
         settings=_settings_with_sheet(tmp_path),
         logger=logging.getLogger("test"),
@@ -637,6 +637,20 @@ def test_format_sheet_data_rows_alternates_week_background(tmp_path: Path, monke
         pancake_client=FakePancake(),  # type: ignore[arg-type]
     )
     payloads: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        service,
+        "_sheet_values_get",
+        lambda **_: {
+            "values": [
+                ["2026-07-01", "2026-07-07"],
+                ["2026-07-01", "2026-07-07"],
+                ["2026-07-08", "2026-07-14"],
+                ["2026-07-08", "2026-07-14"],
+                ["2026-07-15", "2026-07-21"],
+            ]
+        },
+    )
 
     def capture_request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         assert method == "POST"
@@ -648,19 +662,29 @@ def test_format_sheet_data_rows_alternates_week_background(tmp_path: Path, monke
 
     service._format_sheet_data_rows(
         spreadsheet_id="sheet_123",
+        sheet_title="Media",
         headers={},
-        row_numbers=[2, 3, 5],
-        start_date="2026-07-14",
-        end_date="2026-07-20",
+        row_numbers=[],
+        start_date="",
+        end_date="",
     )
 
     requests_payload = payloads[0]["requests"]
-    assert [item["repeatCell"]["range"]["startRowIndex"] for item in requests_payload] == [1, 4]
-    assert [item["repeatCell"]["range"]["endRowIndex"] for item in requests_payload] == [3, 5]
-    first_repeat_cell = requests_payload[0]["repeatCell"]
-    assert first_repeat_cell["range"]["endColumnIndex"] == len(MEDIA_PERFORMANCE_SHEET_HEADERS)
-    assert first_repeat_cell["cell"]["userEnteredFormat"]["backgroundColor"] == {
+    assert [item["repeatCell"]["range"]["startRowIndex"] for item in requests_payload] == [1, 3, 5]
+    assert [item["repeatCell"]["range"]["endRowIndex"] for item in requests_payload] == [3, 5, 6]
+    assert requests_payload[0]["repeatCell"]["range"]["endColumnIndex"] == len(MEDIA_PERFORMANCE_SHEET_HEADERS)
+    assert requests_payload[0]["repeatCell"]["cell"]["userEnteredFormat"]["backgroundColor"] == {
+        "red": 1.0,
+        "green": 1.0,
+        "blue": 1.0,
+    }
+    assert requests_payload[1]["repeatCell"]["cell"]["userEnteredFormat"]["backgroundColor"] == {
         "red": 252 / 255,
         "green": 229 / 255,
         "blue": 205 / 255,
+    }
+    assert requests_payload[2]["repeatCell"]["cell"]["userEnteredFormat"]["backgroundColor"] == {
+        "red": 1.0,
+        "green": 1.0,
+        "blue": 1.0,
     }

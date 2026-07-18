@@ -575,7 +575,7 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         default=0,
     )
     if media_analytics_notify_chat_id <= 0:
-        media_analytics_notify_chat_id = daily_report_notify_chat_id or telegram_allowed_user_id
+        media_analytics_notify_chat_id = telegram_allowed_user_id
     media_analytics_history_days = _parse_int_with_range(
         _profile_env("MEDIA_ANALYTICS_HISTORY_DAYS", profile_name, default="7", allow_base_fallback=True),
         default=7,

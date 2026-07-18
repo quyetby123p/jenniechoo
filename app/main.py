@@ -73,8 +73,6 @@ def check_runtime_configuration(profile: str | None = None) -> str:
             missing.append("env.REPORT_THB_MINOR_UNIT_FACTOR")
 
     if settings.media_analytics_enabled:
-        if settings.media_analytics_auto_enabled and settings.media_analytics_notify_chat_id == 0:
-            missing.append("env.MEDIA_ANALYTICS_NOTIFY_CHAT_ID")
         if settings.media_analytics_history_days <= 0:
             missing.append("env.MEDIA_ANALYTICS_HISTORY_DAYS")
         if settings.media_analytics_sheet_enabled:

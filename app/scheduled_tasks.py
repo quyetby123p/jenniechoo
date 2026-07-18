@@ -271,7 +271,7 @@ async def run_media_performance(runtime: ScheduledRuntime, *, codes: str, days: 
     )
     report = await asyncio.to_thread(runtime.media_performance.generate_report, command)
     messages = runtime.media_performance.build_messages(report)
-    chat_id = runtime.settings.media_analytics_notify_chat_id or runtime.settings.telegram_allowed_user_id
+    chat_id = runtime.settings.telegram_allowed_user_id
     for text in messages:
         await runtime.telegram.send_message(chat_id=chat_id, text=text)
 

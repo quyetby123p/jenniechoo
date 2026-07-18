@@ -1102,6 +1102,7 @@ class MediaPerformanceService:
         ]
         self._format_sheet_data_rows(
             spreadsheet_id=spreadsheet_id,
+            sheet_title=sheet_title,
             headers=headers,
             row_numbers=synced_row_numbers,
             start_date=str(rows[0].get("start_date", "")).strip(),
@@ -1259,32 +1260,31 @@ class MediaPerformanceService:
         self,
         *,
         spreadsheet_id: str,
+        sheet_title: str,
         headers: dict[str, str],
         row_numbers: list[int],
         start_date: str,
         end_date: str,
     ) -> None:
-        unique_numbers = sorted({number for number in row_numbers if number >= 2})
-        if not unique_numbers:
+        del row_numbers, start_date, end_date
+        payload = self._sheet_values_get(
+            spreadsheet_id=spreadsheet_id,
+            read_range=f"'{self._escape_sheet_title(sheet_title)}'!A2:B",
+            headers=headers,
+            params={"majorDimension": "ROWS"},
+        )
+        values = payload.get("values", []) if isinstance(payload, dict) else []
+        if not isinstance(values, list):
             return
-        color = self._weekly_background_color(start_date=start_date, end_date=end_date)
-        requests_payload = []
-        for start_row, end_row in self._contiguous_row_ranges(unique_numbers):
-            requests_payload.append(
-                {
-                    "repeatCell": {
-                        "range": {
-                            "sheetId": int(self.settings.media_analytics_sheet_gid),
-                            "startRowIndex": start_row - 1,
-                            "endRowIndex": end_row,
-                            "startColumnIndex": 0,
-                            "endColumnIndex": len(MEDIA_PERFORMANCE_SHEET_HEADERS),
-                        },
-                        "cell": {"userEnteredFormat": {"backgroundColor": color}},
-                        "fields": "userEnteredFormat.backgroundColor",
-                    }
-                }
-            )
+        period_rows: list[tuple[int, tuple[str, str]]] = []
+        for index, row in enumerate(values):
+            if not isinstance(row, list):
+                continue
+            period_key = self._period_key_from_visible_sheet_row(row)
+            if period_key:
+                period_rows.append((index + 2, period_key))
+
+        requests_payload = self._build_weekly_period_format_requests(period_rows)
         if not requests_payload:
             return
         self._sheet_request_json(
@@ -1531,15 +1531,83 @@ class MediaPerformanceService:
         return ""
 
     @staticmethod
-    def _weekly_background_color(*, start_date: str, end_date: str) -> dict[str, float]:
-        try:
-            period_date = date.fromisoformat(end_date or start_date)
-            iso_week = int(period_date.isocalendar().week)
-        except (TypeError, ValueError):
-            iso_week = 1
-        if iso_week % 2 == 0:
+    def _period_key_from_visible_sheet_row(row: list[Any]) -> tuple[str, str] | None:
+        start_date = str(row[0] if len(row) > 0 else "").strip()
+        end_date = str(row[1] if len(row) > 1 else "").strip()
+        if not start_date or not end_date:
+            return None
+        return start_date, end_date
+
+    @staticmethod
+    def _background_color_for_period_index(period_index: int) -> dict[str, float]:
+        if period_index % 2 == 1:
             return {"red": 252 / 255, "green": 229 / 255, "blue": 205 / 255}
         return {"red": 1.0, "green": 1.0, "blue": 1.0}
+
+    def _build_weekly_period_format_requests(
+        self,
+        period_rows: list[tuple[int, tuple[str, str]]],
+    ) -> list[dict[str, Any]]:
+        period_order: dict[tuple[str, str], int] = {}
+        row_colors: list[tuple[int, int]] = []
+        for row_number, period_key in period_rows:
+            if row_number < 2:
+                continue
+            if period_key not in period_order:
+                period_order[period_key] = len(period_order)
+            row_colors.append((row_number, period_order[period_key]))
+
+        if not row_colors:
+            return []
+
+        requests_payload: list[dict[str, Any]] = []
+        range_start = row_colors[0][0]
+        previous_row = row_colors[0][0]
+        previous_color_index = row_colors[0][1]
+
+        for row_number, color_index in row_colors[1:]:
+            if row_number == previous_row + 1 and color_index == previous_color_index:
+                previous_row = row_number
+                continue
+            requests_payload.append(
+                self._sheet_background_request(
+                    start_row=range_start,
+                    end_row=previous_row,
+                    color=self._background_color_for_period_index(previous_color_index),
+                )
+            )
+            range_start = previous_row = row_number
+            previous_color_index = color_index
+
+        requests_payload.append(
+            self._sheet_background_request(
+                start_row=range_start,
+                end_row=previous_row,
+                color=self._background_color_for_period_index(previous_color_index),
+            )
+        )
+        return requests_payload
+
+    def _sheet_background_request(
+        self,
+        *,
+        start_row: int,
+        end_row: int,
+        color: dict[str, float],
+    ) -> dict[str, Any]:
+        return {
+            "repeatCell": {
+                "range": {
+                    "sheetId": int(self.settings.media_analytics_sheet_gid),
+                    "startRowIndex": start_row - 1,
+                    "endRowIndex": end_row,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": len(MEDIA_PERFORMANCE_SHEET_HEADERS),
+                },
+                "cell": {"userEnteredFormat": {"backgroundColor": color}},
+                "fields": "userEnteredFormat.backgroundColor",
+            }
+        }
 
     @staticmethod
     def _contiguous_row_ranges(row_numbers: list[int]) -> list[tuple[int, int]]:

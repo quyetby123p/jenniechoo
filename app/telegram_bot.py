@@ -227,10 +227,16 @@ class TelegramAdsBot:
             user_id=message.from_user.id if message.from_user else None,
             chat_id=chat_id,
         ):
-            await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
+            if not self._is_group_chat_id(chat_id):
+                await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
             return
+        target_chat_id = self._media_performance_private_chat_id()
         if not self.settings.media_analytics_enabled or not self.media_performance:
-            await message.answer("Tool phân tích media đang tắt. Anh bật MEDIA_ANALYTICS_ENABLED=1 rồi chạy lại.")
+            await self._send_media_performance_private_notice(
+                message,
+                target_chat_id=target_chat_id,
+                text="Tool phân tích media đang tắt. Anh bật MEDIA_ANALYTICS_ENABLED=1 rồi chạy lại.",
+            )
             return
         try:
             _, command = try_parse_media_performance_command(
@@ -238,14 +244,26 @@ class TelegramAdsBot:
                 self.settings.app_timezone,
             )
         except CommandParseError as exc:
-            await message.answer(str(exc))
+            await self._send_media_performance_private_notice(
+                message,
+                target_chat_id=target_chat_id,
+                text=str(exc),
+            )
             return
         if command is None:
-            await message.answer("Anh dùng: /media_perf VXV011 7d hoặc phân tích media 7 ngày.")
+            await self._send_media_performance_private_notice(
+                message,
+                target_chat_id=target_chat_id,
+                text="Anh dùng: /media_perf VXV011 7d hoặc phân tích media 7 ngày.",
+            )
             return
-        await message.answer("Đang phân tích media theo mã VXV, anh chờ em vài giây...")
+        await self._send_media_performance_private_notice(
+            message,
+            target_chat_id=target_chat_id,
+            text="Đang phân tích media theo mã VXV, anh chờ em vài giây...",
+        )
         await self._send_media_performance_report(
-            chat_id=message.chat.id,
+            chat_id=target_chat_id,
             command=command,
             trigger_label="Phân tích media thủ công",
         )
@@ -379,17 +397,31 @@ class TelegramAdsBot:
                 user_id=message.from_user.id if message.from_user else None,
                 chat_id=chat_id,
             ):
-                await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
+                if not self._is_group_chat_id(chat_id):
+                    await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
                 return
+            target_chat_id = self._media_performance_private_chat_id()
             if not self.settings.media_analytics_enabled or not self.media_performance:
-                await message.answer("Tool phân tích media đang tắt. Anh bật MEDIA_ANALYTICS_ENABLED=1 rồi chạy lại.")
+                await self._send_media_performance_private_notice(
+                    message,
+                    target_chat_id=target_chat_id,
+                    text="Tool phân tích media đang tắt. Anh bật MEDIA_ANALYTICS_ENABLED=1 rồi chạy lại.",
+                )
                 return
             if media_performance_command is None:
-                await message.answer("Anh dùng: /media_perf VXV011 7d hoặc phân tích media 7 ngày.")
+                await self._send_media_performance_private_notice(
+                    message,
+                    target_chat_id=target_chat_id,
+                    text="Anh dùng: /media_perf VXV011 7d hoặc phân tích media 7 ngày.",
+                )
                 return
-            await message.answer("Đang phân tích media theo mã VXV, anh chờ em vài giây...")
+            await self._send_media_performance_private_notice(
+                message,
+                target_chat_id=target_chat_id,
+                text="Đang phân tích media theo mã VXV, anh chờ em vài giây...",
+            )
             await self._send_media_performance_report(
-                chat_id=message.chat.id,
+                chat_id=target_chat_id,
                 command=media_performance_command,
                 trigger_label="Phân tích media thủ công",
             )
@@ -4722,6 +4754,27 @@ class TelegramAdsBot:
     def _is_authorized(self, user_id: int | None) -> bool:
         return user_id == self.settings.telegram_allowed_user_id
 
+    @staticmethod
+    def _is_group_chat_id(chat_id: int | None) -> bool:
+        return chat_id is not None and int(chat_id) < 0
+
+    def _media_performance_private_chat_id(self) -> int:
+        return int(self.settings.telegram_allowed_user_id)
+
+    async def _send_media_performance_private_notice(
+        self,
+        message: Message,
+        *,
+        target_chat_id: int,
+        text: str,
+    ) -> None:
+        chat_id = message.chat.id if message.chat else None
+        if not self._is_group_chat_id(chat_id):
+            await message.answer(text)
+            return
+        if self._bot:
+            await self._bot.send_message(chat_id=target_chat_id, text=text)
+
     def _is_report_group_chat(self, chat_id: int | None) -> bool:
         notify_chat_id = int(self.settings.daily_report_notify_chat_id)
         if notify_chat_id == 0 or chat_id is None:
@@ -4739,9 +4792,8 @@ class TelegramAdsBot:
         return self._is_report_group_chat(chat_id)
 
     def _can_use_media_performance(self, *, user_id: int | None, chat_id: int | None) -> bool:
-        if self._is_authorized(user_id):
-            return True
-        return self._is_report_group_chat(chat_id)
+        del chat_id
+        return self._is_authorized(user_id)
 
     def _build_duplicate_warning(self, post_url: str, active_jobs: list[dict[str, Any]], next_version: int) -> str:
         lines = [
