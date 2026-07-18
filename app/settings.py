@@ -47,6 +47,20 @@ class Settings:
     daily_report_task_summary_enabled: bool = True
     daily_report_task_summary_max_items: int = 5
     daily_report_task_db_path: str = "storage/assistant_bot/tasks.db"
+    media_analytics_enabled: bool = False
+    media_analytics_auto_enabled: bool = False
+    media_analytics_notify_chat_id: int = 0
+    media_analytics_history_days: int = 7
+    media_analytics_auto_hour: int = 16
+    media_analytics_auto_minute: int = 0
+    media_analytics_min_spend_vnd: int = 50000
+    media_analytics_sheet_enabled: bool = False
+    media_analytics_sheet_spreadsheet_id: str = ""
+    media_analytics_sheet_gid: int = 0
+    media_analytics_sheet_oauth_client_id: str = ""
+    media_analytics_sheet_oauth_client_secret: str = ""
+    media_analytics_sheet_oauth_refresh_token: str = ""
+    media_analytics_sheet_oauth_token_uri: str = "https://oauth2.googleapis.com/token"
     reconcile_cod_enabled: bool = False
     reconcile_cod_auto_enabled: bool = False
     reconcile_cod_hour: int = 15
@@ -533,6 +547,119 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         "DAILY_REPORT_TASK_DB_PATH",
         os.getenv("BOT3_TASK_DB_PATH", "storage/assistant_bot/tasks.db"),
     ).strip()
+    media_analytics_enabled = _parse_bool(
+        _profile_env(
+            "MEDIA_ANALYTICS_ENABLED",
+            profile_name,
+            default="1" if is_ads2_profile else "0",
+            allow_base_fallback=False,
+        ),
+        default=is_ads2_profile,
+    )
+    media_analytics_auto_enabled = _parse_bool(
+        _profile_env(
+            "MEDIA_ANALYTICS_AUTO_ENABLED",
+            profile_name,
+            default="1" if is_ads2_profile else "0",
+            allow_base_fallback=False,
+        ),
+        default=is_ads2_profile,
+    )
+    media_analytics_notify_chat_id = _parse_optional_int(
+        _profile_env(
+            "MEDIA_ANALYTICS_NOTIFY_CHAT_ID",
+            profile_name,
+            default="",
+            allow_base_fallback=is_default_profile,
+        ),
+        default=0,
+    )
+    if media_analytics_notify_chat_id <= 0:
+        media_analytics_notify_chat_id = daily_report_notify_chat_id or telegram_allowed_user_id
+    media_analytics_history_days = _parse_int_with_range(
+        _profile_env("MEDIA_ANALYTICS_HISTORY_DAYS", profile_name, default="7", allow_base_fallback=True),
+        default=7,
+        min_value=1,
+        max_value=90,
+    )
+    media_analytics_auto_hour = _parse_int_with_range(
+        _profile_env("MEDIA_ANALYTICS_AUTO_HOUR", profile_name, default="16", allow_base_fallback=True),
+        default=16,
+        min_value=0,
+        max_value=23,
+    )
+    media_analytics_auto_minute = _parse_int_with_range(
+        _profile_env("MEDIA_ANALYTICS_AUTO_MINUTE", profile_name, default="0", allow_base_fallback=True),
+        default=0,
+        min_value=0,
+        max_value=59,
+    )
+    media_analytics_min_spend_vnd = _parse_int_with_range(
+        _profile_env("MEDIA_ANALYTICS_MIN_SPEND_VND", profile_name, default="50000", allow_base_fallback=True),
+        default=50000,
+        min_value=0,
+        max_value=1_000_000_000,
+    )
+    media_analytics_sheet_enabled = _parse_bool(
+        _profile_env(
+            "MEDIA_ANALYTICS_SHEET_ENABLED",
+            profile_name,
+            default="1" if is_ads2_profile else "0",
+            allow_base_fallback=False,
+        ),
+        default=is_ads2_profile,
+    )
+    media_analytics_sheet_spreadsheet_id = _profile_env(
+        "MEDIA_ANALYTICS_SHEET_SPREADSHEET_ID",
+        profile_name,
+        default="1-ywfhrjlnEAob2Cn3znpKhTA4buKyQZrI5XXjiRCAAo" if is_ads2_profile else "",
+        allow_base_fallback=False,
+    )
+    media_analytics_sheet_gid = _parse_optional_int(
+        _profile_env(
+            "MEDIA_ANALYTICS_SHEET_GID",
+            profile_name,
+            default="424378234" if is_ads2_profile else "",
+            allow_base_fallback=False,
+        ),
+        default=0,
+    )
+    media_analytics_sheet_oauth_client_id = _profile_env_first(
+        ("MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_ID", "BOT3_GOOGLE_OAUTH_CLIENT_ID", "MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_ID"),
+        profile_name,
+        default="",
+        allow_base_fallback=True,
+    )
+    media_analytics_sheet_oauth_client_secret = _profile_env_first(
+        (
+            "MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_SECRET",
+            "BOT3_GOOGLE_OAUTH_CLIENT_SECRET",
+            "MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_SECRET",
+        ),
+        profile_name,
+        default="",
+        allow_base_fallback=True,
+    )
+    media_analytics_sheet_oauth_refresh_token = _profile_env_first(
+        (
+            "MEDIA_ANALYTICS_SHEET_OAUTH_REFRESH_TOKEN",
+            "BOT3_GOOGLE_OAUTH_REFRESH_TOKEN",
+            "MEDIA_RESEARCH_SHEET_OAUTH_REFRESH_TOKEN",
+        ),
+        profile_name,
+        default="",
+        allow_base_fallback=True,
+    )
+    media_analytics_sheet_oauth_token_uri = _profile_env_first(
+        (
+            "MEDIA_ANALYTICS_SHEET_OAUTH_TOKEN_URI",
+            "BOT3_GOOGLE_OAUTH_TOKEN_URI",
+            "MEDIA_RESEARCH_SHEET_OAUTH_TOKEN_URI",
+        ),
+        profile_name,
+        default="https://oauth2.googleapis.com/token",
+        allow_base_fallback=True,
+    )
     pancake_api_base_url = _profile_env(
         "PANCAKE_API_BASE_URL",
         profile_name,
@@ -834,6 +961,20 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         daily_report_task_summary_enabled=daily_report_task_summary_enabled,
         daily_report_task_summary_max_items=daily_report_task_summary_max_items,
         daily_report_task_db_path=daily_report_task_db_path,
+        media_analytics_enabled=media_analytics_enabled,
+        media_analytics_auto_enabled=media_analytics_auto_enabled,
+        media_analytics_notify_chat_id=media_analytics_notify_chat_id,
+        media_analytics_history_days=media_analytics_history_days,
+        media_analytics_auto_hour=media_analytics_auto_hour,
+        media_analytics_auto_minute=media_analytics_auto_minute,
+        media_analytics_min_spend_vnd=media_analytics_min_spend_vnd,
+        media_analytics_sheet_enabled=media_analytics_sheet_enabled,
+        media_analytics_sheet_spreadsheet_id=media_analytics_sheet_spreadsheet_id,
+        media_analytics_sheet_gid=media_analytics_sheet_gid,
+        media_analytics_sheet_oauth_client_id=media_analytics_sheet_oauth_client_id,
+        media_analytics_sheet_oauth_client_secret=media_analytics_sheet_oauth_client_secret,
+        media_analytics_sheet_oauth_refresh_token=media_analytics_sheet_oauth_refresh_token,
+        media_analytics_sheet_oauth_token_uri=media_analytics_sheet_oauth_token_uri,
         reconcile_cod_enabled=reconcile_cod_enabled,
         reconcile_cod_auto_enabled=reconcile_cod_auto_enabled,
         reconcile_cod_hour=reconcile_cod_hour,

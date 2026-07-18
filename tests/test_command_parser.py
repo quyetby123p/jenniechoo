@@ -7,6 +7,7 @@ from app.command_parser import (
     parse_ads_command,
     parse_reconcile_cod_date_argument,
     parse_report_date_argument,
+    try_parse_media_performance_command,
     try_parse_pancake_td_sync_command,
     try_parse_reconcile_cod_command,
     try_parse_report_command,
@@ -189,6 +190,56 @@ def test_try_parse_report_command_not_report() -> None:
 def test_try_parse_report_command_invalid_phrase() -> None:
     with pytest.raises(CommandParseError):
         try_parse_report_command("báo cáo abcxyz", "Asia/Ho_Chi_Minh")
+
+
+def test_try_parse_media_performance_command_slash_with_code_and_days() -> None:
+    is_media, command = try_parse_media_performance_command("/media_perf VXV011 7d", "Asia/Ho_Chi_Minh")
+
+    assert is_media is True
+    assert command is not None
+    assert command.codes == ["VXV011"]
+    assert command.days == 7
+
+
+def test_try_parse_media_performance_command_natural_multiple_codes() -> None:
+    is_media, command = try_parse_media_performance_command(
+        "phân tích mã VXV011 VXV012 14 ngày",
+        "Asia/Ho_Chi_Minh",
+    )
+
+    assert is_media is True
+    assert command is not None
+    assert command.codes == ["VXV011", "VXV012"]
+    assert command.days == 14
+
+
+def test_try_parse_media_performance_command_date_range() -> None:
+    is_media, command = try_parse_media_performance_command(
+        "phân tích media 2026-07-01 đến 2026-07-07",
+        "Asia/Ho_Chi_Minh",
+    )
+
+    assert is_media is True
+    assert command is not None
+    assert command.start_date is not None
+    assert command.end_date is not None
+    assert command.start_date.isoformat() == "2026-07-01"
+    assert command.end_date.isoformat() == "2026-07-07"
+
+
+def test_try_parse_media_performance_command_campaign_hint() -> None:
+    is_media, command = try_parse_media_performance_command(
+        "phân tích camp 12021234567890",
+        "Asia/Ho_Chi_Minh",
+    )
+
+    assert is_media is True
+    assert command is not None
+    assert command.campaign_query == "12021234567890"
+
+
+def test_try_parse_media_performance_command_not_match() -> None:
+    assert try_parse_media_performance_command("hello anh oi", "Asia/Ho_Chi_Minh") == (False, None)
 
 
 def test_parse_reconcile_cod_date_argument_empty_date() -> None:

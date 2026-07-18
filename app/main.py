@@ -13,6 +13,7 @@ from app.daily_task_summary_service import DailyTaskSummaryService
 from app.dedup_service import DedupService
 from app.instance_lock import single_instance_lock
 from app.logger import configure_logger
+from app.media_performance_service import MediaPerformanceService
 from app.meta_ads_client import MetaAdsClient
 from app.pancake_pos_client import PancakePosClient
 from app.pancake_td_sync_service import PancakeToThaiDuongSyncService
@@ -70,6 +71,23 @@ def check_runtime_configuration(profile: str | None = None) -> str:
             missing.append("env.REPORT_THB_TO_VND_RATE")
         if settings.report_thb_minor_unit_factor <= 0:
             missing.append("env.REPORT_THB_MINOR_UNIT_FACTOR")
+
+    if settings.media_analytics_enabled:
+        if settings.media_analytics_auto_enabled and settings.media_analytics_notify_chat_id == 0:
+            missing.append("env.MEDIA_ANALYTICS_NOTIFY_CHAT_ID")
+        if settings.media_analytics_history_days <= 0:
+            missing.append("env.MEDIA_ANALYTICS_HISTORY_DAYS")
+        if settings.media_analytics_sheet_enabled:
+            if not str(settings.media_analytics_sheet_spreadsheet_id).strip():
+                missing.append("env.MEDIA_ANALYTICS_SHEET_SPREADSHEET_ID")
+            if int(settings.media_analytics_sheet_gid) <= 0:
+                missing.append("env.MEDIA_ANALYTICS_SHEET_GID")
+            if not str(settings.media_analytics_sheet_oauth_client_id).strip():
+                missing.append("env.MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_ID")
+            if not str(settings.media_analytics_sheet_oauth_client_secret).strip():
+                missing.append("env.MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_SECRET")
+            if not str(settings.media_analytics_sheet_oauth_refresh_token).strip():
+                missing.append("env.MEDIA_ANALYTICS_SHEET_OAUTH_REFRESH_TOKEN")
 
     if settings.reconcile_cod_enabled:
         if settings.pancake_shop_id <= 0:
@@ -182,6 +200,12 @@ async def run_bot(profile: str | None = None) -> None:
         pancake_client=pancake,
         thai_duong_client=thai_duong,
     )
+    media_performance = MediaPerformanceService(
+        settings=settings,
+        logger=logger,
+        meta_client=meta,
+        pancake_client=pancake,
+    )
     approval = ApprovalService()
     rollback = RollbackService(meta_client=meta, logger=logger)
 
@@ -196,6 +220,7 @@ async def run_bot(profile: str | None = None) -> None:
         reconcile_cod_service=reconcile,
         reconcile_cod_sheet_service=reconcile_sheet,
         pancake_td_sync_service=pancake_td_sync,
+        media_performance_service=media_performance,
         thai_duong_client=thai_duong,
         approval_service=approval,
         rollback_service=rollback,

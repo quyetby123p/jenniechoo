@@ -32,6 +32,7 @@ from app.command_parser import (
     parse_ads_command,
     parse_reconcile_cod_date_argument,
     parse_report_date_argument,
+    try_parse_media_performance_command,
     try_parse_pancake_td_sync_command,
     try_parse_reconcile_cod_command,
     try_parse_report_command,
@@ -41,8 +42,9 @@ from app.daily_report_service import DailyReportService
 from app.daily_task_summary_service import DailyTaskSummaryService
 from app.dedup_service import DedupService
 from app.exceptions import CommandParseError, MetaApiError, ValidationError
+from app.media_performance_service import MediaPerformanceService
 from app.meta_ads_client import MetaAdsClient
-from app.models import AdsCommand, AudienceSlot, PlannedCampaign
+from app.models import AdsCommand, AudienceSlot, MediaPerformanceCommand, PlannedCampaign
 from app.pancake_td_sync_service import PancakeToThaiDuongSyncService
 from app.reconcile_cod_service import ReconcileCodService
 from app.reconcile_cod_sheet_service import ReconcileCodSheetService
@@ -67,6 +69,7 @@ class TelegramAdsBot:
         daily_report_service: DailyReportService,
         approval_service: ApprovalService,
         rollback_service: RollbackService,
+        media_performance_service: MediaPerformanceService | None = None,
         daily_task_summary_service: DailyTaskSummaryService | None = None,
         reconcile_cod_service: ReconcileCodService | None = None,
         reconcile_cod_sheet_service: ReconcileCodSheetService | None = None,
@@ -80,6 +83,7 @@ class TelegramAdsBot:
         self.dedup = dedup
         self.meta = meta_client
         self.reports = daily_report_service
+        self.media_performance = media_performance_service
         self.daily_task_summary = daily_task_summary_service
         self.reconcile = reconcile_cod_service
         self.reconcile_sheet = reconcile_cod_sheet_service
@@ -99,6 +103,7 @@ class TelegramAdsBot:
         self.router.message.register(self.handle_start_command, Command("start"))
         self.router.message.register(self.handle_ads_command, Command("ads"))
         self.router.message.register(self.handle_report_command, Command("report"))
+        self.router.message.register(self.handle_media_performance_command, Command("media_perf"))
         self.router.message.register(self.handle_reconcile_command, Command("reconcile"))
         self.router.message.register(self.handle_token_command, Command("token"))
         self.router.message.register(self.handle_new_chat_members, F.new_chat_members)
@@ -168,6 +173,7 @@ class TelegramAdsBot:
             "Lên campaign cũ theo hint: <link> lên cũ camp video\n"
             "Khi cần kiểm tra token ngay: /token\n"
             "Khi cần xem báo cáo ngày: /report hoặc /report YYYY-MM-DD\n"
+            "Khi cần phân tích media ADS2: /media_perf VXV011 7d hoặc phân tích media 7 ngày\n"
             "Khi cần đối soát COD: /reconcile cod hoặc /reconcile cod YYYY-MM-DD\n"
             "Khi cần lên đơn Thái Dương thủ công: lên đơn hôm nay hoặc lên đơn JCT310"
         )
@@ -210,6 +216,38 @@ class TelegramAdsBot:
             trigger_label="Báo cáo thủ công",
             report_date=report_date,
             notify_success=True,
+        )
+
+    async def handle_media_performance_command(self, message: Message) -> None:
+        chat_id = message.chat.id if message.chat else None
+        raw_text = message.text or ""
+        if self._is_report_group_chat(chat_id) and not self._is_group_message_tagged_for_bot(raw_text):
+            return
+        if not self._can_use_media_performance(
+            user_id=message.from_user.id if message.from_user else None,
+            chat_id=chat_id,
+        ):
+            await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
+            return
+        if not self.settings.media_analytics_enabled or not self.media_performance:
+            await message.answer("Tool phân tích media đang tắt. Anh bật MEDIA_ANALYTICS_ENABLED=1 rồi chạy lại.")
+            return
+        try:
+            _, command = try_parse_media_performance_command(
+                self._strip_bot_mention_tokens(raw_text),
+                self.settings.app_timezone,
+            )
+        except CommandParseError as exc:
+            await message.answer(str(exc))
+            return
+        if command is None:
+            await message.answer("Anh dùng: /media_perf VXV011 7d hoặc phân tích media 7 ngày.")
+            return
+        await message.answer("Đang phân tích media theo mã VXV, anh chờ em vài giây...")
+        await self._send_media_performance_report(
+            chat_id=message.chat.id,
+            command=command,
+            trigger_label="Phân tích media thủ công",
         )
 
     async def handle_reconcile_command(self, message: Message) -> None:
@@ -307,6 +345,10 @@ class TelegramAdsBot:
                 parse_text,
                 self.settings.app_timezone,
             )
+            is_media_performance_command, media_performance_command = try_parse_media_performance_command(
+                parse_text,
+                self.settings.app_timezone,
+            )
             is_pancake_td_sync_command, pancake_td_order_code = try_parse_pancake_td_sync_command(parse_text)
         except CommandParseError as exc:
             if self._is_report_group_chat(chat_id):
@@ -328,6 +370,28 @@ class TelegramAdsBot:
                 trigger_label="Báo cáo thủ công",
                 report_date=report_date,
                 notify_success=True,
+            )
+            return
+        if is_media_performance_command:
+            if self._is_report_group_chat(chat_id) and not self._is_group_message_tagged_for_bot(text):
+                return
+            if not self._can_use_media_performance(
+                user_id=message.from_user.id if message.from_user else None,
+                chat_id=chat_id,
+            ):
+                await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
+                return
+            if not self.settings.media_analytics_enabled or not self.media_performance:
+                await message.answer("Tool phân tích media đang tắt. Anh bật MEDIA_ANALYTICS_ENABLED=1 rồi chạy lại.")
+                return
+            if media_performance_command is None:
+                await message.answer("Anh dùng: /media_perf VXV011 7d hoặc phân tích media 7 ngày.")
+                return
+            await message.answer("Đang phân tích media theo mã VXV, anh chờ em vài giây...")
+            await self._send_media_performance_report(
+                chat_id=message.chat.id,
+                command=media_performance_command,
+                trigger_label="Phân tích media thủ công",
             )
             return
         if is_pancake_td_sync_command:
@@ -3976,6 +4040,42 @@ class TelegramAdsBot:
             self._last_daily_report_send_ok = False
         return report
 
+    async def _send_media_performance_report(
+        self,
+        *,
+        chat_id: int,
+        command: MediaPerformanceCommand,
+        trigger_label: str,
+    ) -> dict[str, Any] | None:
+        if not self._bot or not self.media_performance:
+            return None
+        try:
+            report = await asyncio.to_thread(self.media_performance.generate_report, command)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.exception("Tao bao cao media performance that bai")
+            report = {
+                "ok": False,
+                "start_date": command.start_date.isoformat() if command.start_date else "",
+                "end_date": command.end_date.isoformat() if command.end_date else "",
+                "generated_at": now_utc_iso(),
+                "requested_codes": list(command.codes),
+                "campaign_query": command.campaign_query,
+                "summary": {},
+                "codes": [],
+                "warnings": [f"Lỗi runtime khi tạo báo cáo media: {exc}"],
+                "errors": {"runtime": str(exc)},
+            }
+        messages = self.media_performance.build_messages(report)
+        if trigger_label and messages:
+            messages[0] = f"{trigger_label}\n{messages[0]}"
+        for text in messages:
+            try:
+                await self._bot.send_message(chat_id=chat_id, text=text)
+            except Exception:  # noqa: BLE001
+                self.logger.exception("Gui bao cao media performance qua Telegram that bai")
+                break
+        return report
+
     def _build_daily_task_summary_text_sync(self, target_date: date | None) -> str:
         if not self.daily_task_summary:
             return ""
@@ -4634,6 +4734,11 @@ class TelegramAdsBot:
         return self._is_report_group_chat(chat_id)
 
     def _can_use_reconcile(self, *, user_id: int | None, chat_id: int | None) -> bool:
+        if self._is_authorized(user_id):
+            return True
+        return self._is_report_group_chat(chat_id)
+
+    def _can_use_media_performance(self, *, user_id: int | None, chat_id: int | None) -> bool:
         if self._is_authorized(user_id):
             return True
         return self._is_report_group_chat(chat_id)

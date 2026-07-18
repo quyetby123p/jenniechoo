@@ -1620,6 +1620,43 @@ def test_get_spend_for_range_uses_account_total_without_time_increment() -> None
     assert result["date_stop"] == "2026-05-31"
 
 
+def test_get_ad_insights_for_range_requests_ad_level_action_values() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+    captured: dict[str, object] = {}
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        captured["method"] = method
+        captured["path"] = path
+        captured["params"] = dict(params or {})
+        captured["access_token"] = access_token
+        return {
+            "data": [
+                {
+                    "ad_id": "ad_1",
+                    "ad_name": "ADS:QUYET|SKU:VXV011|MED:Video",
+                    "spend": "100000",
+                    "actions": [{"action_type": "omni_purchase", "value": "2"}],
+                    "action_values": [{"action_type": "omni_purchase", "value": "500000"}],
+                }
+            ]
+        }
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    rows = client.get_ad_insights_for_range(date(2026, 7, 1), date(2026, 7, 7), "Asia/Ho_Chi_Minh")
+
+    assert rows[0]["ad_id"] == "ad_1"
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/act_1/insights"
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert params["level"] == "ad"
+    assert params["use_unified_attribution_setting"] == "true"
+    assert "actions" in str(params["fields"])
+    assert "action_values" in str(params["fields"])
+    assert captured["access_token"] == "dummy"
+
+
 def test_find_active_campaigns_by_keywords_returns_sorted_matches() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
 

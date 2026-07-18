@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import re
 import unicodedata
 from zoneinfo import ZoneInfo
 
 from app.exceptions import CommandParseError, ValidationError
-from app.models import AdsCommand
+from app.models import AdsCommand, MediaPerformanceCommand
 from app.utils import is_supported_facebook_url
 
 
@@ -20,7 +20,21 @@ _EXISTING_MODE_PATTERN = re.compile(
 )
 _NEW_MODE_FLAG_PATTERN = re.compile(r"(?:lên\s*mới|len\s*moi)\s*[.!?]*\s*$", re.IGNORECASE)
 _MANUAL_SKU_PATTERN = re.compile(r"(?<![0-9A-Z])(?:JC|VXV)[0-9A-Z]+(?![0-9A-Z])", re.IGNORECASE)
+_VXV_CODE_PATTERN = re.compile(r"(?<![0-9A-Z])VXV[0-9A-Z]+(?![0-9A-Z])", re.IGNORECASE)
 _LEADING_ADS_PREFIX_PATTERN = re.compile(r"^\s*/ads\b", re.IGNORECASE)
+_MEDIA_PERF_SLASH_PATTERN = re.compile(r"^\s*/media_perf(?:@[a-z0-9_]+)?\b", re.IGNORECASE)
+_MEDIA_PERF_DURATION_PATTERN = re.compile(
+    r"(?<![0-9A-Z])(?P<days>\d{1,3})\s*(?:d|day|days|ngày|ngay)(?![0-9A-Z])",
+    re.IGNORECASE,
+)
+_MEDIA_PERF_DATE_TOKEN = (
+    r"(?:\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|hôm nay|hom nay|hôm qua|hom qua)"
+)
+_MEDIA_PERF_DATE_RANGE_PATTERN = re.compile(
+    rf"(?:\b(?:từ|tu|from)\s+)?(?P<start>{_MEDIA_PERF_DATE_TOKEN})\s+(?:đến|den|tới|toi|to|-)\s+"
+    rf"(?P<end>{_MEDIA_PERF_DATE_TOKEN})",
+    re.IGNORECASE,
+)
 _BUDGET_PATTERNS = [
     re.compile(r"(?:budget)\s*[:=]?\s*<?\s*(?P<budget>[\d\.,\s]+)\s*>?", re.IGNORECASE),
     re.compile(r"(?:ngân\s*sách)\s*[:=]?\s*<?\s*(?P<budget>[\d\.,\s]+)\s*>?", re.IGNORECASE),
@@ -137,6 +151,84 @@ def parse_ads_command(text: str) -> AdsCommand:
         manual_sku_keywords=manual_sku_keywords,
         existing_campaign_hint=existing_campaign_hint,
     )
+
+
+def try_parse_media_performance_command(
+    text: str,
+    timezone_name: str,
+) -> tuple[bool, MediaPerformanceCommand | None]:
+    raw = (text or "").strip()
+    if not raw:
+        return False, None
+
+    normalized = _normalize_text(raw)
+    slash_match = _MEDIA_PERF_SLASH_PATTERN.match(raw)
+    is_natural = normalized.startswith(
+        (
+            "phan tich media",
+            "phan tich ma",
+            "phan tich camp",
+            "phan tich campaign",
+            "media perf",
+            "media performance",
+        )
+    )
+    if not slash_match and not is_natural:
+        return False, None
+
+    today_local = datetime.now(_resolve_timezone(timezone_name)).date()
+    days = 7
+    duration_match = _MEDIA_PERF_DURATION_PATTERN.search(raw)
+    if duration_match:
+        days = int(duration_match.group("days"))
+        if days < 1 or days > 90:
+            raise CommandParseError("Khoảng phân tích media chỉ hỗ trợ từ 1 đến 90 ngày.")
+
+    start_date = today_local - timedelta(days=days - 1)
+    end_date = today_local
+    date_range_match = _MEDIA_PERF_DATE_RANGE_PATTERN.search(raw)
+    if date_range_match:
+        parsed_start = _parse_human_date(date_range_match.group("start"), timezone_name)
+        parsed_end = _parse_human_date(date_range_match.group("end"), timezone_name)
+        if parsed_start is None or parsed_end is None:
+            raise CommandParseError("Khoảng ngày phân tích media chưa hợp lệ.")
+        if parsed_end < parsed_start:
+            parsed_start, parsed_end = parsed_end, parsed_start
+        if (parsed_end - parsed_start).days > 90:
+            raise CommandParseError("Khoảng phân tích media chỉ hỗ trợ tối đa 90 ngày.")
+        start_date = parsed_start
+        end_date = parsed_end
+        days = (end_date - start_date).days + 1
+
+    codes: list[str] = []
+    seen_codes: set[str] = set()
+    for match in _VXV_CODE_PATTERN.finditer(raw):
+        code = str(match.group(0)).strip().upper()
+        if code in seen_codes:
+            continue
+        seen_codes.add(code)
+        codes.append(code)
+
+    campaign_query = _extract_media_performance_campaign_query(raw)
+    return True, MediaPerformanceCommand(
+        codes=codes,
+        campaign_query=campaign_query,
+        start_date=start_date,
+        end_date=end_date,
+        days=days,
+        raw_text=raw,
+    )
+
+
+def _extract_media_performance_campaign_query(raw: str) -> str:
+    match = re.search(r"\b(?:camp|campaign)\s+(?P<campaign>.+)$", raw, re.IGNORECASE)
+    if not match:
+        return ""
+    value = str(match.group("campaign") or "").strip()
+    value = _MEDIA_PERF_DATE_RANGE_PATTERN.sub(" ", value)
+    value = _MEDIA_PERF_DURATION_PATTERN.sub(" ", value)
+    value = re.sub(r"\s+", " ", value).strip(" .,!?:;-")
+    return value
 
 
 def parse_report_date_argument(text: str) -> date | None:

@@ -532,6 +532,150 @@ class MetaAdsClient:
             "currency": self.settings.app_currency,
         }
 
+    def get_ad_insights_for_range(
+        self,
+        start_date: date,
+        end_date: date,
+        timezone_name: str,
+        *,
+        max_rows: int = 5000,
+    ) -> list[dict[str, Any]]:
+        del timezone_name  # Meta insights nhận time_range theo ngày; timezone dùng theo ad account.
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
+        time_range = {
+            "since": start_date.isoformat(),
+            "until": end_date.isoformat(),
+        }
+        next_path = f"/{self.ad_account_id}/insights"
+        next_params: dict[str, Any] | None = {
+            "fields": ",".join(
+                [
+                    "campaign_id",
+                    "campaign_name",
+                    "adset_id",
+                    "adset_name",
+                    "ad_id",
+                    "ad_name",
+                    "spend",
+                    "impressions",
+                    "reach",
+                    "clicks",
+                    "inline_link_clicks",
+                    "actions",
+                    "action_values",
+                    "video_play_actions",
+                    "video_thruplay_watched_actions",
+                    "date_start",
+                    "date_stop",
+                ]
+            ),
+            "level": "ad",
+            "time_range": json.dumps(time_range, ensure_ascii=False),
+            "use_unified_attribution_setting": "true",
+            "limit": 500,
+        }
+        rows: list[dict[str, Any]] = []
+        while next_path and len(rows) < max(1, int(max_rows)):
+            payload = self._request(
+                "GET",
+                next_path,
+                params=next_params,
+                access_token=self.settings.meta_access_token,
+            )
+            data = payload.get("data", [])
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        rows.append(item)
+                        if len(rows) >= max(1, int(max_rows)):
+                            break
+            paging = payload.get("paging", {}) if isinstance(payload, dict) else {}
+            next_url = str(paging.get("next", "")).strip()
+            if not next_url:
+                break
+            next_path, next_params = self._path_and_params_from_next_url(next_url)
+        return rows
+
+    def get_ads_metadata(self, ad_ids: list[str]) -> dict[str, dict[str, Any]]:
+        metadata: dict[str, dict[str, Any]] = {}
+        seen: set[str] = set()
+        for ad_id in ad_ids:
+            normalized_ad_id = str(ad_id).strip()
+            if not normalized_ad_id or normalized_ad_id in seen:
+                continue
+            seen.add(normalized_ad_id)
+            try:
+                payload = self._request(
+                    "GET",
+                    f"/{normalized_ad_id}",
+                    params={
+                        "fields": (
+                            "id,name,status,effective_status,updated_time,created_time,"
+                            "adset{id,name},campaign{id,name},"
+                            "creative{id,name,object_story_id,effective_object_story_id,thumbnail_url,url_tags},"
+                            "issues_info"
+                        ),
+                    },
+                    access_token=self.settings.meta_access_token,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Khong doc duoc metadata ad %s: %s", normalized_ad_id, exc)
+                continue
+            creative = payload.get("creative") if isinstance(payload.get("creative"), dict) else {}
+            adset = payload.get("adset") if isinstance(payload.get("adset"), dict) else {}
+            campaign = payload.get("campaign") if isinstance(payload.get("campaign"), dict) else {}
+            metadata[normalized_ad_id] = {
+                "ad_id": str(payload.get("id", normalized_ad_id)).strip(),
+                "ad_name": str(payload.get("name", "")).strip(),
+                "status": str(payload.get("status", "")).strip(),
+                "effective_status": str(payload.get("effective_status", "")).strip(),
+                "updated_time": str(payload.get("updated_time", "")).strip(),
+                "created_time": str(payload.get("created_time", "")).strip(),
+                "adset_id": str(adset.get("id", "")).strip(),
+                "adset_name": str(adset.get("name", "")).strip(),
+                "campaign_id": str(campaign.get("id", "")).strip(),
+                "campaign_name": str(campaign.get("name", "")).strip(),
+                "creative_id": str(creative.get("id", "")).strip(),
+                "creative_name": str(creative.get("name", "")).strip(),
+                "object_story_id": str(creative.get("object_story_id", "")).strip(),
+                "effective_object_story_id": str(creative.get("effective_object_story_id", "")).strip(),
+                "thumbnail_url": str(creative.get("thumbnail_url", "")).strip(),
+                "url_tags": str(creative.get("url_tags", "")).strip(),
+                "issues_info": payload.get("issues_info", []),
+            }
+        return metadata
+
+    def get_post_metadata_for_story_ids(self, story_ids: list[str]) -> dict[str, dict[str, Any]]:
+        metadata: dict[str, dict[str, Any]] = {}
+        seen: set[str] = set()
+        access_token = self.settings.meta_page_access_token or self.settings.meta_access_token
+        for story_id in story_ids:
+            normalized_story_id = str(story_id).strip()
+            if not normalized_story_id or normalized_story_id in seen:
+                continue
+            seen.add(normalized_story_id)
+            try:
+                payload = self._request(
+                    "GET",
+                    f"/{normalized_story_id}",
+                    params={
+                        "fields": "id,message,permalink_url,created_time,attachments{media_type,type,url,target}",
+                    },
+                    access_token=access_token,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Khong doc duoc post metadata %s: %s", normalized_story_id, exc)
+                continue
+            metadata[normalized_story_id] = {
+                "id": str(payload.get("id", normalized_story_id)).strip(),
+                "message": str(payload.get("message", "")).strip(),
+                "permalink_url": str(payload.get("permalink_url", "")).strip(),
+                "created_time": str(payload.get("created_time", "")).strip(),
+                "attachments": payload.get("attachments", {}),
+            }
+        return metadata
+
     def resolve_post(self, post_url: str) -> ResolvedPost:
         normalized_url = normalize_facebook_url(post_url)
         direct = self._resolve_post_from_url_patterns(normalized_url)

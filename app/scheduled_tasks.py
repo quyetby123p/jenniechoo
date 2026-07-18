@@ -26,6 +26,7 @@ from app.daily_report_service import DailyReportService
 from app.daily_task_summary_service import DailyTaskSummaryService
 from app.dedup_service import DedupService
 from app.logger import configure_logger
+from app.media_performance_service import MediaPerformanceService
 from app.meta_ads_client import MetaAdsClient
 from app.pancake_pos_client import PancakePosClient
 from app.pancake_td_sync_service import PancakeToThaiDuongSyncService
@@ -42,6 +43,7 @@ from app.thai_duong_cod_client import ThaiDuongCodClient
 class ScheduledRuntime:
     settings: Settings
     bot: TelegramAdsBot
+    media_performance: MediaPerformanceService
     telegram: Bot
 
 
@@ -96,6 +98,12 @@ def build_runtime(project_root: Path | None = None, profile: str | None = None) 
         pancake_client=pancake,
         thai_duong_client=thai_duong,
     )
+    media_performance = MediaPerformanceService(
+        settings=settings,
+        logger=logger,
+        meta_client=meta,
+        pancake_client=pancake,
+    )
     telegram = Bot(token=settings.telegram_bot_token)
     bot = TelegramAdsBot(
         settings=settings,
@@ -108,12 +116,13 @@ def build_runtime(project_root: Path | None = None, profile: str | None = None) 
         reconcile_cod_service=reconcile,
         reconcile_cod_sheet_service=reconcile_sheet,
         pancake_td_sync_service=pancake_td_sync,
+        media_performance_service=media_performance,
         thai_duong_client=thai_duong,
         approval_service=ApprovalService(),
         rollback_service=RollbackService(meta_client=meta, logger=logger),
     )
     bot._bot = telegram
-    return ScheduledRuntime(settings=settings, bot=bot, telegram=telegram)
+    return ScheduledRuntime(settings=settings, bot=bot, media_performance=media_performance, telegram=telegram)
 
 
 def build_assistant_runtime(project_root: Path | None = None) -> AssistantScheduledRuntime:
@@ -242,6 +251,31 @@ async def run_pancake_td_sync(runtime: ScheduledRuntime, *, max_batch: int | Non
     await runtime.telegram.send_message(chat_id=notify_chat_id, text=text)
 
 
+async def run_media_performance(runtime: ScheduledRuntime, *, codes: str, days: int | None, campaign: str) -> None:
+    if not runtime.settings.media_analytics_enabled:
+        print("MEDIA_ANALYTICS_ENABLED=0, skip ADS media performance.")
+        return
+    if not runtime.settings.media_analytics_auto_enabled:
+        print("MEDIA_ANALYTICS_AUTO_ENABLED=0, skip ADS media performance.")
+        return
+
+    from app.models import MediaPerformanceCommand
+
+    parsed_codes = [item.strip().upper() for item in str(codes or "").split(",") if item.strip()]
+    safe_days = days or runtime.settings.media_analytics_history_days
+    command = MediaPerformanceCommand(
+        codes=parsed_codes,
+        campaign_query=str(campaign or "").strip(),
+        days=safe_days,
+        raw_text="scheduled media-performance",
+    )
+    report = await asyncio.to_thread(runtime.media_performance.generate_report, command)
+    messages = runtime.media_performance.build_messages(report)
+    chat_id = runtime.settings.media_analytics_notify_chat_id or runtime.settings.telegram_allowed_user_id
+    for text in messages:
+        await runtime.telegram.send_message(chat_id=chat_id, text=text)
+
+
 async def run_bot3_daily_checkin(runtime: AssistantScheduledRuntime, *, slot: str, run_date: date | None) -> None:
     selected_slot = str(slot or "morning").strip().lower()
     if selected_slot not in {"morning", "evening"}:
@@ -328,6 +362,13 @@ async def run_task(args: argparse.Namespace) -> int:
                 max_batch=args.max_batch,
                 notify=args.notify,
             )
+        elif task == "media-performance":
+            await run_media_performance(
+                runtime,
+                codes=args.codes,
+                days=args.days,
+                campaign=args.campaign,
+            )
         else:
             raise ValueError(f"Unknown task: {task}")
         print(f"Scheduled task completed: {task} at {datetime.now(timezone.utc).isoformat()}")
@@ -353,6 +394,11 @@ def build_parser() -> argparse.ArgumentParser:
     pancake = subparsers.add_parser("pancake-td-sync", help="Run one Pancake -> Thai Duong sync batch.")
     pancake.add_argument("--max-batch", type=int, default=None)
     pancake.add_argument("--notify", choices=["auto", "always"], default="auto")
+
+    media_performance = subparsers.add_parser("media-performance", help="Send ADS media performance report.")
+    media_performance.add_argument("--codes", default="", help="Optional comma-separated VXV codes.")
+    media_performance.add_argument("--days", type=int, default=None, help="Optional lookback days.")
+    media_performance.add_argument("--campaign", default="", help="Optional campaign id/name hint.")
 
     bot3_daily = subparsers.add_parser("bot3-daily-checkin", help="Send Bot 3 daily task check-in prompt.")
     bot3_daily.add_argument("--slot", choices=["morning", "evening"], default="morning")

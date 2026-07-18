@@ -12,6 +12,16 @@ class AdsCommand:
 
 
 @dataclass
+class MediaPerformanceCommand:
+    codes: list[str] = field(default_factory=list)
+    campaign_query: str = ""
+    start_date: Any | None = None
+    end_date: Any | None = None
+    days: int = 7
+    raw_text: str = ""
+
+
+@dataclass
 class ResolvedPost:
     post_id: str
     page_id: str

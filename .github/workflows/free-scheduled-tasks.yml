@@ -11,6 +11,7 @@ on:
         options:
           - token-health
           - daily-report
+          - media-performance
           - reconcile-cash-in
           - reconcile-weekly
           - pancake-td-sync
@@ -26,6 +27,18 @@ on:
           - evening
       date:
         description: "Optional report date YYYY-MM-DD"
+        required: false
+        default: ""
+      media_codes:
+        description: "Optional comma-separated VXV codes for media-performance"
+        required: false
+        default: ""
+      media_days:
+        description: "Optional lookback days for media-performance"
+        required: false
+        default: ""
+      media_campaign:
+        description: "Optional campaign id or hint for media-performance"
         required: false
         default: ""
       profile:
@@ -120,6 +133,20 @@ jobs:
       DAILY_REPORT_NOTIFY_CHAT_ID: ${{ secrets.DAILY_REPORT_NOTIFY_CHAT_ID }}
       ADS2_DAILY_REPORT_ENABLED: ${{ secrets.ADS2_DAILY_REPORT_ENABLED || '1' }}
       ADS2_DAILY_REPORT_NOTIFY_CHAT_ID: ${{ secrets.ADS2_DAILY_REPORT_NOTIFY_CHAT_ID || secrets.DAILY_REPORT_NOTIFY_CHAT_ID }}
+      ADS2_MEDIA_ANALYTICS_ENABLED: ${{ secrets.ADS2_MEDIA_ANALYTICS_ENABLED || '1' }}
+      ADS2_MEDIA_ANALYTICS_AUTO_ENABLED: ${{ secrets.ADS2_MEDIA_ANALYTICS_AUTO_ENABLED || '1' }}
+      ADS2_MEDIA_ANALYTICS_NOTIFY_CHAT_ID: ${{ secrets.ADS2_MEDIA_ANALYTICS_NOTIFY_CHAT_ID || secrets.ADS2_DAILY_REPORT_NOTIFY_CHAT_ID || secrets.ADS2_TELEGRAM_ALLOWED_USER_ID || secrets.TELEGRAM_ALLOWED_USER_ID }}
+      ADS2_MEDIA_ANALYTICS_HISTORY_DAYS: ${{ secrets.ADS2_MEDIA_ANALYTICS_HISTORY_DAYS || '7' }}
+      ADS2_MEDIA_ANALYTICS_AUTO_HOUR: ${{ secrets.ADS2_MEDIA_ANALYTICS_AUTO_HOUR || '16' }}
+      ADS2_MEDIA_ANALYTICS_AUTO_MINUTE: ${{ secrets.ADS2_MEDIA_ANALYTICS_AUTO_MINUTE || '0' }}
+      ADS2_MEDIA_ANALYTICS_MIN_SPEND_VND: ${{ secrets.ADS2_MEDIA_ANALYTICS_MIN_SPEND_VND || '50000' }}
+      ADS2_MEDIA_ANALYTICS_SHEET_ENABLED: ${{ secrets.ADS2_MEDIA_ANALYTICS_SHEET_ENABLED || '1' }}
+      ADS2_MEDIA_ANALYTICS_SHEET_SPREADSHEET_ID: ${{ secrets.ADS2_MEDIA_ANALYTICS_SHEET_SPREADSHEET_ID || '1-ywfhrjlnEAob2Cn3znpKhTA4buKyQZrI5XXjiRCAAo' }}
+      ADS2_MEDIA_ANALYTICS_SHEET_GID: ${{ secrets.ADS2_MEDIA_ANALYTICS_SHEET_GID || '424378234' }}
+      ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_ID: ${{ secrets.ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_ID || secrets.BOT3_GOOGLE_OAUTH_CLIENT_ID || secrets.MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_ID }}
+      ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_SECRET: ${{ secrets.ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_SECRET || secrets.BOT3_GOOGLE_OAUTH_CLIENT_SECRET || secrets.MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_SECRET }}
+      ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_REFRESH_TOKEN: ${{ secrets.ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_REFRESH_TOKEN || secrets.BOT3_GOOGLE_OAUTH_REFRESH_TOKEN || secrets.MEDIA_RESEARCH_SHEET_OAUTH_REFRESH_TOKEN }}
+      ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_TOKEN_URI: ${{ secrets.ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_TOKEN_URI || secrets.BOT3_GOOGLE_OAUTH_TOKEN_URI || secrets.MEDIA_RESEARCH_SHEET_OAUTH_TOKEN_URI || 'https://oauth2.googleapis.com/token' }}
       RECONCILE_COD_ENABLED: ${{ secrets.RECONCILE_COD_ENABLED }}
       RECONCILE_COD_AUTO_ENABLED: ${{ secrets.RECONCILE_COD_AUTO_ENABLED }}
       RECONCILE_COD_HOUR: ${{ secrets.RECONCILE_COD_HOUR }}
@@ -230,6 +257,9 @@ jobs:
           echo "task=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
           echo "slot=${{ inputs.slot }}" >> "$GITHUB_OUTPUT"
           echo "date=${{ inputs.date }}" >> "$GITHUB_OUTPUT"
+          echo "media_codes=${{ inputs.media_codes }}" >> "$GITHUB_OUTPUT"
+          echo "media_days=${{ inputs.media_days }}" >> "$GITHUB_OUTPUT"
+          echo "media_campaign=${{ inputs.media_campaign }}" >> "$GITHUB_OUTPUT"
           echo "profile=${{ inputs.profile || 'main' }}" >> "$GITHUB_OUTPUT"
           echo "pancake_notify=${{ inputs.pancake_notify }}" >> "$GITHUB_OUTPUT"
           echo "source=${{ inputs.source }}" >> "$GITHUB_OUTPUT"
@@ -255,6 +285,10 @@ jobs:
           fi
           if [ "$task" = "daily-report" ] && [ "$profile" = "ads2" ]; then
             needs_main_ads_config=0
+          fi
+          if [ "$task" = "media-performance" ]; then
+            needs_main_ads_config=0
+            profile="ads2"
           fi
           if [ "$needs_main_ads_config" = "1" ]; then
             for key in TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USER_ID META_ACCESS_TOKEN META_AD_ACCOUNT_ID META_PAGE_ID; do
@@ -289,6 +323,23 @@ jobs:
               missing+=("ADS2_DAILY_REPORT_NOTIFY_CHAT_ID or DAILY_REPORT_NOTIFY_CHAT_ID")
             fi
           fi
+          if [ "$task" = "media-performance" ]; then
+            for key in ADS2_TELEGRAM_BOT_TOKEN ADS2_TELEGRAM_ALLOWED_USER_ID ADS2_META_AD_ACCOUNT_ID ADS2_META_PAGE_ID; do
+              if [ -z "${!key}" ]; then
+                missing+=("$key")
+              fi
+            done
+            if [ -z "$ADS2_META_ACCESS_TOKEN" ] && [ -z "$META_ACCESS_TOKEN" ]; then
+              missing+=("ADS2_META_ACCESS_TOKEN or META_ACCESS_TOKEN")
+            fi
+            if [ "$ADS2_MEDIA_ANALYTICS_SHEET_ENABLED" != "0" ]; then
+              for key in ADS2_MEDIA_ANALYTICS_SHEET_SPREADSHEET_ID ADS2_MEDIA_ANALYTICS_SHEET_GID ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_ID ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_SECRET ADS2_MEDIA_ANALYTICS_SHEET_OAUTH_REFRESH_TOKEN; do
+                if [ -z "${!key}" ]; then
+                  missing+=("$key")
+                fi
+              done
+            fi
+          fi
           if [ "$task" = "telegram-update" ] && [ "$bot" = "ads2" ]; then
             for key in ADS2_TELEGRAM_BOT_TOKEN ADS2_TELEGRAM_ALLOWED_USER_ID ADS2_META_ACCESS_TOKEN ADS2_META_PAGE_ACCESS_TOKEN ADS2_META_AD_ACCOUNT_ID ADS2_META_PAGE_ID; do
               if [ -z "${!key}" ]; then
@@ -312,6 +363,9 @@ jobs:
           fi
           profile="${{ steps.task.outputs.profile || 'main' }}"
           runtime_profile="$profile"
+          if [ "$task" = "media-performance" ]; then
+            runtime_profile="ads2"
+          fi
           if [ "$runtime_profile" = "main" ]; then
             runtime_profile="default"
           fi
@@ -330,6 +384,17 @@ jobs:
           fi
           if [ "$task" = "pancake-td-sync" ]; then
             args+=("--notify" "${{ steps.task.outputs.pancake_notify || 'auto' }}")
+          fi
+          if [ "$task" = "media-performance" ]; then
+            if [ -n "${{ steps.task.outputs.media_codes }}" ]; then
+              args+=("--codes" "${{ steps.task.outputs.media_codes }}")
+            fi
+            if [ -n "${{ steps.task.outputs.media_days }}" ]; then
+              args+=("--days" "${{ steps.task.outputs.media_days }}")
+            fi
+            if [ -n "${{ steps.task.outputs.media_campaign }}" ]; then
+              args+=("--campaign" "${{ steps.task.outputs.media_campaign }}")
+            fi
           fi
           if [ "$task" = "telegram-update" ]; then
             python -c 'import json, os, sys; event=json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8")); update_b64=(event.get("inputs") or {}).get("update_b64", ""); sys.exit("Missing update_b64 for telegram-update.") if not update_b64 else open("telegram_update.b64", "w", encoding="utf-8").write(update_b64)'

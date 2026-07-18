@@ -13,4 +13,5 @@ crons = [
   "5 2 * * *",         # Backup 09:05 Asia/Ho_Chi_Minh token health.
   "5 8 * * 1,5,6",     # Backup 15:05 Asia/Ho_Chi_Minh Mon/Fri cash-in, Sat weekly summary.
   "5 14 * * *",        # Backup 21:05 Asia/Ho_Chi_Minh evening daily report.
+  "0 9 * * 6",         # Backup 16:00 Asia/Ho_Chi_Minh Saturday ADS2 media performance.
 ]

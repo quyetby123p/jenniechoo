@@ -478,6 +478,12 @@ function scheduledInputsFromCron(cron, scheduledTime) {
           source: "cloudflare-cron",
         },
       ];
+    case "0 9 * * 6":
+      return [{
+        task: "media-performance",
+        profile: "ads2",
+        source: "cloudflare-cron",
+      }];
     default:
       return [];
   }
