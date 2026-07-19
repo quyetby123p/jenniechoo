@@ -593,13 +593,27 @@ export default {
       console.log(`No GitHub task mapped for cron: ${event.cron}`);
       return;
     }
+    const failures = [];
     for (const inputs of inputList) {
-      if (await hasLocalCompletionMark(inputs, event.scheduledTime, env)) {
-        console.log(`Skipped GitHub task ${inputs.task} from cron ${event.cron}; local completion mark exists.`);
-        continue;
+      const label = [
+        inputs.task,
+        inputs.profile,
+        inputs.slot,
+      ].filter(Boolean).join(":");
+      try {
+        if (await hasLocalCompletionMark(inputs, event.scheduledTime, env)) {
+          console.log(`Skipped GitHub task ${label} from cron ${event.cron}; local completion mark exists.`);
+          continue;
+        }
+        await dispatchGitHubInputs(inputs, env);
+        console.log(`Dispatched GitHub task ${label} from cron ${event.cron}`);
+      } catch (error) {
+        failures.push(label);
+        console.error(`Failed GitHub task dispatch ${label} from cron ${event.cron}:`, error);
       }
-      await dispatchGitHubInputs(inputs, env);
-      console.log(`Dispatched GitHub task ${inputs.task} from cron ${event.cron}`);
+    }
+    if (failures.length === inputList.length) {
+      throw new Error(`All GitHub task dispatches failed for cron ${event.cron}: ${failures.join(", ")}`);
     }
   },
 };
