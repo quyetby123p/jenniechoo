@@ -421,6 +421,16 @@ function scheduledInputsFromCron(cron, scheduledTime) {
           source: "cloudflare-cron",
         });
       }
+      if (parts.hour === 16 && parts.minute === 5) {
+        const dayOfWeek = new Date(scheduledTime || Date.now()).getUTCDay();
+        if (dayOfWeek === 6) {
+          inputs.push({
+            task: "media-performance",
+            profile: "ads2",
+            source: "cloudflare-cron",
+          });
+        }
+      }
       return inputs;
     }
     case "5 1 * * *":
@@ -478,12 +488,6 @@ function scheduledInputsFromCron(cron, scheduledTime) {
           source: "cloudflare-cron",
         },
       ];
-    case "0 9 * * 6":
-      return [{
-        task: "media-performance",
-        profile: "ads2",
-        source: "cloudflare-cron",
-      }];
     default:
       return [];
   }
