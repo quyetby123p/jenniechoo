@@ -4346,15 +4346,39 @@ class TelegramAdsBot:
                 self.logger.warning("Khong doc duoc report cache %s", path)
                 continue
             if isinstance(payload, dict):
+                if self._rollup_report_needs_refresh(payload):
+                    refreshed = self._generate_report_for_rollup_sync(report_date=report_date, report_key=report_key)
+                    if isinstance(refreshed, dict):
+                        report_cache[report_key] = refreshed
+                        return refreshed
                 report_cache[report_key] = payload
                 return payload
+        payload = self._generate_report_for_rollup_sync(report_date=report_date, report_key=report_key)
+        if isinstance(payload, dict):
+            report_cache[report_key] = payload
+            return payload
+        return None
+
+    @staticmethod
+    def _rollup_report_needs_refresh(report: dict[str, Any]) -> bool:
+        errors = report.get("errors")
+        if bool(report.get("partial")):
+            return True
+        if isinstance(errors, dict) and errors:
+            return True
+        if not isinstance(report.get("pos"), dict):
+            return True
+        if not isinstance(report.get("ads"), dict):
+            return True
+        return False
+
+    def _generate_report_for_rollup_sync(self, *, report_date: date, report_key: str) -> dict[str, Any] | None:
         try:
             payload = self.reports.generate_report(report_date)
         except Exception:  # noqa: BLE001
             self.logger.warning("Khong tao duoc report bo sung cho rollup ngay %s", report_key)
             return None
         if isinstance(payload, dict):
-            report_cache[report_key] = payload
             return payload
         return None
 

@@ -1581,12 +1581,15 @@ def test_get_daily_spend_success() -> None:
     assert result["date_stop"] == "2026-05-15"
 
 
-def test_get_daily_spend_raises_when_empty_data() -> None:
+def test_get_daily_spend_returns_zero_when_empty_data() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
     client._request = lambda *args, **kwargs: {"data": []}  # type: ignore[method-assign]
 
-    with pytest.raises(MetaApiError):
-        client.get_daily_spend(date(2026, 5, 15), "Asia/Ho_Chi_Minh")
+    result = client.get_daily_spend(date(2026, 5, 15), "Asia/Ho_Chi_Minh")
+
+    assert result["spend_vnd"] == 0
+    assert result["date_start"] == "2026-05-15"
+    assert result["date_stop"] == "2026-05-15"
 
 
 def test_get_spend_for_range_uses_account_total_without_time_increment() -> None:

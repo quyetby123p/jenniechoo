@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from datetime import date, datetime
+import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -4599,6 +4600,69 @@ def test_send_daily_report_appends_rollup_text_only_when_enabled() -> None:
 
     assert bot._bot.messages[0]["text"] == "BASE\n\nROLLUP 3D7D"
     assert bot._bot.messages[1]["text"] == "BASE"
+
+
+def test_recent_rollup_refreshes_cached_report_missing_ads(tmp_path: Path) -> None:
+    meta = FakeMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+    bot.settings = replace(bot.settings, storage_root=tmp_path / "storage")
+    bot.settings.reports_daily_dir.mkdir(parents=True, exist_ok=True)
+
+    stale_report = {
+        "ok": False,
+        "partial": True,
+        "report_date": "2026-05-23",
+        "pos": {"revenue_total_thb": 1, "revenue_total_vnd": 815, "order_count": 1},
+        "ads": None,
+        "errors": {"ads": "expired token"},
+    }
+    (bot.settings.reports_daily_dir / "report_2026-05-23.json").write_text(
+        json.dumps(stale_report),
+        encoding="utf-8",
+    )
+    generated_dates: list[date] = []
+
+    def _generate_report(report_date: date) -> dict[str, Any]:
+        generated_dates.append(report_date)
+        day = report_date.day
+        return {
+            "ok": True,
+            "partial": False,
+            "report_date": report_date.isoformat(),
+            "pos": {
+                "revenue_total_thb": day - 22,
+                "revenue_total_vnd": (day - 22) * 815,
+                "order_count": 1,
+            },
+            "ads": {"spend_vnd": {23: 200, 24: 300}.get(day, 0)},
+            "errors": {},
+        }
+
+    bot.reports = SimpleNamespace(
+        generate_report=_generate_report,
+        default_report_date=lambda: date(2026, 5, 25),
+        build_message=lambda *_args, **_kwargs: "",
+    )
+    current_report = {
+        "ok": True,
+        "partial": False,
+        "report_date": "2026-05-25",
+        "pos": {"revenue_total_thb": 3, "revenue_total_vnd": 2445, "order_count": 1},
+        "ads": {"spend_vnd": 500},
+        "errors": {},
+    }
+
+    text = bot._build_recent_rollup_window_text_sync(
+        target_date=date(2026, 5, 25),
+        window_days=3,
+        report_cache={"2026-05-25": current_report},
+    )
+
+    assert generated_dates == [date(2026, 5, 23), date(2026, 5, 24)]
+    assert "- Chi phí Ads cộng dồn: 1,000 VND" in text
+    assert "- ROAS cộng dồn: 4.89" in text
 
 
 def test_send_daily_report_appends_task_summary_when_enabled() -> None:

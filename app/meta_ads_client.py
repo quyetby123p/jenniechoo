@@ -582,11 +582,27 @@ class MetaAdsClient:
         )
         data = payload.get("data", [])
         if not isinstance(data, list) or not data:
-            raise MetaApiError("Meta không trả dữ liệu spend cho khoảng ngày yêu cầu.")
+            return {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "account_id": self.ad_account_id,
+                "date_start": start_date.isoformat(),
+                "date_stop": end_date.isoformat(),
+                "spend_vnd": 0,
+                "currency": self.settings.app_currency,
+            }
 
         rows = [item for item in data if isinstance(item, dict)]
         if not rows:
-            raise MetaApiError("Meta không trả dữ liệu spend cho khoảng ngày yêu cầu.")
+            return {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "account_id": self.ad_account_id,
+                "date_start": start_date.isoformat(),
+                "date_stop": end_date.isoformat(),
+                "spend_vnd": 0,
+                "currency": self.settings.app_currency,
+            }
 
         spend_vnd = sum(self._to_vnd_int(str(row.get("spend", "0")).strip()) for row in rows)
         first = rows[0]
