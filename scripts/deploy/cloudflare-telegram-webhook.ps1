@@ -134,6 +134,11 @@ $ads2AllowedUserId = [string]$envValues["ADS2_TELEGRAM_ALLOWED_USER_ID"]
 if ([string]::IsNullOrWhiteSpace($ads2AllowedUserId)) {
     $ads2AllowedUserId = $allowedUserId
 }
+$mediaTelegramToken = [string]$envValues["MEDIA_BOT_TELEGRAM_TOKEN"]
+$mediaAllowedUserId = [string]$envValues["MEDIA_BOT_ALLOWED_USER_ID"]
+if ([string]::IsNullOrWhiteSpace($mediaAllowedUserId)) {
+    $mediaAllowedUserId = $allowedUserId
+}
 if ([string]::IsNullOrWhiteSpace($WebhookSecret)) {
     $WebhookSecret = [string]$envValues["TELEGRAM_WEBHOOK_SECRET"]
 }
@@ -168,6 +173,14 @@ if (-not [string]::IsNullOrWhiteSpace($ads2TelegramToken)) {
     }
     $ads2Username = [string]$ads2Info.result.username
 }
+$mediaUsername = ""
+if (-not [string]::IsNullOrWhiteSpace($mediaTelegramToken)) {
+    $mediaInfo = Invoke-RestMethod -Method Get -Uri ("https://api.telegram.org/bot{0}/getMe" -f $mediaTelegramToken)
+    if (-not $mediaInfo.ok) {
+        throw "Media Bot Telegram getMe failed."
+    }
+    $mediaUsername = [string]$mediaInfo.result.username
+}
 
 $groupIds = New-Object System.Collections.Generic.List[string]
 foreach ($key in @("DAILY_REPORT_NOTIFY_CHAT_ID", "RECONCILE_COD_NOTIFY_CHAT_ID", "PANCAKE_TD_SYNC_NOTIFY_CHAT_ID")) {
@@ -185,6 +198,19 @@ foreach ($key in @("BOT3_TASK_GROUP_CHAT_ID")) {
     }
 }
 $bot3AllowedGroupChatIds = (($bot3GroupIds | Select-Object -Unique) -join ",")
+$mediaGroupIds = New-Object System.Collections.Generic.List[string]
+foreach ($key in @("MEDIA_BOT_ALLOWED_GROUP_CHAT_IDS", "WORK_PROGRESS_TELEGRAM_ALLOWLIST_CHANNEL_IDS")) {
+    $value = [string]$envValues[$key]
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+        foreach ($part in $value.Split(",")) {
+            $trimmed = $part.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($trimmed) -and $trimmed -ne "0" -and $trimmed -ne "__DISABLED__") {
+                $mediaGroupIds.Add($trimmed)
+            }
+        }
+    }
+}
+$mediaAllowedGroupChatIds = (($mediaGroupIds | Select-Object -Unique) -join ",")
 
 $githubToken = Get-GitHubToken
 
@@ -207,6 +233,12 @@ try {
     Set-WranglerSecret -Name "ADS2_BOT_USERNAME" -Value $ads2Username -ConfigPath $configPath
     Set-WranglerSecret -Name "ADS2_ALLOWED_GROUP_CHAT_IDS" -Value $allowedGroupChatIds -ConfigPath $configPath
     Set-WranglerSecret -Name "ADS2_TELEGRAM_WEBHOOK_SECRET" -Value $ads2WebhookSecret -ConfigPath $configPath
+    Set-WranglerSecret -Name "MEDIA_BOT_TELEGRAM_TOKEN" -Value $mediaTelegramToken -ConfigPath $configPath
+    Set-WranglerSecret -Name "MEDIA_BOT_ALLOWED_USER_ID" -Value $mediaAllowedUserId -ConfigPath $configPath
+    Set-WranglerSecret -Name "MEDIA_BOT_USERNAME" -Value $mediaUsername -ConfigPath $configPath
+    Set-WranglerSecret -Name "MEDIA_BOT_ALLOWED_GROUP_CHAT_IDS" -Value $mediaAllowedGroupChatIds -ConfigPath $configPath
+    Set-WranglerSecret -Name "WORK_PROGRESS_TELEGRAM_ALLOWLIST_CHANNEL_IDS" -Value ([string]$envValues["WORK_PROGRESS_TELEGRAM_ALLOWLIST_CHANNEL_IDS"]) -ConfigPath $configPath
+    Set-WranglerSecret -Name "MEDIA_BOT_TELEGRAM_WEBHOOK_SECRET" -Value $WebhookSecret -ConfigPath $configPath
     Set-WranglerSecret -Name "GITHUB_TOKEN" -Value $githubToken -ConfigPath $configPath
     Set-WranglerSecret -Name "GITHUB_REPO" -Value $Repo -ConfigPath $configPath
     Set-WranglerSecret -Name "GITHUB_WORKFLOW_FILE" -Value $WorkflowFile -ConfigPath $configPath
@@ -289,6 +321,21 @@ if (-not $SkipSetWebhook) {
             throw "ADS2 Telegram setWebhook failed: $($ads2Result | ConvertTo-Json -Compress)"
         }
         Write-Host "ADS2 Telegram webhook configured."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($mediaTelegramToken)) {
+        $mediaWebhookUrl = $WorkerUrl.TrimEnd("/") + "/telegram/webhook/media"
+        Write-Host ("Setting Media Bot Telegram webhook: {0}" -f $mediaWebhookUrl)
+        $mediaBody = @{
+            url = $mediaWebhookUrl
+            secret_token = $WebhookSecret
+            allowed_updates = '["message","callback_query"]'
+            drop_pending_updates = "false"
+        }
+        $mediaResult = Invoke-RestMethod -Method Post -Uri ("https://api.telegram.org/bot{0}/setWebhook" -f $mediaTelegramToken) -Body $mediaBody
+        if (-not $mediaResult.ok) {
+            throw "Media Bot Telegram setWebhook failed: $($mediaResult | ConvertTo-Json -Compress)"
+        }
+        Write-Host "Media Bot Telegram webhook configured."
     }
 }
 

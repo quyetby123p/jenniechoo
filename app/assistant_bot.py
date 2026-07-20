@@ -1316,6 +1316,7 @@ class TelegramAssistantBot:
                         f"[Nhắc lịch 08:00]\n{reply}",
                     )
                     self.scheduler.mark_day_sent("agenda", day_key)
+                    await self._mark_assistant_cloud_completed(task="bot3-agenda", run_date=now_local.date())
                     await asyncio.sleep(65)
                     continue
             except Exception as exc:  # noqa: BLE001
@@ -1341,6 +1342,10 @@ class TelegramAssistantBot:
                         f"- Còn khoảng: {self.settings.event_reminder_lead_minutes} phút",
                     )
                     self.scheduler.mark_event_reminded(event)
+                await self._mark_assistant_cloud_completed(
+                    task="bot3-event-reminders",
+                    bucket=_local_half_hour_bucket(now_local),
+                )
             except Exception as exc:  # noqa: BLE001
                 if _is_google_scope_error(exc):
                     self.logger.warning(
@@ -1365,6 +1370,7 @@ class TelegramAssistantBot:
                     reply = await self._build_result_reply(now_local.date())
                     await self._bot_send_message(self.settings.telegram_allowed_user_id, f"[Tổng kết 21:00]\n{reply}")
                     self.scheduler.mark_day_sent("eod", day_key)
+                    await self._mark_assistant_cloud_completed(task="bot3-eod", run_date=now_local.date())
                     await asyncio.sleep(65)
                     continue
             except Exception as exc:  # noqa: BLE001
@@ -1399,6 +1405,10 @@ class TelegramAssistantBot:
                     text = self._build_task_weekly_reply(snapshot=snapshot, trigger_label="Tổng kết tuần tự động")
                     await self._bot_send_message(int(self.settings.task_group_chat_id), text)
                     self.scheduler.mark_day_sent("task_weekly_summary", day_key)
+                    await self._mark_assistant_cloud_completed(
+                        task="bot3-task-weekly-summary",
+                        run_date=now_local.date(),
+                    )
                     await asyncio.sleep(65)
                     continue
             except Exception as exc:  # noqa: BLE001
@@ -1522,11 +1532,26 @@ class TelegramAssistantBot:
             run_date = date.fromisoformat(str(day_key).strip())
         except ValueError:
             run_date = self.scheduler.now_local().date()
-        await asyncio.to_thread(
-            self.cloud_schedule_guard.mark_completed,
+        await self._mark_assistant_cloud_completed(
             task="bot3-daily-checkin",
             slot=slot,
             run_date=run_date,
+        )
+
+    async def _mark_assistant_cloud_completed(
+        self,
+        *,
+        task: str,
+        slot: str | None = None,
+        run_date: date | str | None = None,
+        bucket: str | None = None,
+    ) -> None:
+        await asyncio.to_thread(
+            self.cloud_schedule_guard.mark_completed,
+            task=task,
+            slot=slot,
+            run_date=run_date,
+            bucket=bucket,
         )
 
     async def _setup_bot_commands(self) -> None:
@@ -1886,6 +1911,11 @@ def _format_time_label(raw: str) -> str:
         return dt.strftime("%d/%m %H:%M")
     except ValueError:
         return value
+
+
+def _local_half_hour_bucket(value: datetime) -> str:
+    minute = 30 if int(value.minute) >= 30 else 0
+    return f"{value.date().isoformat()}T{int(value.hour):02d}:{minute:02d}"
 
 
 def _compact_excerpt(raw: str, *, max_len: int) -> str:

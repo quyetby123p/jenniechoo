@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from app.cloud_schedule_guard import CloudScheduleGuardClient
 from app.utils import dump_json, load_json, now_utc_iso
 from app.work_progress_service import WorkProgressService
 from app.work_progress_settings import WorkProgressSettings
@@ -22,10 +23,12 @@ class WorkProgressScheduler:
         settings: WorkProgressSettings,
         service: WorkProgressService,
         logger: logging.Logger,
+        cloud_schedule_guard: CloudScheduleGuardClient | None = None,
     ) -> None:
         self.settings = settings
         self.service = service
         self.logger = logger
+        self.cloud_schedule_guard = cloud_schedule_guard or CloudScheduleGuardClient.from_env(logger=logger)
 
     def run_forever(self) -> None:
         self.logger.info(
@@ -62,6 +65,7 @@ class WorkProgressScheduler:
             self._send_private_to_managers(text)
             self._mark_sent(state, slot_name="daily", day_key=day_key)
             self._save_state(state)
+            self._mark_cloud_completed(task="work-progress-daily", run_date=now_local.date())
             return
 
         if (
@@ -75,6 +79,7 @@ class WorkProgressScheduler:
             self._send_private_to_managers(text)
             self._mark_sent(state, slot_name="weekly", day_key=day_key)
             self._save_state(state)
+            self._mark_cloud_completed(task="work-progress-weekly", run_date=now_local.date())
             return
 
         target_day = min(
@@ -92,6 +97,7 @@ class WorkProgressScheduler:
             self._send_private_to_managers(text)
             self._mark_sent(state, slot_name="monthly", day_key=day_key)
             self._save_state(state)
+            self._mark_cloud_completed(task="work-progress-monthly", run_date=now_local.date())
 
     def _send_private_to_managers(self, text: str) -> None:
         bot_token = str(self.settings.telegram_bot_token or "").strip()
@@ -145,4 +151,10 @@ class WorkProgressScheduler:
             slots = {}
         slots[str(slot_name)] = str(day_key)
         state["slots"] = slots
+
+    def _mark_cloud_completed(self, *, task: str, run_date: date) -> None:
+        self.cloud_schedule_guard.mark_completed(
+            task=task,
+            run_date=run_date,
+        )
 

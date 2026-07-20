@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sys
 from typing import Any
@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot
 
 from app.assistant_approval_service import AssistantApprovalService
-from app.assistant_bot import TelegramAssistantBot
+from app.assistant_bot import TelegramAssistantBot, _format_time_label, _is_google_scope_error
 from app.assistant_google_service import AssistantGoogleService
 from app.assistant_internal_ops_service import AssistantInternalOpsService
 from app.assistant_memory_service import AssistantMemoryService
@@ -26,7 +26,14 @@ from app.daily_report_service import DailyReportService
 from app.daily_task_summary_service import DailyTaskSummaryService
 from app.dedup_service import DedupService
 from app.logger import configure_logger
+from app.media_approval_service import MediaApprovalService
+from app.media_bot import MediaResearchBot
+from app.media_main import _configure_media_logger
 from app.media_performance_service import MediaPerformanceService
+from app.media_research_service import MediaResearchService
+from app.media_settings import MediaSettings, load_media_settings
+from app.media_sheet_service import MediaSheetService
+from app.media_storage_service import MediaStorageService
 from app.meta_ads_client import MetaAdsClient
 from app.pancake_pos_client import PancakePosClient
 from app.pancake_td_sync_service import PancakeToThaiDuongSyncService
@@ -37,6 +44,9 @@ from app.settings import Settings, load_settings
 from app.storage_service import StorageService
 from app.telegram_bot import TelegramAdsBot
 from app.thai_duong_cod_client import ThaiDuongCodClient
+from app.work_progress_scheduler import WorkProgressScheduler
+from app.work_progress_service import WorkProgressService
+from app.work_progress_settings import WorkProgressSettings, load_work_progress_settings
 
 
 @dataclass
@@ -52,6 +62,16 @@ class AssistantScheduledRuntime:
     settings: AssistantSettings
     bot: TelegramAssistantBot
     storage: AssistantStorageService
+    telegram: Bot
+
+
+@dataclass
+class MediaScheduledRuntime:
+    settings: MediaSettings
+    bot: MediaResearchBot
+    work_progress_settings: WorkProgressSettings | None
+    work_progress: WorkProgressService | None
+    work_progress_scheduler: WorkProgressScheduler | None
     telegram: Bot
 
 
@@ -161,6 +181,60 @@ def build_assistant_runtime(project_root: Path | None = None) -> AssistantSchedu
     )
     bot._bot = telegram
     return AssistantScheduledRuntime(settings=settings, bot=bot, storage=storage, telegram=telegram)
+
+
+def build_media_runtime(project_root: Path | None = None) -> MediaScheduledRuntime:
+    if project_root is None:
+        project_root = Path(__file__).resolve().parents[1]
+
+    settings = load_media_settings(project_root=project_root)
+    logger = _configure_media_logger(
+        settings.logs_root,
+        secrets=[
+            settings.telegram_bot_token,
+            settings.serpapi_api_key,
+            settings.sheet_oauth_client_secret,
+            settings.sheet_oauth_refresh_token,
+        ],
+    )
+    storage = MediaStorageService(settings=settings, logger=logger)
+    research = MediaResearchService(settings=settings, logger=logger)
+    sheet = MediaSheetService(settings=settings, logger=logger)
+    approval = MediaApprovalService()
+
+    work_progress_settings = None
+    work_progress = None
+    work_progress_scheduler = None
+    if settings.work_progress_enabled:
+        work_progress_settings = load_work_progress_settings(project_root=project_root)
+        work_progress = WorkProgressService(settings=work_progress_settings, logger=logger)
+        work_progress_scheduler = WorkProgressScheduler(
+            settings=work_progress_settings,
+            service=work_progress,
+            logger=logger,
+        )
+
+    telegram = Bot(token=settings.telegram_bot_token)
+    bot = MediaResearchBot(
+        settings=settings,
+        logger=logger,
+        storage=storage,
+        research=research,
+        sheet=sheet,
+        approval=approval,
+        work_progress_service=work_progress,
+        work_progress_scheduler=work_progress_scheduler,
+        work_progress_api_server=None,
+    )
+    bot._bot = telegram
+    return MediaScheduledRuntime(
+        settings=settings,
+        bot=bot,
+        work_progress_settings=work_progress_settings,
+        work_progress=work_progress,
+        work_progress_scheduler=work_progress_scheduler,
+        telegram=telegram,
+    )
 
 
 def parse_date(value: str | None) -> date | None:
@@ -327,19 +401,229 @@ async def run_bot3_daily_checkin(runtime: AssistantScheduledRuntime, *, slot: st
     print(f"Bot 3 evening check-in sent for {day_key}.")
 
 
+def _assistant_run_date(runtime: AssistantScheduledRuntime, run_date: date | None) -> date:
+    if run_date is not None:
+        return run_date
+    tzinfo = ZoneInfo(runtime.settings.timezone_name)
+    return datetime.now(tzinfo).date()
+
+
+async def run_bot3_agenda(runtime: AssistantScheduledRuntime, *, run_date: date | None) -> None:
+    if not runtime.settings.proactive_enabled:
+        print("BOT3_PROACTIVE_ENABLED=0, skip Bot 3 agenda.")
+        return
+
+    target_date = _assistant_run_date(runtime, run_date)
+    day_key = target_date.isoformat()
+    if not runtime.bot.scheduler.should_send_day_mark("agenda", day_key):
+        print(f"Bot 3 agenda already sent for {day_key}.")
+        return
+
+    reply = await runtime.bot._build_agenda_reply(target_date)
+    await runtime.bot._bot_send_message(
+        int(runtime.settings.telegram_allowed_user_id),
+        f"[Nhắc lịch {int(runtime.settings.agenda_hour):02d}:00]\n{reply}",
+    )
+    runtime.bot.scheduler.mark_day_sent("agenda", day_key)
+    print(f"Bot 3 agenda sent for {day_key}.")
+
+
+async def run_bot3_eod(runtime: AssistantScheduledRuntime, *, run_date: date | None) -> None:
+    if not runtime.settings.proactive_enabled:
+        print("BOT3_PROACTIVE_ENABLED=0, skip Bot 3 EOD.")
+        return
+
+    target_date = _assistant_run_date(runtime, run_date)
+    day_key = target_date.isoformat()
+    if not runtime.bot.scheduler.should_send_day_mark("eod", day_key):
+        print(f"Bot 3 EOD already sent for {day_key}.")
+        return
+
+    reply = await runtime.bot._build_result_reply(target_date)
+    await runtime.bot._bot_send_message(
+        int(runtime.settings.telegram_allowed_user_id),
+        f"[Tổng kết {int(runtime.settings.eod_hour):02d}:00]\n{reply}",
+    )
+    runtime.bot.scheduler.mark_day_sent("eod", day_key)
+    print(f"Bot 3 EOD sent for {day_key}.")
+
+
+async def run_bot3_task_weekly_summary(runtime: AssistantScheduledRuntime, *, run_date: date | None) -> None:
+    if not runtime.settings.tasks_enabled:
+        print("BOT3_TASKS_ENABLED=0, skip Bot 3 task weekly summary.")
+        return
+    if not runtime.settings.task_weekly_summary_enabled:
+        print("BOT3_TASK_WEEKLY_SUMMARY_ENABLED=0, skip Bot 3 task weekly summary.")
+        return
+    if int(runtime.settings.task_group_chat_id) == 0:
+        print("BOT3_TASK_GROUP_CHAT_ID is empty, skip Bot 3 task weekly summary.")
+        return
+
+    target_date = _assistant_run_date(runtime, run_date)
+    if target_date.weekday() != int(runtime.settings.task_weekly_summary_weekday):
+        print(f"Bot 3 task weekly summary skipped for non-summary day: {target_date.isoformat()}")
+        return
+
+    day_key = target_date.isoformat()
+    if not runtime.bot.scheduler.should_send_day_mark("task_weekly_summary", day_key):
+        print(f"Bot 3 task weekly summary already sent for {day_key}.")
+        return
+
+    snapshot = await asyncio.to_thread(
+        runtime.bot.tasks.build_weekly_snapshot,
+        reference_date=target_date,
+        timezone_name=runtime.settings.timezone_name,
+        max_items=int(runtime.settings.task_weekly_summary_max_items),
+    )
+    text = runtime.bot._build_task_weekly_reply(snapshot=snapshot, trigger_label="Tổng kết tuần tự động")
+    await runtime.bot._bot_send_message(int(runtime.settings.task_group_chat_id), text)
+    runtime.bot.scheduler.mark_day_sent("task_weekly_summary", day_key)
+    print(f"Bot 3 task weekly summary sent for {day_key}.")
+
+
+async def run_bot3_event_reminders(runtime: AssistantScheduledRuntime) -> None:
+    if not runtime.settings.proactive_enabled:
+        print("BOT3_PROACTIVE_ENABLED=0, skip Bot 3 event reminders.")
+        return
+
+    now_local = runtime.bot.scheduler.now_local()
+    end_local = now_local + timedelta(minutes=int(runtime.settings.event_reminder_lead_minutes) + 5)
+    try:
+        events = await asyncio.to_thread(
+            runtime.bot.google.fetch_events_between,
+            now_local,
+            end_local,
+            max_per_calendar=20,
+        )
+    except Exception as exc:  # noqa: BLE001
+        if _is_google_scope_error(exc):
+            print("Bot 3 event reminders skipped: missing Google Calendar/Gmail scope.")
+            return
+        raise
+
+    due = runtime.bot.scheduler.pick_due_event_reminders(events, now_local=now_local)
+    for event in due:
+        summary = str(event.get("summary", "")).strip() or "(Không tiêu đề)"
+        start_label = _format_time_label(str(event.get("start_iso", "")))
+        await runtime.bot._bot_send_message(
+            int(runtime.settings.telegram_allowed_user_id),
+            "[Nhắc trước sự kiện]\n"
+            f"- {summary}\n"
+            f"- Bắt đầu lúc: {start_label}\n"
+            f"- Còn khoảng: {int(runtime.settings.event_reminder_lead_minutes)} phút",
+        )
+        runtime.bot.scheduler.mark_event_reminded(event)
+    print(f"Bot 3 event reminder check completed: {len(due)} due.")
+
+
+def _work_progress_run_date(runtime: MediaScheduledRuntime, run_date: date | None) -> date:
+    if run_date is not None:
+        return run_date
+    settings = runtime.work_progress_settings
+    timezone_name = settings.timezone_name if settings else "Asia/Ho_Chi_Minh"
+    return datetime.now(ZoneInfo(timezone_name)).date()
+
+
+async def run_work_progress_report(
+    runtime: MediaScheduledRuntime,
+    *,
+    report_type: str,
+    run_date: date | None,
+) -> None:
+    if not runtime.settings.work_progress_enabled:
+        print("MEDIA_BOT_WORK_PROGRESS_ENABLED=0, skip work-progress report.")
+        return
+    if not runtime.work_progress or not runtime.work_progress_scheduler:
+        print("Work-progress runtime is not configured, skip report.")
+        return
+
+    selected_type = str(report_type or "").strip().lower()
+    if selected_type not in {"daily", "weekly", "monthly"}:
+        raise ValueError("report_type phai la daily, weekly hoac monthly")
+
+    target_date = _work_progress_run_date(runtime, run_date)
+    settings = runtime.work_progress_scheduler.settings
+    if selected_type == "weekly" and target_date.weekday() != int(settings.weekly_report_weekday):
+        print(f"Work-progress weekly skipped for non-weekly day: {target_date.isoformat()}")
+        return
+    if selected_type == "monthly":
+        target_day = min(int(settings.monthly_report_day), _month_last_day(target_date))
+        if target_date.day != target_day:
+            print(f"Work-progress monthly skipped for non-monthly day: {target_date.isoformat()}")
+            return
+
+    day_key = target_date.isoformat()
+    state = runtime.work_progress_scheduler._load_state()
+    if not runtime.work_progress_scheduler._should_send(state, slot_name=selected_type, day_key=day_key):
+        print(f"Work-progress {selected_type} already sent for {day_key}.")
+        return
+
+    anchor_date = target_date
+    if selected_type == "daily":
+        anchor_date = target_date + timedelta(days=int(settings.daily_report_offset_days))
+    report = await asyncio.to_thread(runtime.work_progress.build_report, selected_type, anchor_date=anchor_date)
+    text = await asyncio.to_thread(runtime.work_progress.format_report_text, report)
+    await asyncio.to_thread(runtime.work_progress_scheduler._send_private_to_managers, text)
+    runtime.work_progress_scheduler._mark_sent(state, slot_name=selected_type, day_key=day_key)
+    runtime.work_progress_scheduler._save_state(state)
+    print(f"Work-progress {selected_type} report sent for {day_key}.")
+
+
+def _month_last_day(value: date) -> int:
+    import calendar
+
+    return calendar.monthrange(value.year, value.month)[1]
+
+
 async def run_task(args: argparse.Namespace) -> int:
-    if str(args.task).strip() == "bot3-daily-checkin":
+    assistant_tasks = {
+        "bot3-agenda",
+        "bot3-event-reminders",
+        "bot3-eod",
+        "bot3-task-weekly-summary",
+        "bot3-daily-checkin",
+    }
+    if str(args.task).strip() in assistant_tasks:
         assistant_runtime = build_assistant_runtime()
         try:
-            await run_bot3_daily_checkin(
-                assistant_runtime,
-                slot=args.slot,
+            task = str(args.task).strip()
+            if task == "bot3-daily-checkin":
+                await run_bot3_daily_checkin(
+                    assistant_runtime,
+                    slot=args.slot,
+                    run_date=parse_date(args.date),
+                )
+            elif task == "bot3-agenda":
+                await run_bot3_agenda(assistant_runtime, run_date=parse_date(args.date))
+            elif task == "bot3-event-reminders":
+                await run_bot3_event_reminders(assistant_runtime)
+            elif task == "bot3-eod":
+                await run_bot3_eod(assistant_runtime, run_date=parse_date(args.date))
+            elif task == "bot3-task-weekly-summary":
+                await run_bot3_task_weekly_summary(assistant_runtime, run_date=parse_date(args.date))
+            print(f"Scheduled task completed: {args.task} at {datetime.now(timezone.utc).isoformat()}")
+            return 0
+        finally:
+            await assistant_runtime.telegram.session.close()
+
+    work_progress_tasks = {
+        "work-progress-daily": "daily",
+        "work-progress-weekly": "weekly",
+        "work-progress-monthly": "monthly",
+    }
+    if str(args.task).strip() in work_progress_tasks:
+        media_runtime = build_media_runtime()
+        try:
+            task = str(args.task).strip()
+            await run_work_progress_report(
+                media_runtime,
+                report_type=work_progress_tasks[task],
                 run_date=parse_date(args.date),
             )
             print(f"Scheduled task completed: {args.task} at {datetime.now(timezone.utc).isoformat()}")
             return 0
         finally:
-            await assistant_runtime.telegram.session.close()
+            await media_runtime.telegram.session.close()
 
     runtime = build_runtime(profile=args.profile)
     try:
@@ -400,9 +684,29 @@ def build_parser() -> argparse.ArgumentParser:
     media_performance.add_argument("--days", type=int, default=None, help="Optional lookback days.")
     media_performance.add_argument("--campaign", default="", help="Optional campaign id/name hint.")
 
+    bot3_agenda = subparsers.add_parser("bot3-agenda", help="Send Bot 3 morning agenda.")
+    bot3_agenda.add_argument("--date", default="", help="Optional agenda date in YYYY-MM-DD.")
+
+    subparsers.add_parser("bot3-event-reminders", help="Check and send Bot 3 event reminders.")
+
+    bot3_eod = subparsers.add_parser("bot3-eod", help="Send Bot 3 end-of-day summary.")
+    bot3_eod.add_argument("--date", default="", help="Optional summary date in YYYY-MM-DD.")
+
+    bot3_weekly = subparsers.add_parser("bot3-task-weekly-summary", help="Send Bot 3 weekly task summary.")
+    bot3_weekly.add_argument("--date", default="", help="Optional summary date in YYYY-MM-DD.")
+
     bot3_daily = subparsers.add_parser("bot3-daily-checkin", help="Send Bot 3 daily task check-in prompt.")
     bot3_daily.add_argument("--slot", choices=["morning", "evening"], default="morning")
     bot3_daily.add_argument("--date", default="", help="Optional check-in date in YYYY-MM-DD.")
+
+    work_progress_daily = subparsers.add_parser("work-progress-daily", help="Send work-progress daily report.")
+    work_progress_daily.add_argument("--date", default="", help="Optional report date in YYYY-MM-DD.")
+
+    work_progress_weekly = subparsers.add_parser("work-progress-weekly", help="Send work-progress weekly report.")
+    work_progress_weekly.add_argument("--date", default="", help="Optional report date in YYYY-MM-DD.")
+
+    work_progress_monthly = subparsers.add_parser("work-progress-monthly", help="Send work-progress monthly report.")
+    work_progress_monthly.add_argument("--date", default="", help="Optional report date in YYYY-MM-DD.")
     return parser
 
 

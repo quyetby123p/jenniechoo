@@ -16,7 +16,14 @@ on:
           - reconcile-weekly
           - pancake-td-sync
           - telegram-update
+          - bot3-agenda
+          - bot3-event-reminders
+          - bot3-eod
+          - bot3-task-weekly-summary
           - bot3-daily-checkin
+          - work-progress-daily
+          - work-progress-weekly
+          - work-progress-monthly
       slot:
         description: "Daily report slot"
         required: false
@@ -74,6 +81,7 @@ on:
           - main
           - ads2
           - bot3
+          - media
 
 concurrency:
   # Keep simultaneous cron dispatches from replacing each other in GitHub's single pending slot.
@@ -193,11 +201,21 @@ jobs:
       BOT3_TELEGRAM_TOKEN: ${{ secrets.BOT3_TELEGRAM_TOKEN }}
       BOT3_ALLOWED_USER_ID: ${{ secrets.BOT3_ALLOWED_USER_ID || secrets.TELEGRAM_ALLOWED_USER_ID }}
       BOT3_TIMEZONE: ${{ secrets.BOT3_TIMEZONE || 'Asia/Ho_Chi_Minh' }}
+      BOT3_PROACTIVE_ENABLED: ${{ secrets.BOT3_PROACTIVE_ENABLED || '0' }}
+      BOT3_AGENDA_HOUR: ${{ secrets.BOT3_AGENDA_HOUR || '8' }}
+      BOT3_EVENT_REMINDER_LEAD_MINUTES: ${{ secrets.BOT3_EVENT_REMINDER_LEAD_MINUTES || '30' }}
+      BOT3_EOD_HOUR: ${{ secrets.BOT3_EOD_HOUR || '21' }}
       BOT3_TASKS_ENABLED: ${{ secrets.BOT3_TASKS_ENABLED || '1' }}
       BOT3_TASK_GROUP_CHAT_ID: ${{ secrets.BOT3_TASK_GROUP_CHAT_ID }}
       BOT3_MANAGER_USER_IDS: ${{ secrets.BOT3_MANAGER_USER_IDS }}
+      BOT3_TASK_WEEKLY_SUMMARY_ENABLED: ${{ secrets.BOT3_TASK_WEEKLY_SUMMARY_ENABLED || '1' }}
+      BOT3_TASK_WEEKLY_SUMMARY_WEEKDAY: ${{ secrets.BOT3_TASK_WEEKLY_SUMMARY_WEEKDAY || '5' }}
+      BOT3_TASK_WEEKLY_SUMMARY_HOUR: ${{ secrets.BOT3_TASK_WEEKLY_SUMMARY_HOUR || '15' }}
+      BOT3_TASK_WEEKLY_SUMMARY_MINUTE: ${{ secrets.BOT3_TASK_WEEKLY_SUMMARY_MINUTE || '0' }}
+      BOT3_TASK_WEEKLY_SUMMARY_MAX_ITEMS: ${{ secrets.BOT3_TASK_WEEKLY_SUMMARY_MAX_ITEMS || '5' }}
       BOT3_TASK_DB_PATH: ${{ secrets.BOT3_TASK_DB_PATH || 'storage/assistant_bot/tasks.db' }}
       BOT3_DAILY_TASK_CHECKIN_ENABLED: ${{ secrets.BOT3_DAILY_TASK_CHECKIN_ENABLED || '1' }}
+      BOT3_DAILY_TASK_LOCAL_SCHEDULER_ENABLED: ${{ secrets.BOT3_DAILY_TASK_LOCAL_SCHEDULER_ENABLED || '0' }}
       BOT3_DAILY_TASK_MORNING_HOUR: ${{ secrets.BOT3_DAILY_TASK_MORNING_HOUR || '9' }}
       BOT3_DAILY_TASK_MORNING_MINUTE: ${{ secrets.BOT3_DAILY_TASK_MORNING_MINUTE || '0' }}
       BOT3_DAILY_TASK_EVENING_HOUR: ${{ secrets.BOT3_DAILY_TASK_EVENING_HOUR || '17' }}
@@ -215,6 +233,45 @@ jobs:
       BOT3_GMAIL_QUERY_DEFAULT: ${{ secrets.BOT3_GMAIL_QUERY_DEFAULT }}
       BOT3_SHEETS_SPREADSHEET_ID: ${{ secrets.BOT3_SHEETS_SPREADSHEET_ID }}
       BOT3_SHEETS_GID: ${{ secrets.BOT3_SHEETS_GID }}
+      MEDIA_BOT_TELEGRAM_TOKEN: ${{ secrets.MEDIA_BOT_TELEGRAM_TOKEN }}
+      MEDIA_BOT_ALLOWED_USER_ID: ${{ secrets.MEDIA_BOT_ALLOWED_USER_ID || secrets.TELEGRAM_ALLOWED_USER_ID }}
+      MEDIA_BOT_TIMEZONE: ${{ secrets.MEDIA_BOT_TIMEZONE || vars.MEDIA_BOT_TIMEZONE || 'Asia/Ho_Chi_Minh' }}
+      WORK_PROGRESS_TIMEZONE: ${{ secrets.WORK_PROGRESS_TIMEZONE || vars.WORK_PROGRESS_TIMEZONE || secrets.MEDIA_BOT_TIMEZONE || vars.MEDIA_BOT_TIMEZONE || 'Asia/Ho_Chi_Minh' }}
+      MEDIA_BOT_DAILY_RUN_CAP: ${{ secrets.MEDIA_BOT_DAILY_RUN_CAP || vars.MEDIA_BOT_DAILY_RUN_CAP || '30' }}
+      MEDIA_BOT_MEDIA_RESEARCH_ENABLED: ${{ secrets.MEDIA_BOT_MEDIA_RESEARCH_ENABLED || vars.MEDIA_BOT_MEDIA_RESEARCH_ENABLED || '1' }}
+      MEDIA_BOT_WORK_PROGRESS_ENABLED: ${{ secrets.MEDIA_BOT_WORK_PROGRESS_ENABLED || vars.MEDIA_BOT_WORK_PROGRESS_ENABLED || '1' }}
+      MEDIA_RESEARCH_SERPAPI_API_KEY: ${{ secrets.MEDIA_RESEARCH_SERPAPI_API_KEY }}
+      MEDIA_RESEARCH_CLOUDINARY_CLOUD_NAME: ${{ secrets.MEDIA_RESEARCH_CLOUDINARY_CLOUD_NAME || vars.MEDIA_RESEARCH_CLOUDINARY_CLOUD_NAME }}
+      MEDIA_RESEARCH_CLOUDINARY_UPLOAD_PRESET: ${{ secrets.MEDIA_RESEARCH_CLOUDINARY_UPLOAD_PRESET || vars.MEDIA_RESEARCH_CLOUDINARY_UPLOAD_PRESET }}
+      MEDIA_RESEARCH_MAX_IMAGE_RESULTS: ${{ secrets.MEDIA_RESEARCH_MAX_IMAGE_RESULTS || vars.MEDIA_RESEARCH_MAX_IMAGE_RESULTS || '20' }}
+      MEDIA_RESEARCH_MAX_VIDEO_RESULTS: ${{ secrets.MEDIA_RESEARCH_MAX_VIDEO_RESULTS || vars.MEDIA_RESEARCH_MAX_VIDEO_RESULTS || '20' }}
+      MEDIA_RESEARCH_MAX_API_CALLS_PER_RUN: ${{ secrets.MEDIA_RESEARCH_MAX_API_CALLS_PER_RUN || vars.MEDIA_RESEARCH_MAX_API_CALLS_PER_RUN || '5' }}
+      MEDIA_RESEARCH_PLATFORM_ALLOWLIST: ${{ secrets.MEDIA_RESEARCH_PLATFORM_ALLOWLIST || vars.MEDIA_RESEARCH_PLATFORM_ALLOWLIST }}
+      MEDIA_RESEARCH_MARKET_SCOPE: ${{ secrets.MEDIA_RESEARCH_MARKET_SCOPE || vars.MEDIA_RESEARCH_MARKET_SCOPE || 'VN+TH+GLOBAL' }}
+      MEDIA_RESEARCH_SHEET_ENABLED: ${{ secrets.MEDIA_RESEARCH_SHEET_ENABLED || vars.MEDIA_RESEARCH_SHEET_ENABLED || '1' }}
+      MEDIA_RESEARCH_SHEET_MODE: ${{ secrets.MEDIA_RESEARCH_SHEET_MODE || vars.MEDIA_RESEARCH_SHEET_MODE || 'oauth_user' }}
+      MEDIA_RESEARCH_SHEET_SPREADSHEET_ID: ${{ secrets.MEDIA_RESEARCH_SHEET_SPREADSHEET_ID || vars.MEDIA_RESEARCH_SHEET_SPREADSHEET_ID }}
+      MEDIA_RESEARCH_SHEET_GID: ${{ secrets.MEDIA_RESEARCH_SHEET_GID || vars.MEDIA_RESEARCH_SHEET_GID || '844064194' }}
+      MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_ID: ${{ secrets.MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_ID || secrets.BOT3_GOOGLE_OAUTH_CLIENT_ID }}
+      MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_SECRET: ${{ secrets.MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_SECRET || secrets.BOT3_GOOGLE_OAUTH_CLIENT_SECRET }}
+      MEDIA_RESEARCH_SHEET_OAUTH_REFRESH_TOKEN: ${{ secrets.MEDIA_RESEARCH_SHEET_OAUTH_REFRESH_TOKEN || secrets.BOT3_GOOGLE_OAUTH_REFRESH_TOKEN }}
+      MEDIA_RESEARCH_SHEET_OAUTH_TOKEN_URI: ${{ secrets.MEDIA_RESEARCH_SHEET_OAUTH_TOKEN_URI || secrets.BOT3_GOOGLE_OAUTH_TOKEN_URI || 'https://oauth2.googleapis.com/token' }}
+      WORK_PROGRESS_MANAGER_TELEGRAM_IDS: ${{ secrets.WORK_PROGRESS_MANAGER_TELEGRAM_IDS || vars.WORK_PROGRESS_MANAGER_TELEGRAM_IDS || secrets.BOT3_MANAGER_USER_IDS || secrets.TELEGRAM_ALLOWED_USER_ID }}
+      WORK_PROGRESS_TELEGRAM_ALLOWLIST_CHANNEL_IDS: ${{ secrets.WORK_PROGRESS_TELEGRAM_ALLOWLIST_CHANNEL_IDS || vars.WORK_PROGRESS_TELEGRAM_ALLOWLIST_CHANNEL_IDS || secrets.BOT3_TASK_GROUP_CHAT_ID || secrets.DAILY_REPORT_NOTIFY_CHAT_ID }}
+      WORK_PROGRESS_ZALO_ALLOWLIST_CHANNEL_IDS: ${{ secrets.WORK_PROGRESS_ZALO_ALLOWLIST_CHANNEL_IDS || vars.WORK_PROGRESS_ZALO_ALLOWLIST_CHANNEL_IDS }}
+      WORK_PROGRESS_PANCAKE_ALLOWLIST_CHANNEL_IDS: ${{ secrets.WORK_PROGRESS_PANCAKE_ALLOWLIST_CHANNEL_IDS || vars.WORK_PROGRESS_PANCAKE_ALLOWLIST_CHANNEL_IDS }}
+      WORK_PROGRESS_FORWARDED_ALLOWLIST_CHANNEL_IDS: ${{ secrets.WORK_PROGRESS_FORWARDED_ALLOWLIST_CHANNEL_IDS || vars.WORK_PROGRESS_FORWARDED_ALLOWLIST_CHANNEL_IDS }}
+      WORK_PROGRESS_DAILY_REPORT_HOUR: ${{ secrets.WORK_PROGRESS_DAILY_REPORT_HOUR || vars.WORK_PROGRESS_DAILY_REPORT_HOUR || '21' }}
+      WORK_PROGRESS_DAILY_REPORT_MINUTE: ${{ secrets.WORK_PROGRESS_DAILY_REPORT_MINUTE || vars.WORK_PROGRESS_DAILY_REPORT_MINUTE || '0' }}
+      WORK_PROGRESS_DAILY_REPORT_OFFSET_DAYS: ${{ secrets.WORK_PROGRESS_DAILY_REPORT_OFFSET_DAYS || vars.WORK_PROGRESS_DAILY_REPORT_OFFSET_DAYS || '0' }}
+      WORK_PROGRESS_WEEKLY_REPORT_WEEKDAY: ${{ secrets.WORK_PROGRESS_WEEKLY_REPORT_WEEKDAY || vars.WORK_PROGRESS_WEEKLY_REPORT_WEEKDAY || '5' }}
+      WORK_PROGRESS_WEEKLY_REPORT_HOUR: ${{ secrets.WORK_PROGRESS_WEEKLY_REPORT_HOUR || vars.WORK_PROGRESS_WEEKLY_REPORT_HOUR || '15' }}
+      WORK_PROGRESS_WEEKLY_REPORT_MINUTE: ${{ secrets.WORK_PROGRESS_WEEKLY_REPORT_MINUTE || vars.WORK_PROGRESS_WEEKLY_REPORT_MINUTE || '0' }}
+      WORK_PROGRESS_MONTHLY_REPORT_DAY: ${{ secrets.WORK_PROGRESS_MONTHLY_REPORT_DAY || vars.WORK_PROGRESS_MONTHLY_REPORT_DAY || '1' }}
+      WORK_PROGRESS_MONTHLY_REPORT_HOUR: ${{ secrets.WORK_PROGRESS_MONTHLY_REPORT_HOUR || vars.WORK_PROGRESS_MONTHLY_REPORT_HOUR || '9' }}
+      WORK_PROGRESS_MONTHLY_REPORT_MINUTE: ${{ secrets.WORK_PROGRESS_MONTHLY_REPORT_MINUTE || vars.WORK_PROGRESS_MONTHLY_REPORT_MINUTE || '0' }}
+      WORK_PROGRESS_CONFIDENCE_FAST_TRACK: ${{ secrets.WORK_PROGRESS_CONFIDENCE_FAST_TRACK || vars.WORK_PROGRESS_CONFIDENCE_FAST_TRACK || '0.75' }}
+      WORK_PROGRESS_CONTEXT_WINDOW_MINUTES: ${{ secrets.WORK_PROGRESS_CONTEXT_WINDOW_MINUTES || vars.WORK_PROGRESS_CONTEXT_WINDOW_MINUTES || '20' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -242,6 +299,10 @@ jobs:
             storage/reports
             storage/reconcile_cod
             storage/assistant_bot
+            storage/media_research
+            state/media_bot
+            storage/work_progress
+            state/work_progress
           key: ops-state-${{ github.run_id }}
           restore-keys: |
             ops-state-
@@ -278,10 +339,15 @@ jobs:
             exit 0
           fi
           needs_main_ads_config=1
-          if [ "$task" = "bot3-daily-checkin" ]; then
-            needs_main_ads_config=0
-          fi
-          if [ "$task" = "telegram-update" ] && { [ "$bot" = "ads2" ] || [ "$bot" = "bot3" ]; }; then
+          case "$task" in
+            bot3-*)
+              needs_main_ads_config=0
+              ;;
+            work-progress-*)
+              needs_main_ads_config=0
+              ;;
+          esac
+          if [ "$task" = "telegram-update" ] && { [ "$bot" = "ads2" ] || [ "$bot" = "bot3" ] || [ "$bot" = "media" ]; }; then
             needs_main_ads_config=0
           fi
           if [ "$task" = "daily-report" ] && [ "$profile" = "ads2" ]; then
@@ -304,12 +370,38 @@ jobs:
               missing+=("PANCAKE_SHOP_ID")
             fi
           fi
-          if [ "$task" = "bot3-daily-checkin" ] || { [ "$task" = "telegram-update" ] && [ "$bot" = "bot3" ]; }; then
+          if [[ "$task" == bot3-* ]] || { [ "$task" = "telegram-update" ] && [ "$bot" = "bot3" ]; }; then
             for key in BOT3_TELEGRAM_TOKEN BOT3_ALLOWED_USER_ID; do
               if [ -z "${!key}" ]; then
                 missing+=("$key")
               fi
             done
+          fi
+          if [[ "$task" == work-progress-* ]] || { [ "$task" = "telegram-update" ] && [ "$bot" = "media" ]; }; then
+            for key in MEDIA_BOT_TELEGRAM_TOKEN MEDIA_BOT_ALLOWED_USER_ID; do
+              if [ -z "${!key}" ]; then
+                missing+=("$key")
+              fi
+            done
+            if [ "$MEDIA_BOT_WORK_PROGRESS_ENABLED" != "0" ]; then
+              if [ -z "$WORK_PROGRESS_MANAGER_TELEGRAM_IDS" ]; then
+                missing+=("WORK_PROGRESS_MANAGER_TELEGRAM_IDS")
+              fi
+            fi
+            if [ "$MEDIA_BOT_MEDIA_RESEARCH_ENABLED" != "0" ]; then
+              for key in MEDIA_RESEARCH_SERPAPI_API_KEY MEDIA_RESEARCH_CLOUDINARY_CLOUD_NAME MEDIA_RESEARCH_CLOUDINARY_UPLOAD_PRESET; do
+                if [ -z "${!key}" ]; then
+                  missing+=("$key")
+                fi
+              done
+              if [ "$MEDIA_RESEARCH_SHEET_ENABLED" != "0" ]; then
+                for key in MEDIA_RESEARCH_SHEET_SPREADSHEET_ID MEDIA_RESEARCH_SHEET_GID MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_ID MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_SECRET MEDIA_RESEARCH_SHEET_OAUTH_REFRESH_TOKEN; do
+                  if [ -z "${!key}" ]; then
+                    missing+=("$key")
+                  fi
+                done
+              fi
+            fi
           fi
           if [ "$task" = "daily-report" ] && [ "$profile" = "ads2" ]; then
             for key in ADS2_TELEGRAM_BOT_TOKEN ADS2_TELEGRAM_ALLOWED_USER_ID ADS2_META_ACCESS_TOKEN ADS2_META_PAGE_ACCESS_TOKEN ADS2_META_AD_ACCOUNT_ID ADS2_META_PAGE_ID ADS2_PANCAKE_SHOP_ID; do
@@ -383,6 +475,16 @@ jobs:
               args+=("--date" "${{ steps.task.outputs.date }}")
             fi
           fi
+          if [[ "$task" == "bot3-agenda" || "$task" == "bot3-eod" || "$task" == "bot3-task-weekly-summary" ]]; then
+            if [ -n "${{ steps.task.outputs.date }}" ]; then
+              args+=("--date" "${{ steps.task.outputs.date }}")
+            fi
+          fi
+          if [[ "$task" == "work-progress-daily" || "$task" == "work-progress-weekly" || "$task" == "work-progress-monthly" ]]; then
+            if [ -n "${{ steps.task.outputs.date }}" ]; then
+              args+=("--date" "${{ steps.task.outputs.date }}")
+            fi
+          fi
           if [ "$task" = "pancake-td-sync" ]; then
             args+=("--notify" "${{ steps.task.outputs.pancake_notify || 'auto' }}")
           fi
@@ -418,4 +520,8 @@ jobs:
             storage/reports
             storage/reconcile_cod
             storage/assistant_bot
+            storage/media_research
+            state/media_bot
+            storage/work_progress
+            state/work_progress
           key: ops-state-${{ github.run_id }}

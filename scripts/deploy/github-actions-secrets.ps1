@@ -74,6 +74,9 @@ $prefixes = @(
     "REPORT_",
     "DAILY_REPORT_",
     "BOT3_",
+    "MEDIA_BOT_",
+    "MEDIA_RESEARCH_",
+    "WORK_PROGRESS_",
     "RECONCILE_COD_",
     "THAI_DUONG_"
 )

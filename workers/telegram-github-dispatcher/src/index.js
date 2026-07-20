@@ -86,13 +86,16 @@ function shouldDispatch(update, env, botName = "main") {
   const normalizedBot = String(botName || "").trim().toLowerCase();
   const isBot3 = normalizedBot === "bot3";
   const isAds2 = normalizedBot === "ads2";
+  const isMedia = normalizedBot === "media";
   const actorId = actorIdFromUpdate(update);
   const allowedUserId = String(
     isBot3
       ? env.BOT3_ALLOWED_USER_ID || env.TELEGRAM_ALLOWED_USER_ID || ""
       : isAds2
         ? env.ADS2_TELEGRAM_ALLOWED_USER_ID || env.TELEGRAM_ALLOWED_USER_ID || ""
-        : env.TELEGRAM_ALLOWED_USER_ID || "",
+        : isMedia
+          ? env.MEDIA_BOT_ALLOWED_USER_ID || env.TELEGRAM_ALLOWED_USER_ID || ""
+          : env.TELEGRAM_ALLOWED_USER_ID || "",
   ).trim();
   if (allowedUserId && actorId && actorId !== allowedUserId) {
     return false;
@@ -118,7 +121,7 @@ function shouldDispatch(update, env, botName = "main") {
   }
 
   if (chatType === "private") {
-    if (isBot3) {
+    if (isBot3 || isMedia) {
       return true;
     }
     return looksRelevantDirectText(text);
@@ -129,10 +132,15 @@ function shouldDispatch(update, env, botName = "main") {
       ? env.BOT3_ALLOWED_GROUP_CHAT_IDS || env.BOT3_TASK_GROUP_CHAT_ID || ""
       : isAds2
         ? env.ADS2_ALLOWED_GROUP_CHAT_IDS || env.ALLOWED_GROUP_CHAT_IDS
-        : env.ALLOWED_GROUP_CHAT_IDS,
+        : isMedia
+          ? env.MEDIA_BOT_ALLOWED_GROUP_CHAT_IDS || env.WORK_PROGRESS_TELEGRAM_ALLOWLIST_CHANNEL_IDS || ""
+          : env.ALLOWED_GROUP_CHAT_IDS,
   );
   if (!allowedGroupChatIds.has(chatId)) {
     return false;
+  }
+  if (isMedia) {
+    return true;
   }
   const username = isBot3 ? env.BOT3_USERNAME : isAds2 ? env.ADS2_BOT_USERNAME : env.BOT_USERNAME;
   return text.startsWith("/") || hasBotMention(text, username);
@@ -193,9 +201,9 @@ async function dispatchTelegramUpdate(update, env, botName = "main") {
   await dispatchGitHubInputs(
     {
       task: "telegram-update",
-      bot: ["main", "ads2", "bot3"].includes(normalizedBot) ? normalizedBot : "main",
+      bot: ["main", "ads2", "bot3", "media"].includes(normalizedBot) ? normalizedBot : "main",
       update_b64: updateB64,
-      source: "cloudflare-worker",
+      source: `cloudflare-worker-${String(update.update_id || Date.now())}`,
     },
     env,
   );
@@ -255,7 +263,10 @@ function scheduleMarkKey(parts) {
     const runDate = String(parts.run_date || "").trim();
     return profile && slot && runDate ? `${task}:${profile}:${slot}:${runDate}` : "";
   }
-  if (task === "pancake-td-sync") {
+  if (
+    task === "pancake-td-sync"
+    || task === "bot3-event-reminders"
+  ) {
     const bucket = String(parts.bucket || "").trim();
     return bucket ? `${task}:${bucket}` : "";
   }
@@ -274,7 +285,7 @@ function scheduleMarkPartsFromCloud(inputs, scheduledTime) {
       run_date: localRunDate(scheduledTime),
     };
   }
-  if (task === "pancake-td-sync") {
+  if (task === "pancake-td-sync" || task === "bot3-event-reminders") {
     return {
       task,
       bucket: localHalfHourBucket(scheduledTime),
@@ -448,8 +459,8 @@ function scheduledInputsFromCron(cron, scheduledTime) {
           source: "cloudflare-cron",
         },
       ];
-    case "5 2 * * *":
-      return [
+    case "5 2 * * *": {
+      const inputs = [
         {
           task: "token-health",
           source: "cloudflare-cron",
@@ -460,13 +471,31 @@ function scheduledInputsFromCron(cron, scheduledTime) {
           source: "cloudflare-cron",
         },
       ];
+      if (parts.day === 1) {
+        inputs.push({
+          task: "work-progress-monthly",
+          source: "cloudflare-cron",
+        });
+      }
+      return inputs;
+    }
     case "5 8 * * 1,5,6": {
       const dayOfWeek = new Date(scheduledTime || Date.now()).getUTCDay();
       if (dayOfWeek === 6) {
-        return [{
-          task: "reconcile-weekly",
-          source: "cloudflare-cron",
-        }];
+        return [
+          {
+            task: "reconcile-weekly",
+            source: "cloudflare-cron",
+          },
+          {
+            task: "bot3-task-weekly-summary",
+            source: "cloudflare-cron",
+          },
+          {
+            task: "work-progress-weekly",
+            source: "cloudflare-cron",
+          },
+        ];
       }
       return [{
         task: "reconcile-cash-in",
@@ -487,6 +516,10 @@ function scheduledInputsFromCron(cron, scheduledTime) {
           slot: "evening",
           source: "cloudflare-cron",
         },
+        {
+          task: "work-progress-daily",
+          source: "cloudflare-cron",
+        },
       ];
     default:
       return [];
@@ -500,12 +533,15 @@ async function sendAck(update, env, botName = "main") {
   const normalizedBot = String(botName || "").trim().toLowerCase();
   const isBot3 = normalizedBot === "bot3";
   const isAds2 = normalizedBot === "ads2";
+  const isMedia = normalizedBot === "media";
   const token = String(
     isBot3
       ? env.BOT3_TELEGRAM_TOKEN || ""
       : isAds2
         ? env.ADS2_TELEGRAM_BOT_TOKEN || ""
-        : env.TELEGRAM_BOT_TOKEN || "",
+        : isMedia
+          ? env.MEDIA_BOT_TELEGRAM_TOKEN || ""
+          : env.TELEGRAM_BOT_TOKEN || "",
   ).trim();
   if (!token) {
     return;
@@ -550,10 +586,12 @@ export default {
         ? "bot3"
         : url.pathname === "/telegram/webhook/ads2"
           ? "ads2"
-          : "main";
+          : url.pathname === "/telegram/webhook/media"
+            ? "media"
+            : "main";
     if (
       request.method !== "POST"
-      || !["/telegram/webhook", "/telegram/webhook/ads2", "/telegram/webhook/bot3"].includes(url.pathname)
+      || !["/telegram/webhook", "/telegram/webhook/ads2", "/telegram/webhook/bot3", "/telegram/webhook/media"].includes(url.pathname)
     ) {
       return jsonResponse({ ok: false, error: "not_found" }, 404);
     }
@@ -563,6 +601,8 @@ export default {
         ? env.BOT3_TELEGRAM_WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
         : botName === "ads2"
           ? env.ADS2_TELEGRAM_WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
+          : botName === "media"
+            ? env.MEDIA_BOT_TELEGRAM_WEBHOOK_SECRET || env.TELEGRAM_WEBHOOK_SECRET || ""
         : env.TELEGRAM_WEBHOOK_SECRET || "",
     ).trim();
     const providedSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
