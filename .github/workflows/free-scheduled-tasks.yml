@@ -76,7 +76,8 @@ on:
           - bot3
 
 concurrency:
-  group: free-scheduled-tasks
+  # Keep simultaneous cron dispatches from replacing each other in GitHub's single pending slot.
+  group: free-scheduled-tasks-${{ github.event.inputs.task || 'none' }}-${{ github.event.inputs.profile || 'main' }}-${{ github.event.inputs.bot || 'main' }}-${{ github.event.inputs.slot || 'none' }}
   cancel-in-progress: false
 
 jobs:
