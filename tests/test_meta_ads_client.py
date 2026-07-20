@@ -1620,6 +1620,35 @@ def test_get_spend_for_range_uses_account_total_without_time_increment() -> None
     assert result["date_stop"] == "2026-05-31"
 
 
+def test_get_spend_for_range_retries_page_token_when_ads_token_expired() -> None:
+    client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+    used_tokens: list[str | None] = []
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = method, params, data
+        used_tokens.append(access_token)
+        assert path == "/act_1/insights"
+        if access_token == "dummy":
+            raise MetaApiError("Meta API loi (400): The token has expired.")
+        return {
+            "data": [
+                {
+                    "account_id": "act_1",
+                    "date_start": "2026-07-19",
+                    "date_stop": "2026-07-19",
+                    "spend": "2000000",
+                }
+            ]
+        }
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    result = client.get_spend_for_range(date(2026, 7, 19), date(2026, 7, 19), "Asia/Ho_Chi_Minh")
+
+    assert result["spend_vnd"] == 2000000
+    assert used_tokens == ["dummy", "page_dummy"]
+
+
 def test_get_ad_insights_for_range_requests_ad_level_action_values() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
     captured: dict[str, object] = {}

@@ -572,15 +572,13 @@ class MetaAdsClient:
             "since": start_date.isoformat(),
             "until": end_date.isoformat(),
         }
-        payload = self._request(
-            "GET",
+        payload = self._request_media_read(
             f"/{self.ad_account_id}/insights",
             params={
                 "fields": "spend,account_id,date_start,date_stop",
                 "level": "account",
                 "time_range": json.dumps(time_range, ensure_ascii=False),
             },
-            access_token=self.settings.meta_access_token,
         )
         data = payload.get("data", [])
         if not isinstance(data, list) or not data:
