@@ -403,13 +403,13 @@ def try_parse_pancake_td_sync_command(text: str) -> tuple[bool, str | None]:
         sanitized = re.sub(r"[^a-z0-9]", "", raw_code.lower())
         if re.fullmatch(r"[a-z]{2,}\d{2,}", sanitized):
             return True, sanitized.upper()
-        if re.fullmatch(r"\d{6,}", sanitized):
+        if re.fullmatch(r"\d+", sanitized):
             return True, sanitized
 
     raise CommandParseError(
         "Cú pháp lên đơn chưa đúng. Anh dùng:\n"
         "lên đơn hôm nay\n"
-        "hoặc: lên đơn JCT310"
+        "hoặc: lên đơn JCT310 / lên đơn 146"
     )
 
 

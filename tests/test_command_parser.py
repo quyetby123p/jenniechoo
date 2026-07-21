@@ -329,6 +329,10 @@ def test_try_parse_pancake_td_sync_command_order_code() -> None:
     assert try_parse_pancake_td_sync_command("lên đơn JCT310") == (True, "JCT310")
 
 
+def test_try_parse_pancake_td_sync_command_numeric_order_code() -> None:
+    assert try_parse_pancake_td_sync_command("lên đơn 146") == (True, "146")
+
+
 def test_try_parse_pancake_td_sync_command_order_code_without_space() -> None:
     assert try_parse_pancake_td_sync_command("lên đơnJCT310") == (True, "JCT310")
 

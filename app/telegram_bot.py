@@ -175,7 +175,7 @@ class TelegramAdsBot:
             "Khi cần xem báo cáo ngày: /report hoặc /report YYYY-MM-DD\n"
             "Khi cần phân tích media ADS2: /media_perf VXV011 7d hoặc phân tích media 7 ngày\n"
             "Khi cần đối soát COD: /reconcile cod hoặc /reconcile cod YYYY-MM-DD\n"
-            "Khi cần lên đơn Thái Dương thủ công: lên đơn hôm nay hoặc lên đơn JCT310"
+            "Khi cần lên đơn Thái Dương thủ công: lên đơn hôm nay, lên đơn JCT310 hoặc lên đơn 146"
         )
 
     async def handle_ads_command(self, message: Message) -> None:

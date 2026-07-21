@@ -5259,3 +5259,36 @@ def test_handle_text_message_manual_pancake_td_sync_runs_for_order_code() -> Non
     assert fake_sync.sync_order_code_calls == ["JCT310"]
     assert bot._bot is not None
     assert "Đồng bộ thủ công Pancake -> Thái Dương (mã JCT310)" in bot._bot.messages[-1]["text"]
+
+
+def test_handle_text_message_manual_pancake_td_sync_runs_for_numeric_order_code() -> None:
+    meta = FakeMeta()
+    storage = FakeStorage()
+    rollback = FakeRollback()
+    bot = _build_bot(meta, storage, rollback)
+    bot.settings = replace(
+        bot.settings,
+        pancake_td_sync_enabled=True,
+    )
+    fake_sync = FakePancakeTdSync(report={"ok": True, "created": 1, "failed": 0, "notify": True})
+    bot.pancake_td_sync = fake_sync
+
+    class _ManualSyncByNumericCodeMessage:
+        def __init__(self) -> None:
+            self.from_user = SimpleNamespace(id=1)
+            self.chat = SimpleNamespace(id=1)
+            self.text = "lên đơn 146"
+            self.answers: list[str] = []
+
+        async def answer(self, text: str, reply_markup=None) -> None:  # noqa: ANN001
+            del reply_markup
+            self.answers.append(text)
+
+    message = _ManualSyncByNumericCodeMessage()
+    asyncio.run(bot.handle_text_message(message))
+
+    assert "Đang lên đơn Thái Dương cho mã 146" in message.answers[-1]
+    assert fake_sync.sync_today_calls == 0
+    assert fake_sync.sync_order_code_calls == ["146"]
+    assert bot._bot is not None
+    assert "Đồng bộ thủ công Pancake -> Thái Dương (mã 146)" in bot._bot.messages[-1]["text"]
