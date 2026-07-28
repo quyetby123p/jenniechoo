@@ -3,7 +3,13 @@
 {% block pre_filter %}
 <div class="brand-card p-3 mb-3">
   <h2 class="h6 mb-3">Báo cáo ngày</h2>
-  <div class="kpi-grid kpi-grid-quick">
+  <div
+    class="kpi-grid kpi-grid-quick"
+    id="quick-kpi-grid"
+    data-overall-url="{{ summary_cards.overall_api_url }}"
+    data-overall-start="{{ summary_cards.overall_start_label }}"
+    data-overall-end="{{ summary_cards.overall_end_label }}"
+  >
     <div class="metric-card p-3">
       <div class="label">Đơn chốt hôm nay</div>
       <div class="value">{{ "{:,}".format(summary_cards.closed_today) }}</div>
@@ -26,18 +32,18 @@
     </div>
     <div class="metric-card p-3">
       <div class="label">Đơn chờ (Tổng)</div>
-      <div class="value text-danger">{{ "{:,}".format(summary_cards.waiting_total) }}</div>
-      <small class="text-muted">Tổng đơn: {{ "{:,}".format(summary_cards.waiting_total) }}</small>
+      <div class="value text-danger" data-overall-metric="waiting_orders">{{ "{:,}".format(summary_cards.waiting_total) }}</div>
+      <small class="text-muted" data-overall-note="waiting_orders">Đang tải tổng từ {{ summary_cards.overall_start_label }}...</small>
     </div>
     <div class="metric-card p-3">
       <div class="label">Đơn đang gửi (Tổng)</div>
-      <div class="value text-primary">{{ "{:,}".format(summary_cards.shipping_total) }}</div>
-      <small class="text-muted">Tổng đơn: {{ "{:,}".format(summary_cards.shipping_total) }}</small>
+      <div class="value text-primary" data-overall-metric="shipping_orders">{{ "{:,}".format(summary_cards.shipping_total) }}</div>
+      <small class="text-muted" data-overall-note="shipping_orders">Đang tải tổng từ {{ summary_cards.overall_start_label }}...</small>
     </div>
     <div class="metric-card p-3">
       <div class="label">Đơn chờ đối soát (Tổng)</div>
-      <div class="value text-danger">{{ "{:,}".format(summary_cards.pending_reconcile_total) }}</div>
-      <small class="text-muted">Tổng đơn: {{ "{:,}".format(summary_cards.pending_reconcile_total) }}</small>
+      <div class="value text-danger" data-overall-metric="pending_reconcile_orders">{{ "{:,}".format(summary_cards.pending_reconcile_total) }}</div>
+      <small class="text-muted" data-overall-note="pending_reconcile_orders">Đang tải tổng từ {{ summary_cards.overall_start_label }}...</small>
     </div>
   </div>
 </div>
@@ -189,4 +195,50 @@
     </table>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    const grid = document.getElementById("quick-kpi-grid");
+    if (!grid || !grid.dataset.overallUrl) {
+      return;
+    }
+    const formatter = new Intl.NumberFormat("en-US");
+    const notes = Array.from(grid.querySelectorAll("[data-overall-note]"));
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(function () {
+      controller.abort();
+    }, 45000);
+
+    fetch(grid.dataset.overallUrl, { signal: controller.signal })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+        return response.json();
+      })
+      .then(function (payload) {
+        const metrics = payload && payload.metrics ? payload.metrics : {};
+        ["waiting_orders", "shipping_orders", "pending_reconcile_orders"].forEach(function (key) {
+          const valueEl = grid.querySelector('[data-overall-metric="' + key + '"]');
+          const noteEl = grid.querySelector('[data-overall-note="' + key + '"]');
+          const value = Number(metrics[key] || 0);
+          if (valueEl) {
+            valueEl.textContent = formatter.format(value);
+          }
+          if (noteEl) {
+            noteEl.textContent = "Tổng đơn: " + formatter.format(value);
+          }
+        });
+      })
+      .catch(function () {
+        notes.forEach(function (noteEl) {
+          noteEl.textContent = "Tổng tải chậm, đang hiển thị kỳ lọc";
+        });
+      })
+      .finally(function () {
+        window.clearTimeout(timeoutId);
+      });
+  })();
+</script>
 {% endblock %}

@@ -49,6 +49,7 @@
   "pending_reconcile_cashflow_paid_statuses": [
     "PAID_TO_SENDER"
   ],
+  "pending_reconcile_live_cashflow_refs_enabled": false,
   "pending_reconcile_td_to_pancake_status_codes": {
     "SUCCESS": [3],
     "BEING_RETURNED": [3, 4, 5],

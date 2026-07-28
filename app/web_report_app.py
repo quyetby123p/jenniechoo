@@ -70,18 +70,31 @@ def create_app(
         snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
         missing_overview = _build_missing_overview(snapshot)
         today = datetime.now(_resolve_timezone(current_settings.app_timezone)).date()
-        today_snapshot = current_report_service.get_snapshot(today, today)
+        if period["start_date"] == today and period["end_date"] == today:
+            today_snapshot = snapshot
+        else:
+            today_snapshot = current_report_service.get_snapshot(today, today)
         overall_start = min(REPORT_BASELINE_DATE, today)
-        overall_snapshot = current_report_service.get_snapshot(overall_start, today)
+        overall_query_string = urlencode(
+            {
+                "mode": "range",
+                "start_date": overall_start.isoformat(),
+                "end_date": today.isoformat(),
+            }
+        )
+        snapshot_metrics = snapshot.get("metrics") if isinstance(snapshot.get("metrics"), dict) else {}
         summary_cards = {
             "closed_today": int((today_snapshot.get("metrics") or {}).get("closed_orders") or 0),
             "revenue_today_thb_text": str((today_snapshot.get("metrics") or {}).get("revenue_total_thb_text") or "0"),
             "revenue_today_vnd_text": str((today_snapshot.get("metrics") or {}).get("revenue_total_vnd_text") or "0"),
             "ads_spend_today_vnd_text": str((today_snapshot.get("metrics") or {}).get("ads_spend_vnd_text") or "0"),
             "roas_today_text": str((today_snapshot.get("metrics") or {}).get("roas_text") or "0.00x"),
-            "waiting_total": int((overall_snapshot.get("metrics") or {}).get("waiting_orders") or 0),
-            "shipping_total": int((overall_snapshot.get("metrics") or {}).get("shipping_orders") or 0),
-            "pending_reconcile_total": int((overall_snapshot.get("metrics") or {}).get("pending_reconcile_orders") or 0),
+            "waiting_total": int(snapshot_metrics.get("waiting_orders") or 0),
+            "shipping_total": int(snapshot_metrics.get("shipping_orders") or 0),
+            "pending_reconcile_total": int(snapshot_metrics.get("pending_reconcile_orders") or 0),
+            "overall_api_url": f"/api/v1/snapshot?{overall_query_string}",
+            "overall_start_label": overall_start.strftime("%d-%m-%Y"),
+            "overall_end_label": today.strftime("%d-%m-%Y"),
         }
         return render_template(
             "web_report/dashboard.html",

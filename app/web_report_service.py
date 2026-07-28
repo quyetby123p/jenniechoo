@@ -551,7 +551,7 @@ class WebReportService:
         cashflow_paid_statuses = self._to_text_set(
             status_cfg.get("pending_reconcile_cashflow_paid_statuses", ["PAID_TO_SENDER"])
         )
-        cashflow_refs = self._load_reconcile_cashflow_refs()
+        cashflow_refs = self._load_reconcile_cashflow_refs(status_cfg=status_cfg)
         pancake_detail_status_cache: dict[str, int | None] = {}
         pending_rows: list[dict[str, Any]] = []
 
@@ -723,7 +723,7 @@ class WebReportService:
         )
         return any(self._normalize_text(ref) in cashflow_refs for ref in refs)
 
-    def _load_reconcile_cashflow_refs(self) -> set[str]:
+    def _load_reconcile_cashflow_refs(self, *, status_cfg: dict[str, Any] | None = None) -> set[str]:
         now_ts = time.time()
         with self._cache_lock:
             cached = self._cashflow_refs_cache
@@ -744,7 +744,10 @@ class WebReportService:
                     for record in records:
                         if isinstance(record, dict):
                             refs.update(self._extract_reconcile_record_refs(record))
-        refs.update(self._fetch_live_reconcile_cashflow_refs())
+        cfg = status_cfg if isinstance(status_cfg, dict) else {}
+        live_refs_enabled = self._config_bool(cfg.get("pending_reconcile_live_cashflow_refs_enabled"), default=False)
+        if live_refs_enabled:
+            refs.update(self._fetch_live_reconcile_cashflow_refs())
         with self._cache_lock:
             self._cashflow_refs_cache = (time.time(), set(refs))
         return refs
@@ -1629,6 +1632,7 @@ class WebReportService:
             "pending_reconcile_td_order_shipping_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
             "pending_reconcile_pancake_status_codes": [2],
             "pending_reconcile_cashflow_paid_statuses": ["PAID_TO_SENDER"],
+            "pending_reconcile_live_cashflow_refs_enabled": False,
             "pending_reconcile_td_to_pancake_status_codes": {
                 "SUCCESS": [3],
                 "BEING_RETURNED": [3, 4, 5],
@@ -1879,6 +1883,19 @@ class WebReportService:
             if text:
                 result.add(text)
         return result
+
+    @staticmethod
+    def _config_bool(value: Any, *, default: bool = False) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        normalized = WebReportService._normalize_text(str(value))
+        if normalized in {"1", "true", "yes", "y", "on", "bat", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", "tat", "disabled"}:
+            return False
+        return default
 
     @staticmethod
     def _serialize_size_totals(size_map: Any) -> list[dict[str, Any]]:
