@@ -572,6 +572,86 @@ def test_ensure_sheet_header_deletes_legacy_metadata_and_ad_columns(tmp_path: Pa
     assert updated_ranges == ["'Media'!A1:W1"]
 
 
+def test_ensure_sheet_header_inserts_reactions_column_for_legacy_metrics(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    service = MediaPerformanceService(
+        settings=_settings_with_sheet(tmp_path),
+        logger=logging.getLogger("test"),
+        meta_client=FakeMeta(),  # type: ignore[arg-type]
+        pancake_client=FakePancake(),  # type: ignore[arg-type]
+    )
+    old_header = [
+        header for header in MEDIA_PERFORMANCE_SHEET_HEADERS if header != "REACTIONS / THẢ CẢM XÚC"
+    ]
+    batch_payloads: list[dict[str, Any]] = []
+    updated_ranges: list[str] = []
+
+    monkeypatch.setattr(service, "_sheet_values_get", lambda **_: {"values": [old_header]})
+    monkeypatch.setattr(service, "_sheet_request_json", lambda *_, **kwargs: batch_payloads.append(kwargs["data"]) or {})
+    monkeypatch.setattr(service, "_sheet_values_update", lambda *, write_range, **_: updated_ranges.append(write_range))
+
+    service._ensure_sheet_header(spreadsheet_id="sheet_123", sheet_title="Media", headers={})
+
+    insert_range = batch_payloads[0]["requests"][0]["insertDimension"]["range"]
+    assert insert_range["dimension"] == "COLUMNS"
+    assert insert_range["startIndex"] == 16
+    assert insert_range["endIndex"] == 17
+    assert updated_ranges == ["'Media'!A1:W1"]
+
+
+def test_ensure_sheet_header_repairs_shifted_reactions_data(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    service = MediaPerformanceService(
+        settings=_settings_with_sheet(tmp_path),
+        logger=logging.getLogger("test"),
+        meta_client=FakeMeta(),  # type: ignore[arg-type]
+        pancake_client=FakePancake(),  # type: ignore[arg-type]
+    )
+    shifted_row = [
+        "2026-07-19",
+        "2026-07-25",
+        "VXV011",
+        "media",
+        "649228828282105_111",
+        "649228828282105_111",
+        "https://www.facebook.com/reel/1",
+        "SCALE",
+        "93",
+        "1.215.973 đ",
+        "9",
+        "135.108 đ",
+        "4",
+        "303.993 đ",
+        "2.679.313 đ",
+        "2,2",
+        "2031",
+        "3946",
+        "171",
+        "7.111 đ",
+        "5,68",
+        "459.172 đ",
+    ]
+    batch_payloads: list[dict[str, Any]] = []
+    updated_ranges: list[str] = []
+
+    def fake_values_get(*, read_range: str, **_: Any) -> dict[str, Any]:
+        if "A1:AE1" in read_range:
+            return {"values": [MEDIA_PERFORMANCE_SHEET_HEADERS]}
+        return {"values": [shifted_row]}
+
+    monkeypatch.setattr(service, "_sheet_values_get", fake_values_get)
+    monkeypatch.setattr(service, "_sheet_request_json", lambda *_, **kwargs: batch_payloads.append(kwargs["data"]) or {})
+    monkeypatch.setattr(service, "_sheet_values_update", lambda *, write_range, **_: updated_ranges.append(write_range))
+
+    service._ensure_sheet_header(spreadsheet_id="sheet_123", sheet_title="Media", headers={})
+
+    insert_range = batch_payloads[0]["requests"][0]["insertDimension"]["range"]
+    assert insert_range["startIndex"] == 16
+    assert insert_range["endIndex"] == 17
+    trailing_delete_range = batch_payloads[1]["requests"][0]["deleteDimension"]["range"]
+    assert trailing_delete_range["startIndex"] == 23
+    assert trailing_delete_range["endIndex"] == 24
+    assert updated_ranges == ["'Media'!A1:W1"]
+
+
 def test_format_sheet_header_bolds_display_row(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
     service = MediaPerformanceService(
         settings=_settings_with_sheet(tmp_path),

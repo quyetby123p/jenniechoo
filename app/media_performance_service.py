@@ -106,6 +106,13 @@ MEDIA_PERFORMANCE_SHEET_HEADERS = [
     "CTR / TỶ LỆ CLICK",
     "CPM / CHI PHÍ 1.000 HIỂN THỊ",
 ]
+_REACTIONS_COLUMN_INDEX = MEDIA_PERFORMANCE_SHEET_KEYS.index("reactions")
+_LEGACY_MEDIA_PERFORMANCE_SHEET_KEYS_WITHOUT_REACTIONS = [
+    key for key in MEDIA_PERFORMANCE_SHEET_KEYS if key != "reactions"
+]
+_LEGACY_MEDIA_PERFORMANCE_SHEET_HEADERS_WITHOUT_REACTIONS = [
+    header for header in MEDIA_PERFORMANCE_SHEET_HEADERS if header != "REACTIONS / THẢ CẢM XÚC"
+]
 
 
 class MediaPerformanceService:
@@ -1220,6 +1227,23 @@ class MediaPerformanceService:
                 end_index=legacy_ad_start + 6,
             )
             first_row = list(first_row[:legacy_ad_start]) + list(first_row[legacy_ad_start + 6 :])
+        if self._missing_reactions_sheet_column(first_row) or self._has_shifted_reactions_sheet_data(
+            spreadsheet_id=spreadsheet_id,
+            sheet_title=sheet_title,
+            headers=headers,
+            first_row=first_row,
+        ):
+            self._insert_sheet_columns(
+                spreadsheet_id=spreadsheet_id,
+                headers=headers,
+                start_index=_REACTIONS_COLUMN_INDEX,
+                end_index=_REACTIONS_COLUMN_INDEX + 1,
+            )
+            first_row = (
+                list(first_row[:_REACTIONS_COLUMN_INDEX])
+                + [""]
+                + list(first_row[_REACTIONS_COLUMN_INDEX:])
+            )
         if len(first_row) > len(MEDIA_PERFORMANCE_SHEET_HEADERS):
             self._delete_trailing_sheet_columns(
                 spreadsheet_id=spreadsheet_id,
@@ -1227,6 +1251,7 @@ class MediaPerformanceService:
                 start_index=len(MEDIA_PERFORMANCE_SHEET_HEADERS),
                 end_index=len(first_row),
             )
+            first_row = list(first_row[: len(MEDIA_PERFORMANCE_SHEET_HEADERS)])
         current_header = [str(cell or "").strip() for cell in first_row[: len(MEDIA_PERFORMANCE_SHEET_HEADERS)]]
         if current_header != MEDIA_PERFORMANCE_SHEET_HEADERS:
             self._sheet_values_update(
@@ -1524,6 +1549,69 @@ class MediaPerformanceService:
         return None
 
     @staticmethod
+    def _missing_reactions_sheet_column(header_row: list[Any]) -> bool:
+        normalized = [str(cell or "").strip() for cell in header_row]
+        return normalized[: len(_LEGACY_MEDIA_PERFORMANCE_SHEET_HEADERS_WITHOUT_REACTIONS)] in (
+            _LEGACY_MEDIA_PERFORMANCE_SHEET_HEADERS_WITHOUT_REACTIONS,
+            _LEGACY_MEDIA_PERFORMANCE_SHEET_KEYS_WITHOUT_REACTIONS,
+        )
+
+    def _has_shifted_reactions_sheet_data(
+        self,
+        *,
+        spreadsheet_id: str,
+        sheet_title: str,
+        headers: dict[str, str],
+        first_row: list[Any],
+    ) -> bool:
+        current_header = [str(cell or "").strip() for cell in first_row[: len(MEDIA_PERFORMANCE_SHEET_HEADERS)]]
+        if current_header != MEDIA_PERFORMANCE_SHEET_HEADERS:
+            return False
+        payload = self._sheet_values_get(
+            spreadsheet_id=spreadsheet_id,
+            read_range=f"'{self._escape_sheet_title(sheet_title)}'!A2:{self._sheet_column_label(len(MEDIA_PERFORMANCE_SHEET_HEADERS))}21",
+            headers=headers,
+            params={"majorDimension": "ROWS"},
+        )
+        values = payload.get("values", []) if isinstance(payload, dict) else []
+        if not isinstance(values, list):
+            return False
+        return self._has_shifted_reactions_metric_rows(values)
+
+    @staticmethod
+    def _has_shifted_reactions_metric_rows(rows: list[Any]) -> bool:
+        for row in rows:
+            if not isinstance(row, list):
+                continue
+            level = str(row[3] if len(row) > 3 else "").strip().lower()
+            if level not in {"code", "media", "ad"}:
+                continue
+            reactions_value = str(row[_REACTIONS_COLUMN_INDEX] if len(row) > _REACTIONS_COLUMN_INDEX else "").strip()
+            reach_value = str(row[_REACTIONS_COLUMN_INDEX + 1] if len(row) > _REACTIONS_COLUMN_INDEX + 1 else "").strip()
+            shifted_clicks_value = str(
+                row[_REACTIONS_COLUMN_INDEX + 3] if len(row) > _REACTIONS_COLUMN_INDEX + 3 else ""
+            ).strip()
+            if (
+                reactions_value
+                and reach_value
+                and MediaPerformanceService._looks_like_integer_cell(reactions_value)
+                and MediaPerformanceService._looks_like_integer_cell(reach_value)
+                and MediaPerformanceService._looks_like_currency_cell(shifted_clicks_value)
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _looks_like_integer_cell(value: str) -> bool:
+        text = str(value or "").strip().replace(".", "").replace(",", "")
+        return text.isdigit()
+
+    @staticmethod
+    def _looks_like_currency_cell(value: str) -> bool:
+        text = str(value or "").strip().lower()
+        return "đ" in text or "vnd" in text
+
+    @staticmethod
     def _dedupe_key_from_visible_sheet_row(row: list[Any]) -> str:
         start_date = str(row[0] if len(row) > 0 else "").strip()
         end_date = str(row[1] if len(row) > 1 else "").strip()
@@ -1658,6 +1746,37 @@ class MediaPerformanceService:
                                 "startIndex": start_index,
                                 "endIndex": end_index,
                             }
+                        }
+                    }
+                ]
+            },
+        )
+
+    def _insert_sheet_columns(
+        self,
+        *,
+        spreadsheet_id: str,
+        headers: dict[str, str],
+        start_index: int,
+        end_index: int,
+    ) -> None:
+        if end_index <= start_index:
+            return
+        self._sheet_request_json(
+            "POST",
+            f"{_SHEETS_API_BASE}/{spreadsheet_id}:batchUpdate",
+            headers=headers,
+            data={
+                "requests": [
+                    {
+                        "insertDimension": {
+                            "range": {
+                                "sheetId": int(self.settings.media_analytics_sheet_gid),
+                                "dimension": "COLUMNS",
+                                "startIndex": start_index,
+                                "endIndex": end_index,
+                            },
+                            "inheritFromBefore": True,
                         }
                     }
                 ]
