@@ -93,6 +93,7 @@ class FakeMeta:
                     {"action_type": "onsite_conversion.messaging_first_reply", "value": "9"},
                     {"action_type": "omni_purchase", "value": "2"},
                     {"action_type": "video_view", "value": "500"},
+                    {"action_type": "post_reaction", "value": "7"},
                 ],
                 "action_values": [
                     {"action_type": "omni_purchase", "value": "500000"},
@@ -111,6 +112,7 @@ class FakeMeta:
                 "actions": [
                     {"action_type": "onsite_conversion.messaging_conversation_started_7d", "value": "1"},
                     {"action_type": "onsite_conversion.total_messaging_connection", "value": "2"},
+                    {"action_type": "post_reaction", "value": "3"},
                 ],
             },
             {
@@ -125,6 +127,7 @@ class FakeMeta:
                 "clicks": "0",
                 "actions": [
                     {"action_type": "omni_purchase", "value": "1"},
+                    {"action_type": "post_reaction", "value": "2"},
                 ],
                 "action_values": [
                     {"action_type": "omni_purchase", "value": "300000"},
@@ -252,15 +255,18 @@ def test_generate_report_groups_by_code_then_media_and_adds_meta_revenue(tmp_pat
     codes = {item["code"]: item for item in report["codes"]}
     assert codes["VXV011"]["totals"]["spend_vnd"] == 150000
     assert codes["VXV011"]["totals"]["messages"] == 11
+    assert codes["VXV011"]["totals"]["reactions"] == 10
     assert codes["VXV011"]["totals"]["order_count"] == 2
     assert codes["VXV011"]["revenue"]["revenue_vnd"] == 500000
     assert codes["VXV011"]["revenue"]["order_count"] == 2
     assert codes["VXV011"]["revenue"]["source"] == "meta_insights"
     assert codes["VXV011"]["media_count"] == 1
+    assert codes["VXV011"]["media"][0]["totals"]["reactions"] == 10
     assert codes["VXV011"]["media"][0]["totals"]["revenue_vnd"] == 500000
     assert codes["VXV011"]["media"][0]["roas"] == 3.33
     assert len(codes["VXV011"]["media"][0]["ads"]) == 2
     assert codes["VXV012"]["totals"]["spend_vnd"] == 80000
+    assert codes["VXV012"]["totals"]["reactions"] == 2
     assert codes["VXV012"]["revenue"]["revenue_vnd"] == 300000
 
     messages = service.build_messages(report)
@@ -307,6 +313,7 @@ def test_sync_report_to_sheet_upserts_media_rows_only(tmp_path: Path, monkeypatc
                     "spend_vnd": 150000,
                     "messages": 11,
                     "views": 500,
+                    "reactions": 17,
                     "clicks": 60,
                     "ctr": 4.0,
                     "cpc_vnd": 2500,
@@ -330,6 +337,7 @@ def test_sync_report_to_sheet_upserts_media_rows_only(tmp_path: Path, monkeypatc
                             "spend_vnd": 150000,
                             "messages": 11,
                             "views": 500,
+                            "reactions": 17,
                             "clicks": 60,
                             "ctr": 4.0,
                             "cpc_vnd": 2500,
@@ -351,6 +359,7 @@ def test_sync_report_to_sheet_upserts_media_rows_only(tmp_path: Path, monkeypatc
                                     "spend_vnd": 100000,
                                     "messages": 10,
                                     "views": 500,
+                                    "reactions": 7,
                                     "clicks": 50,
                                     "ctr": 5.0,
                                     "cpc_vnd": 2000,
@@ -398,7 +407,7 @@ def test_sync_report_to_sheet_upserts_media_rows_only(tmp_path: Path, monkeypatc
     assert len(updated_values) == len(MEDIA_PERFORMANCE_SHEET_KEYS)
     assert str(updated_values[3]).strip().lower() == "media"
     assert updated_values[6] == "https://www.facebook.com/p/111"
-    assert updated_values[9:22] == [
+    assert updated_values[9:23] == [
         150000,
         11,
         13636,
@@ -406,6 +415,7 @@ def test_sync_report_to_sheet_upserts_media_rows_only(tmp_path: Path, monkeypatc
         150000,
         163000,
         1.09,
+        17,
         1200,
         500,
         60,
@@ -437,6 +447,7 @@ def test_sheet_headers_are_bilingual_uppercase_and_metric_ordered() -> None:
         "COST_PER_ORDER / CHI PHÍ TB/ĐƠN",
         "REVENUE / DOANH THU",
         "ROAS / TỶ SUẤT DOANH THU",
+        "REACTIONS / THẢ CẢM XÚC",
         "REACH / TIẾP CẬN",
         "VIEWS / LƯỢT XEM",
         "CLICKS / LƯỢT CLICK",
@@ -463,6 +474,7 @@ def test_sheet_headers_are_bilingual_uppercase_and_metric_ordered() -> None:
         "cost_per_order_vnd",
         "revenue_vnd",
         "roas",
+        "reactions",
         "reach",
         "views",
         "clicks",
@@ -557,7 +569,7 @@ def test_ensure_sheet_header_deletes_legacy_metadata_and_ad_columns(tmp_path: Pa
     assert ad_delete_range["dimension"] == "COLUMNS"
     assert ad_delete_range["startIndex"] == 9
     assert ad_delete_range["endIndex"] == 15
-    assert updated_ranges == ["'Media'!A1:V1"]
+    assert updated_ranges == ["'Media'!A1:W1"]
 
 
 def test_format_sheet_header_bolds_display_row(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001

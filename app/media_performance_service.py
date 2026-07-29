@@ -52,6 +52,9 @@ _VIEW_ACTION_MARKERS = (
     "video_view",
     "thruplay",
 )
+_REACTION_ACTION_MARKERS = (
+    "post_reaction",
+)
 _SHEETS_API_BASE = "https://sheets.googleapis.com/v4/spreadsheets"
 MEDIA_PERFORMANCE_SHEET_KEYS = [
     "start_date",
@@ -70,6 +73,7 @@ MEDIA_PERFORMANCE_SHEET_KEYS = [
     "cost_per_order_vnd",
     "revenue_vnd",
     "roas",
+    "reactions",
     "reach",
     "views",
     "clicks",
@@ -94,6 +98,7 @@ MEDIA_PERFORMANCE_SHEET_HEADERS = [
     "COST_PER_ORDER / CHI PHÍ TB/ĐƠN",
     "REVENUE / DOANH THU",
     "ROAS / TỶ SUẤT DOANH THU",
+    "REACTIONS / THẢ CẢM XÚC",
     "REACH / TIẾP CẬN",
     "VIEWS / LƯỢT XEM",
     "CLICKS / LƯỢT CLICK",
@@ -549,6 +554,7 @@ class MediaPerformanceService:
         views = self._sum_actions(row.get("actions"), _VIEW_ACTION_MARKERS)
         views += self._sum_actions(row.get("video_play_actions"), _VIEW_ACTION_MARKERS)
         views += self._sum_actions(row.get("video_thruplay_watched_actions"), _VIEW_ACTION_MARKERS)
+        reactions = self._sum_actions(row.get("actions"), _REACTION_ACTION_MARKERS)
         ctr = round((clicks / impressions) * 100, 2) if impressions > 0 and clicks > 0 else 0.0
         cpc_vnd = int(round(spend_vnd / clicks)) if clicks > 0 else 0
         cpm_vnd = int(round((spend_vnd / impressions) * 1000)) if impressions > 0 else 0
@@ -563,6 +569,7 @@ class MediaPerformanceService:
             "order_count": order_count,
             "revenue_vnd": revenue_vnd,
             "views": views,
+            "reactions": reactions,
             "ctr": ctr,
             "cpc_vnd": cpc_vnd,
             "cpm_vnd": cpm_vnd,
@@ -580,6 +587,7 @@ class MediaPerformanceService:
             "order_count",
             "revenue_vnd",
             "views",
+            "reactions",
         ):
             target[key] = self._to_int(target.get(key)) + self._to_int(source.get(key))
         impressions = self._to_int(target.get("impressions"))
@@ -602,6 +610,7 @@ class MediaPerformanceService:
             "order_count": 0,
             "revenue_vnd": 0,
             "views": 0,
+            "reactions": 0,
             "ctr": 0.0,
             "cpc_vnd": 0,
             "cpm_vnd": 0,
@@ -1023,6 +1032,7 @@ class MediaPerformanceService:
             "cost_per_order_vnd": int(round(spend_vnd / order_count_int)) if order_count_int > 0 else 0,
             "revenue_vnd": revenue_vnd,
             "roas": roas,
+            "reactions": self._to_int(totals.get("reactions")),
             "reach": self._to_int(totals.get("reach")),
             "views": self._to_int(totals.get("views")),
             "clicks": self._to_int(totals.get("clicks")),
