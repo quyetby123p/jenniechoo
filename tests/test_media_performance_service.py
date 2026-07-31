@@ -234,6 +234,107 @@ class FakePancake:
         }
 
 
+class FakeMultiCodeMeta:
+    ad_account_id = "act_894644562928775"
+
+    def get_ad_insights_for_range(self, start_date: date, end_date: date, timezone_name: str) -> list[dict[str, Any]]:
+        assert start_date.isoformat() == "2026-07-12"
+        assert end_date.isoformat() == "2026-07-18"
+        assert timezone_name == "Asia/Ho_Chi_Minh"
+        return [
+            {
+                "campaign_id": "camp_combo",
+                "campaign_name": "ADS:QUYET|VXV002_VXV001_VXV004|Codex",
+                "adset_id": "adset_combo_1",
+                "adset_name": "Combo 1",
+                "ad_id": "ad_combo_1",
+                "ad_name": "ADS:QUYET|SKU:VXV004_VXV002_VXV001|MED:Video",
+                "spend": "100000",
+                "impressions": "1000",
+                "clicks": "40",
+                "actions": [
+                    {"action_type": "onsite_conversion.messaging_conversation_started_7d", "value": "5"},
+                    {"action_type": "video_view", "value": "300"},
+                ],
+            },
+            {
+                "campaign_id": "camp_combo",
+                "campaign_name": "ADS:QUYET|VXV001_VXV002_VXV004|Codex",
+                "adset_id": "adset_combo_2",
+                "adset_name": "Combo 2",
+                "ad_id": "ad_combo_2",
+                "ad_name": "ADS:QUYET|SKU:VXV001_VXV002_VXV004|MED:Video",
+                "spend": "50000",
+                "impressions": "500",
+                "clicks": "10",
+                "actions": [
+                    {"action_type": "onsite_conversion.messaging_conversation_started_7d", "value": "1"},
+                    {"action_type": "video_view", "value": "100"},
+                ],
+            },
+        ]
+
+    def get_ads_metadata(self, ad_ids: list[str]) -> dict[str, dict[str, Any]]:
+        assert set(ad_ids) == {"ad_combo_1", "ad_combo_2"}
+        return {
+            ad_id: {
+                "ad_id": ad_id,
+                "campaign_id": "camp_combo",
+                "campaign_name": "ADS:QUYET|VXV001_VXV002_VXV004|Codex",
+                "creative_id": "creative_combo",
+                "object_story_id": "649228828282105_4236666629977775",
+                "effective_object_story_id": "649228828282105_4236666629977775",
+            }
+            for ad_id in ad_ids
+        }
+
+    def get_post_metadata_for_story_ids(self, story_ids: list[str]) -> dict[str, dict[str, Any]]:
+        assert story_ids == ["649228828282105_4236666629977775"]
+        return {
+            "649228828282105_4236666629977775": {
+                "message": "Combo media #VXV001 #VXV002 #VXV004",
+                "permalink_url": "https://www.facebook.com/reel/4236666629977775/",
+            }
+        }
+
+
+class FakeMultiCodePancake:
+    def is_configured(self) -> bool:
+        return True
+
+    def fetch_orders_snapshot_for_range(
+        self,
+        start_date: date,
+        end_date: date,
+        timezone_name: str,
+    ) -> dict[str, Any]:
+        assert start_date.isoformat() == "2026-07-12"
+        assert end_date.isoformat() == "2026-07-18"
+        assert timezone_name == "Asia/Ho_Chi_Minh"
+        return {
+            "orders": [
+                {
+                    "id": "order_vxv001",
+                    "order_currency": "THB",
+                    "total_price": 10000,
+                    "items": [{"quantity": 1, "variation_info": {"name": "VXV001", "retail_price": 10000}}],
+                },
+                {
+                    "id": "order_vxv002",
+                    "order_currency": "THB",
+                    "total_price": 20000,
+                    "items": [{"quantity": 1, "variation_info": {"name": "VXV002", "retail_price": 20000}}],
+                },
+                {
+                    "id": "order_vxv004",
+                    "order_currency": "THB",
+                    "total_price": 30000,
+                    "items": [{"quantity": 1, "variation_info": {"name": "VXV004", "retail_price": 30000}}],
+                },
+            ]
+        }
+
+
 def test_generate_report_groups_by_code_then_media_and_adds_meta_revenue(tmp_path: Path) -> None:
     service = MediaPerformanceService(
         settings=_settings(tmp_path),
@@ -293,6 +394,52 @@ def test_generate_report_filters_requested_code(tmp_path: Path) -> None:
 
     assert [item["code"] for item in report["codes"]] == ["VXV011"]
     assert report["summary"]["code_count"] == 1
+
+
+def test_generate_report_keeps_multi_code_media_as_one_combo_sku(tmp_path: Path) -> None:
+    service = MediaPerformanceService(
+        settings=_settings(tmp_path),
+        logger=logging.getLogger("test"),
+        meta_client=FakeMultiCodeMeta(),  # type: ignore[arg-type]
+        pancake_client=FakeMultiCodePancake(),  # type: ignore[arg-type]
+    )
+
+    report = service.generate_report(
+        MediaPerformanceCommand(
+            codes=["VXV002"],
+            start_date=date(2026, 7, 12),
+            end_date=date(2026, 7, 18),
+            days=7,
+        )
+    )
+
+    assert report["ok"] is True
+    assert [item["code"] for item in report["codes"]] == ["VXV001_VXV002_VXV004"]
+    assert report["warnings"] == []
+    code = report["codes"][0]
+    assert code["codes"] == ["VXV001", "VXV002", "VXV004"]
+    assert code["totals"]["spend_vnd"] == 150000
+    assert code["totals"]["messages"] == 6
+    assert code["multi_code_ad_count"] == 2
+    assert code["revenue"]["source"] == "pancake_fallback"
+    assert code["revenue"]["revenue_vnd"] == 489000
+    assert code["revenue"]["order_count"] == 3
+    assert code["roas"] == 3.26
+    assert code["media_count"] == 1
+    media = code["media"][0]
+    assert media["media_key"] == "649228828282105_4236666629977775"
+    assert media["permalink_url"] == "https://www.facebook.com/reel/4236666629977775/"
+    assert media["multi_code"] is True
+    assert media["totals"]["spend_vnd"] == 150000
+    assert len(media["ads"]) == 2
+
+    rows = service._report_to_sheet_rows(report)
+
+    assert len(rows) == 1
+    assert rows[0]["code"] == "VXV001_VXV002_VXV004"
+    assert rows[0]["dedupe_key"] == (
+        "2026-07-12:2026-07-18:VXV001_VXV002_VXV004:media:649228828282105_4236666629977775"
+    )
 
 
 def test_sync_report_to_sheet_upserts_media_rows_only(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
@@ -381,7 +528,7 @@ def test_sync_report_to_sheet_upserts_media_rows_only(tmp_path: Path, monkeypatc
     monkeypatch.setattr(service, "_ensure_sheet_header", lambda **_: None)
     monkeypatch.setattr(service, "_format_sheet_header", lambda **_: None)
     monkeypatch.setattr(service, "_format_sheet_data_rows", lambda **_: None)
-    monkeypatch.setattr(service, "_delete_stale_ad_rows_for_period", lambda **_: 3)
+    monkeypatch.setattr(service, "_delete_stale_sheet_rows_for_period", lambda **_: 3)
     monkeypatch.setattr(
         service,
         "_load_existing_sheet_map",
@@ -401,6 +548,7 @@ def test_sync_report_to_sheet_upserts_media_rows_only(tmp_path: Path, monkeypatc
     assert result["updated"] == 1
     assert result["inserted"] == 0
     assert result["deleted_stale_ad_rows"] == 3
+    assert result["deleted_stale_rows"] == 3
     assert len(updates_capture) == 1
     assert len(appends) == 0
     updated_values = updates_capture[0][1]
@@ -700,6 +848,55 @@ def test_load_existing_sheet_map_rebuilds_key_from_visible_columns(tmp_path: Pat
         "2026-07-01:2026-07-07:VXV011:code": 2,
         "2026-07-01:2026-07-07:VXV011:media:649228828282105_111": 3,
     }
+
+
+def test_delete_stale_sheet_rows_removes_split_multi_code_media(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    service = MediaPerformanceService(
+        settings=_settings_with_sheet(tmp_path),
+        logger=logging.getLogger("test"),
+        meta_client=FakeMeta(),  # type: ignore[arg-type]
+        pancake_client=FakePancake(),  # type: ignore[arg-type]
+    )
+    deleted_start_indexes: list[int] = []
+
+    monkeypatch.setattr(
+        service,
+        "_sheet_values_get",
+        lambda **_: {
+            "values": [
+                ["2026-07-12", "2026-07-18", "VXV001_VXV002_VXV004", "media", "649228828282105_4236666629977775"],
+                ["2026-07-12", "2026-07-18", "VXV001", "media", "649228828282105_4236666629977775"],
+                ["2026-07-12", "2026-07-18", "VXV002", "media", "649228828282105_4236666629977775"],
+                ["2026-07-12", "2026-07-18", "VXV001", "code", ""],
+                ["2026-07-12", "2026-07-18", "VXV001", "ad", "ad_1"],
+                ["2026-07-19", "2026-07-25", "VXV001", "media", "649228828282105_4236666629977775"],
+            ]
+        },
+    )
+
+    def capture_request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        assert method == "POST"
+        assert url.endswith(":batchUpdate")
+        for request in kwargs["data"]["requests"]:
+            deleted_start_indexes.append(request["deleteDimension"]["range"]["startIndex"])
+        return {}
+
+    monkeypatch.setattr(service, "_sheet_request_json", capture_request)
+
+    deleted_count = service._delete_stale_sheet_rows_for_period(
+        spreadsheet_id="sheet_123",
+        sheet_title="Media",
+        headers={},
+        start_date="2026-07-12",
+        end_date="2026-07-18",
+        expected_dedupe_keys={
+            "2026-07-12:2026-07-18:VXV001_VXV002_VXV004:media:649228828282105_4236666629977775"
+        },
+        delete_missing_media_rows=True,
+    )
+
+    assert deleted_count == 4
+    assert deleted_start_indexes == [5, 4, 3, 2]
 
 
 def test_empty_media_bucket_falls_back_to_story_permalink(tmp_path: Path) -> None:

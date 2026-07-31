@@ -197,41 +197,45 @@ class MediaPerformanceService:
             story_id = self._story_id_from_ad_meta(ad_meta)
             post_meta = post_metadata.get(story_id, {}) if story_id else {}
             job_payloads = self._jobs_for_ad(ad_id=ad_id, story_id=story_id, job_index=job_index)
-            codes = self._extract_codes_for_ad(row=row, ad_meta=ad_meta, post_meta=post_meta, jobs=job_payloads)
-            if requested_codes:
-                codes = sorted(set(codes) & requested_codes)
+            codes = self._normalize_code_group(
+                self._extract_codes_for_ad(row=row, ad_meta=ad_meta, post_meta=post_meta, jobs=job_payloads)
+            )
+            if requested_codes and not (set(codes) & requested_codes):
+                unmatched_ad_count += 1
+                continue
             if not codes:
                 unmatched_ad_count += 1
                 continue
 
             included_ad_count += 1
-            for code in codes:
-                code_bucket = grouped.setdefault(code, self._empty_code_bucket(code))
-                self._add_metrics(code_bucket["totals"], metrics)
-                code_bucket["ad_count"] += 1
-                if len(codes) > 1:
-                    code_bucket["multi_code_ad_count"] += 1
+            code = self._code_group_label(codes)
+            code_bucket = grouped.setdefault(code, self._empty_code_bucket(code, codes=codes))
+            self._add_metrics(code_bucket["totals"], metrics)
+            code_bucket["ad_count"] += 1
+            if len(codes) > 1:
+                code_bucket["multi_code_ad_count"] += 1
 
-                media_key = story_id or str(ad_meta.get("creative_id", "")).strip() or ad_id
-                media_bucket = code_bucket["media"].setdefault(
-                    media_key,
-                    self._empty_media_bucket(media_key=media_key, story_id=story_id, post_meta=post_meta),
-                )
-                self._add_metrics(media_bucket["totals"], metrics)
-                if len(codes) > 1:
-                    media_bucket["multi_code"] = True
-                media_bucket["ads"].append(
-                    {
-                        "ad_id": ad_id,
-                        "ad_name": self._first_text(row.get("ad_name"), ad_meta.get("ad_name")),
-                        "adset_id": self._first_text(row.get("adset_id"), ad_meta.get("adset_id")),
-                        "adset_name": self._first_text(row.get("adset_name"), ad_meta.get("adset_name")),
-                        "campaign_id": self._first_text(row.get("campaign_id"), ad_meta.get("campaign_id")),
-                        "campaign_name": self._first_text(row.get("campaign_name"), ad_meta.get("campaign_name")),
-                        "creative_id": str(ad_meta.get("creative_id", "")).strip(),
-                        "metrics": metrics,
-                    }
-                )
+            media_key = story_id or str(ad_meta.get("creative_id", "")).strip() or ad_id
+            media_bucket = code_bucket["media"].setdefault(
+                media_key,
+                self._empty_media_bucket(media_key=media_key, story_id=story_id, post_meta=post_meta),
+            )
+            self._add_metrics(media_bucket["totals"], metrics)
+            if len(codes) > 1:
+                media_bucket["multi_code"] = True
+            media_bucket["ads"].append(
+                {
+                    "ad_id": ad_id,
+                    "ad_name": self._first_text(row.get("ad_name"), ad_meta.get("ad_name")),
+                    "adset_id": self._first_text(row.get("adset_id"), ad_meta.get("adset_id")),
+                    "adset_name": self._first_text(row.get("adset_name"), ad_meta.get("adset_name")),
+                    "campaign_id": self._first_text(row.get("campaign_id"), ad_meta.get("campaign_id")),
+                    "campaign_name": self._first_text(row.get("campaign_name"), ad_meta.get("campaign_name")),
+                    "creative_id": str(ad_meta.get("creative_id", "")).strip(),
+                    "codes": codes,
+                    "metrics": metrics,
+                }
+            )
 
         code_rows: list[dict[str, Any]] = []
         meta_revenue_available = any(
@@ -256,7 +260,11 @@ class MediaPerformanceService:
                     "source": "meta_insights",
                 }
             else:
-                revenue = pancake_revenue_by_code.get(code, self._empty_revenue_bucket(code))
+                revenue = self._revenue_for_code_group(
+                    code=code,
+                    codes=bucket.get("codes") if isinstance(bucket.get("codes"), list) else [code],
+                    revenue_by_code=pancake_revenue_by_code,
+                )
                 revenue["source"] = "pancake_fallback" if pancake_revenue_by_code else "none"
             bucket["revenue"] = {
                 "revenue_vnd": self._to_int(revenue.get("revenue_vnd")),
@@ -290,7 +298,14 @@ class MediaPerformanceService:
             "unmatched_source_ad_count": unmatched_ad_count,
         }
         if requested_codes:
-            missing_codes = sorted(requested_codes - {str(item.get("code", "")).upper() for item in code_rows})
+            present_codes: set[str] = set()
+            for item in code_rows:
+                if not isinstance(item, dict):
+                    continue
+                codes = item.get("codes") if isinstance(item.get("codes"), list) else []
+                present_codes.update(self._normalize_code_group(codes))
+                present_codes.update(self._extract_codes_from_any(item.get("code")))
+            missing_codes = sorted(requested_codes - present_codes)
             if missing_codes:
                 report["warnings"].append("Không thấy dữ liệu ads cho mã: " + ", ".join(missing_codes))
         report["sheet_sync"] = self.sync_report_to_sheet(report)
@@ -310,6 +325,7 @@ class MediaPerformanceService:
             "updated": 0,
             "skipped": 0,
             "deleted_stale_ad_rows": 0,
+            "deleted_stale_rows": 0,
             "errors": [],
         }
         if not self.settings.media_analytics_sheet_enabled:
@@ -327,7 +343,10 @@ class MediaPerformanceService:
             return result
 
         try:
-            sync_result = self._sync_sheet_rows(rows)
+            sync_result = self._sync_sheet_rows(
+                rows,
+                delete_missing_media_rows=not bool(report.get("requested_codes")) and not bool(report.get("campaign_query")),
+            )
             result.update(sync_result)
             return result
         except Exception as exc:  # noqa: BLE001
@@ -624,9 +643,11 @@ class MediaPerformanceService:
             "cost_per_message_vnd": 0,
         }
 
-    def _empty_code_bucket(self, code: str) -> dict[str, Any]:
+    def _empty_code_bucket(self, code: str, *, codes: list[str] | None = None) -> dict[str, Any]:
+        code_group = self._normalize_code_group(codes or self._extract_codes_from_any(code))
         return {
             "code": code,
+            "codes": code_group or [code],
             "totals": self._empty_metrics(),
             "revenue": self._empty_revenue_bucket(code),
             "roas": None,
@@ -710,9 +731,66 @@ class MediaPerformanceService:
                     multi_order_ids_by_code.setdefault(code, set()).add(order_id)
 
         for code, bucket in buckets.items():
-            bucket["order_count"] = len(order_ids_by_code.get(code, set()))
-            bucket["multi_code_order_count"] = len(multi_order_ids_by_code.get(code, set()))
+            order_ids = order_ids_by_code.get(code, set())
+            multi_order_ids = multi_order_ids_by_code.get(code, set())
+            bucket["order_count"] = len(order_ids)
+            bucket["multi_code_order_count"] = len(multi_order_ids)
+            bucket["_order_ids"] = sorted(order_ids)
+            bucket["_multi_order_ids"] = sorted(multi_order_ids)
         return buckets, warnings
+
+    def _revenue_for_code_group(
+        self,
+        *,
+        code: str,
+        codes: list[Any],
+        revenue_by_code: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        code_group = self._normalize_code_group(codes or [code])
+        if not code_group:
+            return self._empty_revenue_bucket(code)
+        if len(code_group) == 1:
+            return dict(revenue_by_code.get(code_group[0], self._empty_revenue_bucket(code)))
+
+        revenue_vnd = 0
+        order_count = 0
+        multi_code_order_count = 0
+        order_ids: set[str] = set()
+        multi_order_ids: set[str] = set()
+        has_order_ids = False
+        has_multi_order_ids = False
+        for item_code in code_group:
+            bucket = revenue_by_code.get(item_code, {})
+            if not isinstance(bucket, dict):
+                continue
+            revenue_vnd += self._to_int(bucket.get("revenue_vnd"))
+            bucket_order_ids = {
+                str(item).strip()
+                for item in bucket.get("_order_ids", [])
+                if str(item).strip()
+            } if isinstance(bucket.get("_order_ids"), list) else set()
+            bucket_multi_order_ids = {
+                str(item).strip()
+                for item in bucket.get("_multi_order_ids", [])
+                if str(item).strip()
+            } if isinstance(bucket.get("_multi_order_ids"), list) else set()
+            if bucket_order_ids:
+                has_order_ids = True
+                order_ids.update(bucket_order_ids)
+            else:
+                order_count += self._to_int(bucket.get("order_count"))
+            if bucket_multi_order_ids:
+                has_multi_order_ids = True
+                multi_order_ids.update(bucket_multi_order_ids)
+            else:
+                multi_code_order_count += self._to_int(bucket.get("multi_code_order_count"))
+
+        return {
+            "code": code,
+            "revenue_vnd": revenue_vnd,
+            "order_count": len(order_ids) if has_order_ids else order_count,
+            "multi_code_order_count": len(multi_order_ids) if has_multi_order_ids else multi_code_order_count,
+        }
 
     def _load_job_index(self) -> dict[str, dict[str, list[dict[str, Any]]]]:
         index: dict[str, dict[str, list[dict[str, Any]]]] = {
@@ -858,6 +936,24 @@ class MediaPerformanceService:
             seen.add(code)
             codes.append(code)
         return codes
+
+    @staticmethod
+    def _normalize_code_group(codes: Any) -> list[str]:
+        if not isinstance(codes, list | tuple | set):
+            codes = [codes]
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for code in codes:
+            text = str(code or "").strip().upper()
+            if not text or not _VXV_CODE_PATTERN.fullmatch(text) or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return sorted(normalized)
+
+    @staticmethod
+    def _code_group_label(codes: list[str]) -> str:
+        return "_".join(codes)
 
     def _iter_text_fragments(self, value: Any) -> list[str]:
         if value is None:
@@ -1049,7 +1145,7 @@ class MediaPerformanceService:
             or (int(round((spend_vnd / impressions) * 1000)) if impressions > 0 else 0),
         }
 
-    def _sync_sheet_rows(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def _sync_sheet_rows(self, rows: list[dict[str, Any]], *, delete_missing_media_rows: bool = True) -> dict[str, Any]:
         access_token = self._refresh_sheet_access_token()
         headers = {
             "Authorization": f"Bearer {access_token}",
@@ -1061,18 +1157,6 @@ class MediaPerformanceService:
         sheet_title = self._resolve_sheet_title(spreadsheet_id=spreadsheet_id, gid=gid, headers=headers)
         self._ensure_sheet_header(spreadsheet_id=spreadsheet_id, sheet_title=sheet_title, headers=headers)
         self._format_sheet_header(spreadsheet_id=spreadsheet_id, headers=headers)
-        deleted_stale_ad_rows = self._delete_stale_ad_rows_for_period(
-            spreadsheet_id=spreadsheet_id,
-            sheet_title=sheet_title,
-            headers=headers,
-            start_date=str(rows[0].get("start_date", "")).strip(),
-            end_date=str(rows[0].get("end_date", "")).strip(),
-        )
-        existing_map = self._load_existing_sheet_map(
-            spreadsheet_id=spreadsheet_id,
-            sheet_title=sheet_title,
-            headers=headers,
-        )
 
         unique_rows: dict[str, dict[str, Any]] = {}
         skipped = 0
@@ -1085,6 +1169,21 @@ class MediaPerformanceService:
                 skipped += 1
                 continue
             unique_rows[key] = row
+
+        deleted_stale_rows = self._delete_stale_sheet_rows_for_period(
+            spreadsheet_id=spreadsheet_id,
+            sheet_title=sheet_title,
+            headers=headers,
+            start_date=str(rows[0].get("start_date", "")).strip(),
+            end_date=str(rows[0].get("end_date", "")).strip(),
+            expected_dedupe_keys=set(unique_rows),
+            delete_missing_media_rows=delete_missing_media_rows,
+        )
+        existing_map = self._load_existing_sheet_map(
+            spreadsheet_id=spreadsheet_id,
+            sheet_title=sheet_title,
+            headers=headers,
+        )
 
         updates: list[tuple[int, list[Any]]] = []
         appends: list[list[Any]] = []
@@ -1132,7 +1231,8 @@ class MediaPerformanceService:
             "inserted": len(appends),
             "updated": len(updates),
             "skipped": skipped,
-            "deleted_stale_ad_rows": deleted_stale_ad_rows,
+            "deleted_stale_ad_rows": deleted_stale_rows,
+            "deleted_stale_rows": deleted_stale_rows,
         }
 
     def _refresh_sheet_access_token(self) -> str:
@@ -1354,7 +1454,7 @@ class MediaPerformanceService:
                 result[dedupe_key] = index + 2
         return result
 
-    def _delete_stale_ad_rows_for_period(
+    def _delete_stale_sheet_rows_for_period(
         self,
         *,
         spreadsheet_id: str,
@@ -1362,6 +1462,8 @@ class MediaPerformanceService:
         headers: dict[str, str],
         start_date: str,
         end_date: str,
+        expected_dedupe_keys: set[str],
+        delete_missing_media_rows: bool,
     ) -> int:
         if not start_date or not end_date:
             return 0
@@ -1382,7 +1484,13 @@ class MediaPerformanceService:
             row_end = str(row[1] if len(row) > 1 else "").strip()
             level = str(row[3] if len(row) > 3 else "").strip().lower()
             is_same_period = row_start == start_date and row_end == end_date
-            if is_same_period and level in {"ad", "code"}:
+            if not is_same_period:
+                continue
+            dedupe_key = self._dedupe_key_from_visible_sheet_row(row)
+            if level in {"ad", "code"}:
+                row_numbers.append(index + 2)
+                continue
+            if delete_missing_media_rows and level == "media" and dedupe_key not in expected_dedupe_keys:
                 row_numbers.append(index + 2)
         if not row_numbers:
             return 0
@@ -1407,6 +1515,25 @@ class MediaPerformanceService:
             data={"requests": requests_payload},
         )
         return len(row_numbers)
+
+    def _delete_stale_ad_rows_for_period(
+        self,
+        *,
+        spreadsheet_id: str,
+        sheet_title: str,
+        headers: dict[str, str],
+        start_date: str,
+        end_date: str,
+    ) -> int:
+        return self._delete_stale_sheet_rows_for_period(
+            spreadsheet_id=spreadsheet_id,
+            sheet_title=sheet_title,
+            headers=headers,
+            start_date=start_date,
+            end_date=end_date,
+            expected_dedupe_keys=set(),
+            delete_missing_media_rows=False,
+        )
 
     def _batch_update_sheet_rows(
         self,
