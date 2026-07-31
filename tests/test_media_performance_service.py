@@ -529,6 +529,7 @@ def test_sync_report_to_sheet_upserts_media_rows_only(tmp_path: Path, monkeypatc
     monkeypatch.setattr(service, "_format_sheet_header", lambda **_: None)
     monkeypatch.setattr(service, "_format_sheet_data_rows", lambda **_: None)
     monkeypatch.setattr(service, "_delete_stale_sheet_rows_for_period", lambda **_: 3)
+    monkeypatch.setattr(service, "_sort_sheet_rows_by_period", lambda **_: 24)
     monkeypatch.setattr(
         service,
         "_load_existing_sheet_map",
@@ -549,6 +550,7 @@ def test_sync_report_to_sheet_upserts_media_rows_only(tmp_path: Path, monkeypatc
     assert result["inserted"] == 0
     assert result["deleted_stale_ad_rows"] == 3
     assert result["deleted_stale_rows"] == 3
+    assert result["sorted_rows"] == 24
     assert len(updates_capture) == 1
     assert len(appends) == 0
     updated_values = updates_capture[0][1]
@@ -897,6 +899,58 @@ def test_delete_stale_sheet_rows_removes_split_multi_code_media(tmp_path: Path, 
 
     assert deleted_count == 4
     assert deleted_start_indexes == [5, 4, 3, 2]
+
+
+def test_sort_sheet_rows_by_period_groups_weekly_blocks(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    service = MediaPerformanceService(
+        settings=_settings_with_sheet(tmp_path),
+        logger=logging.getLogger("test"),
+        meta_client=FakeMeta(),  # type: ignore[arg-type]
+        pancake_client=FakePancake(),  # type: ignore[arg-type]
+    )
+    payloads: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        service,
+        "_sheet_values_get",
+        lambda **_: {
+            "values": [
+                ["2026-07-23", "2026-07-29"],
+                ["2026-07-23", "2026-07-29"],
+                ["2026-07-07", "2026-07-13"],
+                ["2026-07-19", "2026-07-25"],
+                ["", ""],
+            ]
+        },
+    )
+
+    def capture_request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        assert method == "POST"
+        assert url.endswith(":batchUpdate")
+        payloads.append(kwargs["data"])
+        return {}
+
+    monkeypatch.setattr(service, "_sheet_request_json", capture_request)
+
+    sorted_rows = service._sort_sheet_rows_by_period(
+        spreadsheet_id="sheet_123",
+        sheet_title="Media",
+        headers={},
+    )
+
+    assert sorted_rows == 4
+    sort_range = payloads[0]["requests"][0]["sortRange"]
+    assert sort_range["range"] == {
+        "sheetId": 424378234,
+        "startRowIndex": 1,
+        "endRowIndex": 5,
+        "startColumnIndex": 0,
+        "endColumnIndex": len(MEDIA_PERFORMANCE_SHEET_KEYS),
+    }
+    assert sort_range["sortSpecs"] == [
+        {"dimensionIndex": 0, "sortOrder": "ASCENDING"},
+        {"dimensionIndex": 1, "sortOrder": "ASCENDING"},
+    ]
 
 
 def test_empty_media_bucket_falls_back_to_story_permalink(tmp_path: Path) -> None:

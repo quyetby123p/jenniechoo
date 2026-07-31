@@ -326,6 +326,7 @@ class MediaPerformanceService:
             "skipped": 0,
             "deleted_stale_ad_rows": 0,
             "deleted_stale_rows": 0,
+            "sorted_rows": 0,
             "errors": [],
         }
         if not self.settings.media_analytics_sheet_enabled:
@@ -1208,6 +1209,11 @@ class MediaPerformanceService:
                 headers=headers,
                 rows=appends,
             )
+        sorted_rows = self._sort_sheet_rows_by_period(
+            spreadsheet_id=spreadsheet_id,
+            sheet_title=sheet_title,
+            headers=headers,
+        )
         row_map_after_sync = self._load_existing_sheet_map(
             spreadsheet_id=spreadsheet_id,
             sheet_title=sheet_title,
@@ -1233,6 +1239,7 @@ class MediaPerformanceService:
             "skipped": skipped,
             "deleted_stale_ad_rows": deleted_stale_rows,
             "deleted_stale_rows": deleted_stale_rows,
+            "sorted_rows": sorted_rows,
         }
 
     def _refresh_sheet_access_token(self) -> str:
@@ -1586,6 +1593,62 @@ class MediaPerformanceService:
             params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
             data={"majorDimension": "ROWS", "values": rows},
         )
+
+    def _sort_sheet_rows_by_period(
+        self,
+        *,
+        spreadsheet_id: str,
+        sheet_title: str,
+        headers: dict[str, str],
+    ) -> int:
+        payload = self._sheet_values_get(
+            spreadsheet_id=spreadsheet_id,
+            read_range=f"'{self._escape_sheet_title(sheet_title)}'!A2:B",
+            headers=headers,
+            params={"majorDimension": "ROWS"},
+        )
+        values = payload.get("values", []) if isinstance(payload, dict) else []
+        if not isinstance(values, list):
+            return 0
+
+        last_populated_row = 0
+        populated_rows = 0
+        for index, row in enumerate(values):
+            if not isinstance(row, list):
+                continue
+            if not self._period_key_from_visible_sheet_row(row):
+                continue
+            populated_rows += 1
+            last_populated_row = index + 2
+
+        if populated_rows < 2 or last_populated_row < 3:
+            return 0
+
+        self._sheet_request_json(
+            "POST",
+            f"{_SHEETS_API_BASE}/{spreadsheet_id}:batchUpdate",
+            headers=headers,
+            data={
+                "requests": [
+                    {
+                        "sortRange": {
+                            "range": {
+                                "sheetId": int(self.settings.media_analytics_sheet_gid),
+                                "startRowIndex": 1,
+                                "endRowIndex": last_populated_row,
+                                "startColumnIndex": 0,
+                                "endColumnIndex": len(MEDIA_PERFORMANCE_SHEET_KEYS),
+                            },
+                            "sortSpecs": [
+                                {"dimensionIndex": 0, "sortOrder": "ASCENDING"},
+                                {"dimensionIndex": 1, "sortOrder": "ASCENDING"},
+                            ],
+                        }
+                    }
+                ]
+            },
+        )
+        return populated_rows
 
     def _sheet_values_get(
         self,
