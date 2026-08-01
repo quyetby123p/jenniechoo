@@ -186,6 +186,28 @@ def test_sync_report_maps_b_to_ak_and_skips_existing(tmp_path: Path, monkeypatch
     assert second[17] == 0
 
 
+def test_build_row_values_uses_vayxa_label_for_ads2_profile(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = ReconcileCodSheetService(settings=settings, logger=logging.getLogger("test"))
+
+    values = service._build_row_values(
+        {
+            "td_awb": "TH15018ZXJZD1S",
+            "td_send_date": "2026-07-29",
+            "td_detail_settlement_date": "2026-07-31",
+            "td_status": "SUCCESS",
+            "td_cod_minor": 84900,
+            "td_sheet_cod_minor": 84900,
+            "pancake_profile": "ads2",
+            "pancake_display_id": "149",
+        },
+        settlement_date="2026-07-31",
+    )
+
+    assert values[0] == "DA-TL.VX"
+    assert values[2] == "149"
+
+
 def test_sync_report_returns_structured_error_when_sync_fails(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
     settings = _dummy_settings(tmp_path)
     service = ReconcileCodSheetService(settings=settings, logger=logging.getLogger("test"))

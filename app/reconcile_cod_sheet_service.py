@@ -574,7 +574,7 @@ class ReconcileCodSheetService:
         pancake_display_id = str(record.get("pancake_display_id", "")).strip()
         pancake_order_id = str(record.get("pancake_order_id", "")).strip()
         pos_order_code = pancake_display_id or pancake_order_id
-        col_b = "DA-TL.JE" if pos_order_code.upper().startswith("JC") else ""
+        col_b = self._resolve_sheet_label(record, pos_order_code)
         td_awb = str(record.get("td_awb", "")).strip()
         send_date = self._format_date(record.get("td_send_date"))
         detail_settlement = self._format_date(record.get("td_detail_settlement_date") or settlement_date)
@@ -632,6 +632,23 @@ class ReconcileCodSheetService:
             + (self._to_optional_float(record.get("td_ffm_fee")) or 0.0)
         )  # AK
         return cols_b_to_ak
+
+    @staticmethod
+    def _resolve_sheet_label(record: dict[str, Any], pos_order_code: str) -> str:
+        explicit = str(record.get("pancake_sheet_label", "")).strip()
+        if explicit:
+            return explicit
+
+        profile = str(record.get("pancake_profile", "")).strip().lower()
+        if profile in {"ads2", "vayxa", "vx"}:
+            return "DA-TL.VX"
+
+        normalized_code = str(pos_order_code or "").strip().upper()
+        if normalized_code.startswith("JC"):
+            return "DA-TL.JE"
+        if normalized_code.startswith(("VX", "VXV")):
+            return "DA-TL.VX"
+        return ""
 
     def _request_json(
         self,

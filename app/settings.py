@@ -59,6 +59,7 @@ class Settings:
     reconcile_cod_update_enabled: bool = False
     reconcile_cod_status_map_path: str = "config/reconcile_cod_status_map.json"
     reconcile_cod_pancake_lookback_days: int = 3650
+    reconcile_cod_extra_pancake_profiles: tuple[str, ...] = ()
     reconcile_cod_sheet_enabled: bool = False
     reconcile_cod_sheet_spreadsheet_id: str = ""
     reconcile_cod_sheet_gid: int = 1034910254
@@ -307,6 +308,19 @@ def _parse_weekday_list(raw: str, *, default: tuple[int, ...]) -> tuple[int, ...
     return tuple(sorted(values))
 
 
+def _parse_string_list(raw: str, *, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    text = str(raw or "").strip()
+    if not text:
+        return tuple(default)
+    values: list[str] = []
+    for part in text.split(","):
+        token = part.strip().lower()
+        if not token or token in values:
+            continue
+        values.append(token)
+    return tuple(values)
+
+
 def load_settings(project_root: Path | None = None) -> Settings:
     if project_root is None:
         project_root = Path(__file__).resolve().parents[1]
@@ -468,6 +482,9 @@ def load_settings(project_root: Path | None = None) -> Settings:
         default=3650,
         min_value=1,
         max_value=36500,
+    )
+    reconcile_cod_extra_pancake_profiles = _parse_string_list(
+        os.getenv("RECONCILE_COD_EXTRA_PANCAKE_PROFILES", "ads2"),
     )
     reconcile_cod_sheet_enabled = _parse_bool(
         os.getenv("RECONCILE_COD_SHEET_ENABLED", "0"),
@@ -631,6 +648,7 @@ def load_settings(project_root: Path | None = None) -> Settings:
         reconcile_cod_update_enabled=reconcile_cod_update_enabled,
         reconcile_cod_status_map_path=reconcile_cod_status_map_path,
         reconcile_cod_pancake_lookback_days=reconcile_cod_pancake_lookback_days,
+        reconcile_cod_extra_pancake_profiles=reconcile_cod_extra_pancake_profiles,
         reconcile_cod_sheet_enabled=reconcile_cod_sheet_enabled,
         reconcile_cod_sheet_spreadsheet_id=reconcile_cod_sheet_spreadsheet_id,
         reconcile_cod_sheet_gid=reconcile_cod_sheet_gid,

@@ -249,6 +249,71 @@ def test_reconcile_cod_prefers_linked_pancake_order_id_from_thai_duong(tmp_path:
     assert record["pancake_display_id"] == "JCT354"
 
 
+def test_reconcile_cod_marks_and_updates_vayxa_profile_orders(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    settings = _dummy_settings(tmp_path, reconcile_cod_update_enabled=True)
+    _write_reconcile_configs(settings, mapped_status=3)
+    thai_duong = _FakeThaiDuongClient(
+        history_rows=[{"settlement_date": "2026-07-31"}],
+        detail_rows=[
+            {
+                "settlement_date": "2026-07-31",
+                "awb": "TH15018ZXJZD1S",
+                "pancake_order_id": "vx-order",
+                "status_text": "Giao hàng thành công",
+                "phone": "0919791919",
+                "customer_name": "Noom Khajornsakchai",
+                "cod": "849",
+            }
+        ],
+    )
+    main_pancake = _FakePancakeClient(orders=[])
+    vayxa_pancake = _FakePancakeClient(orders=[])
+    service = ReconcileCodService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=main_pancake,  # type: ignore[arg-type]
+        thai_duong_client=thai_duong,  # type: ignore[arg-type]
+    )
+    vayxa_orders = service._annotate_pancake_orders(
+        [
+            {
+                "id": "vx-order",
+                "display_id": "149",
+                "bill_phone_number": "0919791919",
+                "bill_full_name": "Noom Khajornsakchai",
+                "total_price": 84900,
+                "status": 2,
+            }
+        ],
+        profile="ads2",
+        shop_id=714269213,
+    )
+    monkeypatch.setattr(
+        service,
+        "_fetch_pancake_orders",
+        lambda *_args, **_kwargs: list(vayxa_orders),
+    )
+    monkeypatch.setattr(
+        service,
+        "_get_pancake_client_for_profile",
+        lambda profile: vayxa_pancake if str(profile).strip().lower() == "ads2" else main_pancake,
+    )
+
+    report = service.generate_report(date(2026, 7, 31))
+    record = report["records"][0]
+    assert record["match_result"] == "matched_unique"
+    assert record["pancake_profile"] == "ads2"
+    assert record["pancake_shop_id"] == 714269213
+    assert record["pancake_sheet_label"] == "DA-TL.VX"
+    assert record["pancake_display_id"] == "149"
+
+    apply_summary = service.apply_updates(str(report["run_id"]))
+
+    assert apply_summary["updated"] == 1
+    assert main_pancake.update_calls == []
+    assert vayxa_pancake.update_calls == [("vx-order", 3, {"method": "POST", "path": "/shops/{shop_id}/orders/{order_id}", "status_field": "status"})]
+
+
 def test_reconcile_cod_apply_updates_is_idempotent(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path, reconcile_cod_update_enabled=True)
     _write_reconcile_configs(settings, mapped_status=2)
