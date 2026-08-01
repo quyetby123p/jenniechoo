@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 import csv
 import logging
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -27,6 +29,7 @@ class ReconcileCodService:
         self.logger = logger
         self.pancake = pancake_client
         self.thai_duong = thai_duong_client
+        self._extra_pancake_clients: dict[str, PancakePosClient] = {}
         self._ensure_layout()
 
     def _ensure_layout(self) -> None:
@@ -73,7 +76,7 @@ class ReconcileCodService:
 
         pancake_orders: list[dict[str, Any]] = []
         try:
-            pancake_orders = self._fetch_pancake_orders(match_cfg, target_date)
+            pancake_orders = self._fetch_pancake_orders(match_cfg, target_date, warnings=warnings)
         except Exception as exc:  # noqa: BLE001
             errors["pancake"] = str(exc)
             self.logger.exception("Lay du lieu don Pancake de doi soat that bai")
@@ -382,13 +385,14 @@ class ReconcileCodService:
                 target_status=target_status,
                 transition_cfg=transition_cfg,
             )
+            pancake_client = self._get_pancake_client_for_profile(record.get("pancake_profile"))
             try:
                 if pre_transition_status is not None:
-                    self.pancake.update_order_status(order_id, pre_transition_status, update_cfg=update_cfg)
-                    self.pancake.update_order_status(order_id, target_status, update_cfg=update_cfg)
+                    pancake_client.update_order_status(order_id, pre_transition_status, update_cfg=update_cfg)
+                    pancake_client.update_order_status(order_id, target_status, update_cfg=update_cfg)
                     transitioned += 1
                 else:
-                    self.pancake.update_order_status(order_id, target_status, update_cfg=update_cfg)
+                    pancake_client.update_order_status(order_id, target_status, update_cfg=update_cfg)
                 updated += 1
                 if key:
                     newly_applied.append(key)
@@ -402,6 +406,7 @@ class ReconcileCodService:
                         error=exc,
                         update_cfg=update_cfg,
                         transition_cfg=transition_cfg,
+                        pancake_client=pancake_client,
                     )
                 if recovered:
                     transitioned += 1
@@ -426,6 +431,7 @@ class ReconcileCodService:
                     {
                         "order_id": order_id,
                         "display_id": display_id,
+                        "profile": str(record.get("pancake_profile", "")).strip(),
                         "awb": str(record.get("td_awb", "")).strip(),
                         "current_status": current_status,
                         "target_status": target_status,
@@ -513,11 +519,137 @@ class ReconcileCodService:
                 return row
         return None
 
-    def _fetch_pancake_orders(self, match_cfg: dict[str, Any], target_date: date) -> list[dict[str, Any]]:
+    def _fetch_pancake_orders(
+        self,
+        match_cfg: dict[str, Any],
+        target_date: date,
+        *,
+        warnings: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        del match_cfg
         lookback_days = max(1, int(self.settings.reconcile_cod_pancake_lookback_days))
         start_date = target_date - timedelta(days=lookback_days)
         end_date = datetime.now(self._resolve_timezone()).date()
-        return self.pancake.fetch_all_orders_for_range(start_date, end_date, self.settings.app_timezone)
+        current_profile = self._normalize_profile_name(getattr(self.settings, "profile_name", "main"))
+        orders = self._annotate_pancake_orders(
+            self.pancake.fetch_all_orders_for_range(start_date, end_date, self.settings.app_timezone),
+            profile=current_profile,
+            shop_id=self.settings.pancake_shop_id,
+        )
+
+        for profile in self.settings.reconcile_cod_extra_pancake_profiles:
+            normalized_profile = self._normalize_profile_name(profile)
+            if not normalized_profile or normalized_profile == current_profile:
+                continue
+            try:
+                client = self._get_pancake_client_for_profile(normalized_profile)
+                if not client.is_configured():
+                    continue
+                extra_orders = client.fetch_all_orders_for_range(start_date, end_date, self.settings.app_timezone)
+                orders.extend(
+                    self._annotate_pancake_orders(
+                        extra_orders,
+                        profile=normalized_profile,
+                        shop_id=client.settings.pancake_shop_id,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                message = f"Không lấy được đơn Pancake profile {normalized_profile}: {exc}"
+                if warnings is not None:
+                    warnings.append(message)
+                self.logger.warning(message)
+        return orders
+
+    def _annotate_pancake_orders(
+        self,
+        orders: list[dict[str, Any]],
+        *,
+        profile: str,
+        shop_id: int,
+    ) -> list[dict[str, Any]]:
+        annotated: list[dict[str, Any]] = []
+        sheet_label = self._sheet_label_for_pancake_profile(profile)
+        for order in orders:
+            if not isinstance(order, dict):
+                continue
+            clone = dict(order)
+            clone["_reconcile_pancake_profile"] = profile
+            clone["_reconcile_pancake_shop_id"] = int(shop_id)
+            if sheet_label:
+                clone["_reconcile_sheet_label"] = sheet_label
+            annotated.append(clone)
+        return annotated
+
+    def _get_pancake_client_for_profile(self, profile: Any) -> PancakePosClient:
+        normalized_profile = self._normalize_profile_name(profile)
+        current_profile = self._normalize_profile_name(getattr(self.settings, "profile_name", "main"))
+        if not normalized_profile or normalized_profile == current_profile:
+            return self.pancake
+        cached = self._extra_pancake_clients.get(normalized_profile)
+        if cached is not None:
+            return cached
+
+        prefix = self._profile_prefix(normalized_profile)
+        shop_id = self._to_int(
+            self._profile_env("PANCAKE_SHOP_ID", prefix, "", allow_fallback=False),
+            fallback=0,
+        )
+        replace_kwargs: dict[str, Any] = {
+            "pancake_api_base_url": self._profile_env(
+                "PANCAKE_API_BASE_URL",
+                prefix,
+                self.settings.pancake_api_base_url,
+                allow_fallback=True,
+            ).rstrip("/"),
+            "pancake_api_key": self._profile_env("PANCAKE_API_KEY", prefix, self.settings.pancake_api_key),
+            "pancake_access_token": self._profile_env(
+                "PANCAKE_ACCESS_TOKEN",
+                prefix,
+                self.settings.pancake_access_token,
+            ),
+            "pancake_shop_id": shop_id,
+            "pancake_page_size": self._to_int(
+                self._profile_env("PANCAKE_PAGE_SIZE", prefix, str(self.settings.pancake_page_size)),
+                fallback=self.settings.pancake_page_size,
+            ),
+        }
+        if hasattr(self.settings, "profile_name"):
+            replace_kwargs["profile_name"] = normalized_profile
+        profile_settings = replace(self.settings, **replace_kwargs)
+        client = PancakePosClient(profile_settings, self.logger)
+        self._extra_pancake_clients[normalized_profile] = client
+        return client
+
+    @staticmethod
+    def _normalize_profile_name(profile: Any) -> str:
+        normalized = str(profile or "main").strip().lower()
+        if normalized in {"", "default"}:
+            return "main"
+        return normalized
+
+    @staticmethod
+    def _profile_prefix(profile: str) -> str:
+        normalized = ReconcileCodService._normalize_profile_name(profile)
+        if normalized == "main":
+            return ""
+        return normalized.upper().replace("-", "_")
+
+    @staticmethod
+    def _profile_env(name: str, prefix: str, default: str = "", *, allow_fallback: bool = True) -> str:
+        if prefix:
+            value = os.getenv(f"{prefix}_{name}", "").strip()
+            if value:
+                return value
+            if not allow_fallback:
+                return str(default or "").strip()
+        return os.getenv(name, default).strip()
+
+    @staticmethod
+    def _sheet_label_for_pancake_profile(profile: Any) -> str:
+        normalized = ReconcileCodService._normalize_profile_name(profile)
+        if normalized in {"ads2", "vayxa", "vx"}:
+            return "DA-TL.VX"
+        return ""
 
     def _reconcile_rows(
         self,
@@ -599,6 +731,9 @@ class ReconcileCodService:
                 "order_id": order_id,
                 "display_id": display_id,
                 "status": status_value,
+                "profile": str(order.get("_reconcile_pancake_profile", "")).strip(),
+                "shop_id": self._to_optional_int(order.get("_reconcile_pancake_shop_id")),
+                "sheet_label": str(order.get("_reconcile_sheet_label", "")).strip(),
             }
             pancake_meta[id(order)] = info
             if order_id:
@@ -803,6 +938,9 @@ class ReconcileCodService:
                 "pancake_order_id": "",
                 "pancake_display_id": "",
                 "pancake_status": None,
+                "pancake_profile": "",
+                "pancake_shop_id": None,
+                "pancake_sheet_label": "",
             }
 
             if not candidates:
@@ -852,6 +990,9 @@ class ReconcileCodService:
             record["pancake_order_id"] = str(meta.get("order_id", "")).strip()
             record["pancake_display_id"] = str(meta.get("display_id", "")).strip()
             record["pancake_status"] = meta.get("status")
+            record["pancake_profile"] = str(meta.get("profile", "")).strip()
+            record["pancake_shop_id"] = meta.get("shop_id")
+            record["pancake_sheet_label"] = str(meta.get("sheet_label", "")).strip()
 
             if target_status_int is None:
                 record["match_result"] = "unmapped_status"
@@ -1015,6 +1156,9 @@ class ReconcileCodService:
             "pancake_order_id",
             "pancake_display_id",
             "pancake_status",
+            "pancake_profile",
+            "pancake_shop_id",
+            "pancake_sheet_label",
             "target_status",
         ]
         with path.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -1333,6 +1477,7 @@ class ReconcileCodService:
         error: Exception,
         update_cfg: dict[str, Any],
         transition_cfg: dict[str, Any],
+        pancake_client: PancakePosClient,
     ) -> bool:
         if not self._can_apply_transition_fallback(record=record, error=error, transition_cfg=transition_cfg):
             return False
@@ -1345,8 +1490,8 @@ class ReconcileCodService:
 
         display_id = str(record.get("pancake_display_id", "")).strip() or order_id
         try:
-            self.pancake.update_order_status(order_id, intermediate_status, update_cfg=update_cfg)
-            self.pancake.update_order_status(order_id, target_status, update_cfg=update_cfg)
+            pancake_client.update_order_status(order_id, intermediate_status, update_cfg=update_cfg)
+            pancake_client.update_order_status(order_id, target_status, update_cfg=update_cfg)
             self.logger.info(
                 "Fallback transition thanh cong cho don %s: %s -> %s",
                 display_id,
