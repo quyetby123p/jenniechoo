@@ -34,6 +34,7 @@ class ReconcileCodSheetService:
             "attempted": 0,
             "inserted": 0,
             "skipped_existing": 0,
+            "updated_existing": 0,
             "errors": [],
         }
         if not self.settings.reconcile_cod_sheet_enabled:
@@ -164,23 +165,32 @@ class ReconcileCodSheetService:
         sheet_title = self._resolve_sheet_title(spreadsheet_id, gid, headers=headers)
         result["sheet_title"] = sheet_title
 
-        existing_keys = self._load_existing_keys(
+        existing_index = self._load_existing_row_index(
             spreadsheet_id=spreadsheet_id,
             sheet_title=sheet_title,
             headers=headers,
         )
         rows_to_append: list[list[Any]] = []
+        repair_updates: list[dict[str, Any]] = []
+        repaired_rows: set[int] = set()
         skipped = 0
         for item in row_payloads:
             key = str(item.get("key", "")).strip()
             values = item.get("values", [])
-            if key and key in existing_keys:
+            existing = existing_index.get(key) if key else None
+            if existing:
                 skipped += 1
+                updates = self._build_existing_row_repairs(item, existing=existing)
+                if updates:
+                    repair_updates.extend(updates)
+                    row_number = self._to_int(existing.get("row"), fallback=0)
+                    if row_number > 0:
+                        repaired_rows.add(row_number)
                 continue
             if isinstance(values, list):
                 rows_to_append.append(values)
             if key:
-                existing_keys.add(key)
+                existing_index[key] = {"row": 0, "label": "", "pos": ""}
 
         if rows_to_append:
             start_row = self._find_next_blank_row_from_anchor_column(
@@ -197,8 +207,16 @@ class ReconcileCodSheetService:
                 rows=rows_to_append,
                 start_row=start_row,
             )
+        if repair_updates:
+            self._write_cell_updates(
+                spreadsheet_id=spreadsheet_id,
+                sheet_title=sheet_title,
+                headers=headers,
+                updates=repair_updates,
+            )
         result["inserted"] = len(rows_to_append)
         result["skipped_existing"] = skipped
+        result["updated_existing"] = len(repaired_rows)
         return result
 
     def _sync_via_oauth_user(self, *, row_payloads: list[dict[str, Any]], result: dict[str, Any]) -> dict[str, Any]:
@@ -216,23 +234,32 @@ class ReconcileCodSheetService:
         sheet_title = self._resolve_sheet_title(spreadsheet_id, gid, headers=headers)
         result["sheet_title"] = sheet_title
 
-        existing_keys = self._load_existing_keys(
+        existing_index = self._load_existing_row_index(
             spreadsheet_id=spreadsheet_id,
             sheet_title=sheet_title,
             headers=headers,
         )
         rows_to_append: list[list[Any]] = []
+        repair_updates: list[dict[str, Any]] = []
+        repaired_rows: set[int] = set()
         skipped = 0
         for item in row_payloads:
             key = str(item.get("key", "")).strip()
             values = item.get("values", [])
-            if key and key in existing_keys:
+            existing = existing_index.get(key) if key else None
+            if existing:
                 skipped += 1
+                updates = self._build_existing_row_repairs(item, existing=existing)
+                if updates:
+                    repair_updates.extend(updates)
+                    row_number = self._to_int(existing.get("row"), fallback=0)
+                    if row_number > 0:
+                        repaired_rows.add(row_number)
                 continue
             if isinstance(values, list):
                 rows_to_append.append(values)
             if key:
-                existing_keys.add(key)
+                existing_index[key] = {"row": 0, "label": "", "pos": ""}
 
         if rows_to_append:
             start_row = self._find_next_blank_row_from_anchor_column(
@@ -249,8 +276,16 @@ class ReconcileCodSheetService:
                 rows=rows_to_append,
                 start_row=start_row,
             )
+        if repair_updates:
+            self._write_cell_updates(
+                spreadsheet_id=spreadsheet_id,
+                sheet_title=sheet_title,
+                headers=headers,
+                updates=repair_updates,
+            )
         result["inserted"] = len(rows_to_append)
         result["skipped_existing"] = skipped
+        result["updated_existing"] = len(repaired_rows)
         return result
 
     def _build_row_payloads(self, record_items: list[dict[str, Any]], *, settlement_date: str) -> list[dict[str, Any]]:
@@ -392,28 +427,52 @@ class ReconcileCodSheetService:
         sheet_title: str,
         headers: dict[str, str],
     ) -> set[str]:
-        read_range = f"'{self._escape_sheet_title(sheet_title)}'!O3:Q"
+        return set(
+            self._load_existing_row_index(
+                spreadsheet_id=spreadsheet_id,
+                sheet_title=sheet_title,
+                headers=headers,
+            ).keys()
+        )
+
+    def _load_existing_row_index(
+        self,
+        *,
+        spreadsheet_id: str,
+        sheet_title: str,
+        headers: dict[str, str],
+    ) -> dict[str, dict[str, Any]]:
+        read_range = f"'{self._escape_sheet_title(sheet_title)}'!B3:Q"
         encoded_range = quote(read_range, safe="")
         url = f"{self._SHEETS_API_BASE}/{spreadsheet_id}/values/{encoded_range}"
         payload = self._request_json(
             "GET",
             url,
             headers=headers,
-            params={"majorDimension": "ROWS"},
+            params={
+                "majorDimension": "ROWS",
+                "valueRenderOption": "FORMATTED_VALUE",
+                "dateTimeRenderOption": "FORMATTED_STRING",
+            },
         )
         values = payload.get("values", [])
         if not isinstance(values, list):
-            return set()
-        keys: set[str] = set()
-        for row in values:
+            return {}
+        index: dict[str, dict[str, Any]] = {}
+        for offset, row in enumerate(values):
             if not isinstance(row, list):
                 continue
-            awb_raw = row[0] if len(row) > 0 else ""
-            settlement_raw = row[2] if len(row) > 2 else ""
+            awb_raw = row[13] if len(row) > 13 else ""
+            settlement_raw = row[15] if len(row) > 15 else ""
             key = self._build_row_key(awb_raw, settlement_raw)
-            if key:
-                keys.add(key)
-        return keys
+            if not key or key in index:
+                continue
+            index[key] = {
+                "row": 3 + offset,
+                "label": row[0] if len(row) > 0 else "",
+                "pos": row[2] if len(row) > 2 else "",
+            }
+        return index
 
     def _append_rows(
         self,
@@ -489,6 +548,72 @@ class ReconcileCodSheetService:
                 "values": rows,
             },
         )
+
+    def _write_cell_updates(
+        self,
+        *,
+        spreadsheet_id: str,
+        sheet_title: str,
+        headers: dict[str, str],
+        updates: list[dict[str, Any]],
+    ) -> None:
+        if not updates:
+            return
+        url = f"{self._SHEETS_API_BASE}/{spreadsheet_id}/values:batchUpdate"
+        data_items: list[dict[str, Any]] = []
+        for item in updates:
+            row = self._to_int(item.get("row"), fallback=0)
+            column = str(item.get("column", "")).strip().upper()
+            if row <= 0 or column not in {"B", "D"}:
+                continue
+            data_items.append(
+                {
+                    "range": f"'{self._escape_sheet_title(sheet_title)}'!{column}{row}",
+                    "majorDimension": "ROWS",
+                    "values": [[item.get("value", "")]],
+                }
+            )
+        if not data_items:
+            return
+        self._request_json(
+            "POST",
+            url,
+            headers=headers,
+            params={"valueInputOption": "USER_ENTERED"},
+            data={"data": data_items, "includeValuesInResponse": False},
+        )
+
+    def _build_existing_row_repairs(
+        self,
+        item: dict[str, Any],
+        *,
+        existing: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        values = item.get("values", [])
+        if not isinstance(values, list):
+            return []
+        row_number = self._to_int(existing.get("row"), fallback=0)
+        if row_number <= 0:
+            return []
+
+        updates: list[dict[str, Any]] = []
+        expected_label = values[0] if len(values) > 0 else ""
+        expected_pos = values[2] if len(values) > 2 else ""
+        current_label = existing.get("label", "")
+        current_pos = existing.get("pos", "")
+
+        if self._should_repair_cell(expected_label, current_label):
+            updates.append({"row": row_number, "column": "B", "value": expected_label})
+        if self._should_repair_cell(expected_pos, current_pos):
+            updates.append({"row": row_number, "column": "D", "value": expected_pos})
+        return updates
+
+    @staticmethod
+    def _should_repair_cell(expected: Any, current: Any) -> bool:
+        expected_text = str(expected or "").strip()
+        if not expected_text:
+            return False
+        return str(current or "").strip() != expected_text
 
     def _load_existing_rows_for_block(
         self,

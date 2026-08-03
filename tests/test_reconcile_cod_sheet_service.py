@@ -127,10 +127,17 @@ def test_sync_report_maps_b_to_ak_and_skips_existing(tmp_path: Path, monkeypatch
     service = ReconcileCodSheetService(settings=settings, logger=logging.getLogger("test"))
     captured_rows: list[list[Any]] = []
     captured_start_rows: list[int] = []
+    captured_repairs: list[dict[str, Any]] = []
 
     monkeypatch.setattr(service, "_build_auth_headers", lambda *_args, **_kwargs: {"Authorization": "Bearer t"})
     monkeypatch.setattr(service, "_resolve_sheet_title", lambda *_args, **_kwargs: "COD")
-    monkeypatch.setattr(service, "_load_existing_keys", lambda **_kwargs: {"TH01288ND0802B1|2026-05-09"})
+    monkeypatch.setattr(
+        service,
+        "_load_existing_row_index",
+        lambda **_kwargs: {
+            "TH01288ND0802B1|2026-05-09": {"row": 88, "label": "DA-TL.JE", "pos": "JCT888"}
+        },
+    )
     def _fake_find_row(**kwargs):  # noqa: ANN001
         assert kwargs["anchor_column"] == "Q"
         return 297
@@ -141,6 +148,7 @@ def test_sync_report_maps_b_to_ak_and_skips_existing(tmp_path: Path, monkeypatch
         captured_start_rows.append(int(kwargs["start_row"]))
 
     monkeypatch.setattr(service, "_append_rows", _capture_append)
+    monkeypatch.setattr(service, "_write_cell_updates", lambda **kwargs: captured_repairs.extend(kwargs["updates"]))
 
     result = service.sync_report(report)
 
@@ -148,6 +156,8 @@ def test_sync_report_maps_b_to_ak_and_skips_existing(tmp_path: Path, monkeypatch
     assert result["attempted"] == 3
     assert result["inserted"] == 2
     assert result["skipped_existing"] == 1
+    assert result["updated_existing"] == 0
+    assert captured_repairs == []
     assert len(captured_rows) == 2
     assert captured_start_rows == [297]
 
@@ -184,6 +194,60 @@ def test_sync_report_maps_b_to_ak_and_skips_existing(tmp_path: Path, monkeypatch
     assert second[2] == ""
     assert second[16] == "Đang hoàn hàng"
     assert second[17] == 0
+
+
+def test_sync_report_repairs_existing_vayxa_label_and_pos_without_append(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    settings = _dummy_settings(tmp_path)
+    credentials_file = settings.reconcile_cod_sheet_credentials_file
+    credentials_file.parent.mkdir(parents=True, exist_ok=True)
+    credentials_file.write_text("{}", encoding="utf-8")
+
+    report = {
+        "settlement_date": "2026-08-03",
+        "records": [
+            {
+                "td_awb": "TH0128903UEM2C",
+                "td_send_date": "2026-07-30",
+                "td_detail_settlement_date": "2026-08-03",
+                "td_status": "SUCCESS",
+                "td_cod_minor": 284700,
+                "td_sheet_cod_minor": 284700,
+                "pancake_profile": "ads2",
+                "pancake_order_id": "270229046794750",
+                "pancake_display_id": "136",
+            }
+        ],
+    }
+
+    service = ReconcileCodSheetService(settings=settings, logger=logging.getLogger("test"))
+    captured_repairs: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(service, "_build_auth_headers", lambda *_args, **_kwargs: {"Authorization": "Bearer t"})
+    monkeypatch.setattr(service, "_resolve_sheet_title", lambda *_args, **_kwargs: "COD")
+    monkeypatch.setattr(
+        service,
+        "_load_existing_row_index",
+        lambda **_kwargs: {
+            "TH0128903UEM2C|2026-08-03": {"row": 297, "label": "", "pos": ""}
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_append_rows",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("existing row must not append")),
+    )
+    monkeypatch.setattr(service, "_write_cell_updates", lambda **kwargs: captured_repairs.extend(kwargs["updates"]))
+
+    result = service.sync_report(report)
+
+    assert result["ok"] is True
+    assert result["inserted"] == 0
+    assert result["skipped_existing"] == 1
+    assert result["updated_existing"] == 1
+    assert captured_repairs == [
+        {"row": 297, "column": "B", "value": "DA-TL.VX"},
+        {"row": 297, "column": "D", "value": "136"},
+    ]
 
 
 def test_build_row_values_uses_vayxa_label_for_ads2_profile(tmp_path: Path) -> None:
@@ -314,7 +378,7 @@ def test_sync_report_oauth_user_mode(tmp_path: Path, monkeypatch) -> None:  # no
 
     monkeypatch.setattr(service, "_refresh_oauth_user_access_token", lambda: "oauth_access_token")
     monkeypatch.setattr(service, "_resolve_sheet_title", lambda *_args, **_kwargs: "COD")
-    monkeypatch.setattr(service, "_load_existing_keys", lambda **_kwargs: set())
+    monkeypatch.setattr(service, "_load_existing_row_index", lambda **_kwargs: {})
     def _fake_find_row(**kwargs):  # noqa: ANN001
         assert kwargs["anchor_column"] == "Q"
         return 297
