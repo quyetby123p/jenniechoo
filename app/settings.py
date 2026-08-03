@@ -781,7 +781,7 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         max_value=36500,
     )
     reconcile_cod_extra_pancake_profiles = _parse_string_list(
-        os.getenv("RECONCILE_COD_EXTRA_PANCAKE_PROFILES", "ads2"),
+        os.getenv("RECONCILE_COD_EXTRA_PANCAKE_PROFILES", "ads2" if is_default_profile else ""),
     )
     reconcile_cod_sheet_enabled = _parse_bool(
         os.getenv("RECONCILE_COD_SHEET_ENABLED", "0"),
