@@ -52,22 +52,54 @@ def _dummy_settings() -> Settings:
 
 def test_resolve_post_from_story_fbid_url() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = method, params, data
+        assert path == "/61581440236157_123456789"
+        assert access_token == "page_dummy"
+        return {
+            "id": "61581440236157_123456789",
+            "message": "Reservations for two #JCV257",
+            "permalink_url": "https://www.facebook.com/reel/1555271039631274/",
+        }
+
+    client._request = fake_request  # type: ignore[method-assign]
+
     resolved = client._resolve_post_from_url_patterns(
         "https://www.facebook.com/permalink.php?story_fbid=123456789&id=61581440236157"
     )
     assert resolved is not None
     assert resolved.post_id == "123456789"
     assert resolved.object_story_id == "61581440236157_123456789"
+    assert resolved.message_text == "Reservations for two #JCV257"
+    assert resolved.permalink_url == "https://www.facebook.com/reel/1555271039631274/"
+    assert resolved.media_label == "Video"
 
 
 def test_resolve_post_from_numeric_posts_url() -> None:
     client = MetaAdsClient(settings=_dummy_settings(), logger=logging.getLogger("test"))
+
+    def fake_request(method: str, path: str, *, params=None, data=None, access_token=None):  # noqa: ANN001
+        _ = method, params, data
+        assert path == "/61581440236157_987654321"
+        assert access_token == "page_dummy"
+        return {
+            "id": "61581440236157_987654321",
+            "message": "Chione Dress #JCV257 #phuongthao",
+            "permalink_url": "https://www.facebook.com/61581440236157/posts/987654321",
+            "attachments": {"data": [{"media_type": "photo"}]},
+        }
+
+    client._request = fake_request  # type: ignore[method-assign]
+
     resolved = client._resolve_post_from_url_patterns(
         "https://www.facebook.com/jenniechoo.bangkok/posts/987654321"
     )
     assert resolved is not None
     assert resolved.post_id == "987654321"
     assert resolved.object_story_id == "61581440236157_987654321"
+    assert resolved.message_text == "Chione Dress #JCV257 #phuongthao"
+    assert resolved.media_label == "Anh"
 
 
 def test_resolve_post_owner_page_mismatch() -> None:
