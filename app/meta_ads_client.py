@@ -886,25 +886,13 @@ class MetaAdsClient:
         owner_id = self._first(query, "id")
         if story_fbid and owner_id:
             self._validate_owner_page(owner_id)
-            return ResolvedPost(
-                post_id=story_fbid,
-                page_id=owner_id,
-                permalink_url=post_url,
-                object_story_id=f"{owner_id}_{story_fbid}",
-                strategy="direct_story_fbid",
-            )
+            return self._to_resolved_post(f"{owner_id}_{story_fbid}", post_url, "direct_story_fbid")
 
         path_match = re.search(r"/posts/(?P<post_id>\d+)$", parsed.path or "", re.IGNORECASE)
         if path_match:
             post_id = path_match.group("post_id")
             owner_page_id = self.settings.meta_page_id
-            return ResolvedPost(
-                post_id=post_id,
-                page_id=owner_page_id,
-                permalink_url=post_url,
-                object_story_id=f"{owner_page_id}_{post_id}",
-                strategy="direct_numeric_post",
-            )
+            return self._to_resolved_post(f"{owner_page_id}_{post_id}", post_url, "direct_numeric_post")
         return None
 
     def _resolve_post_from_page_posts(self, post_url: str) -> ResolvedPost:
