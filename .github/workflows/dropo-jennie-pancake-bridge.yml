@@ -1,0 +1,75 @@
+name: Jennie Choo Dropo to Pancake
+
+on:
+  # GitHub scheduler có thể trễ vài phút, nhưng không cần máy của anh bật.
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Tạo đơn thật trong Pancake (bỏ chọn để chỉ dry-run)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jenniechoo-dropo-pancake-bridge
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PANCAKE_API_BASE_URL: ${{ secrets.PANCAKE_API_BASE_URL || 'https://pos.pancake.vn/api/v1' }}
+      PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      PANCAKE_SHOP_ID: ${{ secrets.PANCAKE_SHOP_ID }}
+      DROPO_PANCAKE_OAUTH_CLIENT_ID: ${{ secrets.DROPO_PANCAKE_OAUTH_CLIENT_ID || secrets.RECONCILE_COD_SHEET_OAUTH_CLIENT_ID || secrets.BOT3_GOOGLE_OAUTH_CLIENT_ID }}
+      DROPO_PANCAKE_OAUTH_CLIENT_SECRET: ${{ secrets.DROPO_PANCAKE_OAUTH_CLIENT_SECRET || secrets.RECONCILE_COD_SHEET_OAUTH_CLIENT_SECRET || secrets.BOT3_GOOGLE_OAUTH_CLIENT_SECRET }}
+      DROPO_PANCAKE_OAUTH_REFRESH_TOKEN: ${{ secrets.DROPO_PANCAKE_OAUTH_REFRESH_TOKEN || secrets.RECONCILE_COD_SHEET_OAUTH_REFRESH_TOKEN || secrets.BOT3_GOOGLE_OAUTH_REFRESH_TOKEN }}
+      DROPO_PANCAKE_OAUTH_TOKEN_URI: ${{ secrets.DROPO_PANCAKE_OAUTH_TOKEN_URI || 'https://oauth2.googleapis.com/token' }}
+      # An toàn mặc định; runner chỉ chuyển sang live ở lịch tự động hoặc khi
+      # người quản trị tick live trong workflow_dispatch.
+      DROPO_PANCAKE_BRIDGE_DRY_RUN: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check required secrets
+        shell: bash
+        run: |
+          missing=()
+          for key in PANCAKE_ACCESS_TOKEN PANCAKE_SHOP_ID DROPO_PANCAKE_OAUTH_CLIENT_ID DROPO_PANCAKE_OAUTH_CLIENT_SECRET DROPO_PANCAKE_OAUTH_REFRESH_TOKEN; do
+            if [ -z "${!key}" ]; then missing+=("$key"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Thiếu GitHub Actions secrets:\n'
+            printf ' - %s\n' "${missing[@]}"
+            exit 1
+          fi
+
+      - name: Sync Jennie orders
+        shell: bash
+        run: |
+          args=("--profile" "main" "--once" "--verbose")
+          # Lịch tự động chạy live để lead mới tự lên Pancake. Workflow chạy
+          # tay mặc định dry-run; chỉ tạo thật khi anh tick live.
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.live }}" = "true" ]; then
+            args+=("--live")
+          fi
+          python scripts/run_dropo_pancake_bridge.py "${args[@]}"

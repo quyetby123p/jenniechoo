@@ -109,6 +109,109 @@ class PancakePosClient:
             return [item for item in shops if isinstance(item, dict)]
         return []
 
+    def create_order(
+        self,
+        order_payload: dict[str, Any],
+        *,
+        create_cfg: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Tạo đơn mới trong Pancake POS.
+
+        Trả về dict đơn vừa tạo (đã bóc khỏi envelope nếu API bọc trong "data").
+        Ném PancakeApiError nếu API từ chối, ValidationError nếu thiếu cấu hình.
+
+        Endpoint mặc định POST /shops/{shop_id}/orders có thể đổi qua create_cfg
+        để không phải sửa code khi Pancake đổi đường dẫn.
+        """
+        if self.settings.pancake_shop_id <= 0:
+            raise ValidationError("Chưa có PANCAKE_SHOP_ID hợp lệ.")
+        if not isinstance(order_payload, dict) or not order_payload:
+            raise ValidationError("order_payload rỗng, không tạo đơn Pancake được.")
+        items = order_payload.get("items")
+        if not isinstance(items, list) or not items:
+            raise ValidationError("Đơn Pancake phải có ít nhất 1 item.")
+
+        cfg = create_cfg if isinstance(create_cfg, dict) else {}
+        method = str(cfg.get("method", "POST")).strip().upper() or "POST"
+        path_template = str(cfg.get("path", "/shops/{shop_id}/orders")).strip()
+        try:
+            path = path_template.format(shop_id=self.settings.pancake_shop_id)
+        except KeyError as exc:
+            raise ValidationError(f"Cấu hình create endpoint Pancake thiếu placeholder: {exc}") from exc
+
+        payload = self._request(method, path, data=order_payload)
+        created = self._extract_order_payload(payload)
+        if not isinstance(created, dict) or not created:
+            raise PancakeApiError(
+                f"Pancake không trả về đơn sau khi tạo: {self._short_body(json.dumps(payload, ensure_ascii=False))}"
+            )
+        return created
+
+    def list_products(self, *, page_size: int = 500) -> list[dict[str, Any]]:
+        """Đọc catalog sản phẩm/biến thể của shop hiện tại (GET, không sửa dữ liệu)."""
+        if self.settings.pancake_shop_id <= 0:
+            raise ValidationError("Chưa có PANCAKE_SHOP_ID hợp lệ.")
+        payload = self._request(
+            "GET",
+            f"/shops/{self.settings.pancake_shop_id}/products",
+            params={
+                "page_size": max(1, min(int(page_size), 500)),
+                "page_number": 1,
+            },
+        )
+        products = payload.get("data", [])
+        if not isinstance(products, list):
+            return []
+        return [item for item in products if isinstance(item, dict)]
+
+    def list_geo_provinces(self, *, country_code: str = "66") -> list[dict[str, Any]]:
+        """Đọc danh sách tỉnh/thành Pancake dùng cho địa chỉ giao hàng."""
+        payload = self._request("GET", "/geo/provinces", params={"country_code": country_code})
+        data = payload.get("data", [])
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+    def list_geo_districts(
+        self,
+        province_id: str,
+        *,
+        country_code: str = "66",
+    ) -> list[dict[str, Any]]:
+        """Đọc quận/huyện theo tỉnh/thành Pancake."""
+        normalized = str(province_id or "").strip()
+        if not normalized:
+            return []
+        payload = self._request(
+            "GET",
+            "/geo/districts",
+            params={"country_code": country_code, "province_id": normalized},
+        )
+        data = payload.get("data", [])
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+    def list_geo_communes(
+        self,
+        province_id: str,
+        district_id: str,
+        *,
+        country_code: str = "66",
+    ) -> list[dict[str, Any]]:
+        """Đọc phường/xã theo tỉnh/thành và quận/huyện Pancake."""
+        province = str(province_id or "").strip()
+        district = str(district_id or "").strip()
+        if not province or not district:
+            return []
+        payload = self._request(
+            "GET",
+            "/geo/communes",
+            params={
+                "country_code": country_code,
+                "province_id": province,
+                "district_id": district,
+            },
+        )
+        data = payload.get("data", [])
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
     def fetch_all_orders_for_date(self, report_date: date, timezone_name: str) -> list[dict[str, Any]]:
         snapshot = self.fetch_daily_orders_snapshot(report_date, timezone_name)
         orders = snapshot.get("orders", [])
@@ -273,6 +376,52 @@ class PancakePosClient:
                 f"Không lấy được payload chi tiết đơn Pancake cho order_id={normalized_order_id}."
             )
         return order
+
+    def update_order_shipping_address(
+        self,
+        order_id: str,
+        shipping_address: dict[str, Any],
+        *,
+        verify_after_update: bool = True,
+    ) -> dict[str, Any]:
+        """Cập nhật riêng địa chỉ giao hàng, bảo toàn các phần còn lại của đơn.
+
+        Pancake yêu cầu PUT toàn bộ order khi sửa địa chỉ. Hàm đọc bản hiện tại,
+        thay đúng ``shipping_address`` rồi kiểm tra lại item/tổng tiền/trạng thái
+        và địa chỉ sau khi API ghi xong để tránh sửa nhầm đơn.
+        """
+        normalized_order_id = str(order_id or "").strip()
+        if not normalized_order_id:
+            raise ValidationError("Thiếu order_id để cập nhật địa chỉ Pancake.")
+        if not isinstance(shipping_address, dict) or not shipping_address:
+            raise ValidationError("shipping_address rỗng, không cập nhật Pancake được.")
+
+        path = self._format_order_path(
+            "/shops/{shop_id}/orders/{order_id}", normalized_order_id
+        )
+        source_order = self.get_order_detail(normalized_order_id)
+        payload = copy.deepcopy(source_order)
+        payload["shipping_address"] = copy.deepcopy(shipping_address)
+
+        guard_before = self._capture_paths(
+            source_order,
+            ["__items_signature__", "total_price", "total_quantity", "status", "is_empty_cart"],
+        )
+        self._request("PUT", path, data=payload)
+
+        if not verify_after_update:
+            return payload
+
+        latest_order = self.get_order_detail(normalized_order_id)
+        guard_after = self._capture_paths(
+            latest_order,
+            ["__items_signature__", "total_price", "total_quantity", "status", "is_empty_cart"],
+        )
+        if guard_before != guard_after:
+            raise PancakeApiError(
+                "Cập nhật địa chỉ đã làm thay đổi dữ liệu đơn ngoài phạm vi cho phép."
+            )
+        return latest_order
 
     def update_order_note_print(
         self,
