@@ -120,7 +120,15 @@ def main() -> int:
     if applied:
         logger.info("Lay cau hinh bridge tu file config theo profile: %s", ", ".join(applied))
 
-    settings = load_settings(profile=profile or None)
+    # Jennie dùng bộ biến không tiền tố và config mặc định; "main" chỉ là
+    # tên dễ hiểu ở CLI, không phải một profile cấu hình riêng.  Bridge
+    # không dùng Telegram/Meta nên không được buộc CI phải khai báo credential
+    # của các dịch vụ đó.
+    settings_profile = None if profile.lower() in {"", "main", "default"} else profile
+    settings = load_settings(
+        profile=settings_profile,
+        require_app_credentials=False,
+    )
     config = BridgeConfig.from_env(prefix)
     if args.live:
         config.dry_run = False

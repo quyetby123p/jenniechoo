@@ -402,7 +402,18 @@ def _parse_string_list(raw: str, *, default: tuple[str, ...] = ()) -> tuple[str,
     return tuple(values)
 
 
-def load_settings(project_root: Path | None = None, profile: str | None = None) -> Settings:
+def load_settings(
+    project_root: Path | None = None,
+    profile: str | None = None,
+    *,
+    require_app_credentials: bool = True,
+) -> Settings:
+    """Load settings for the bot or a focused integration worker.
+
+    The Pancake bridge only needs Pancake and Google Sheets credentials.  Keep
+    the existing strict defaults for the bot, while allowing focused workers
+    to avoid requiring unrelated Telegram/Meta credentials.
+    """
     if project_root is None:
         project_root = Path(__file__).resolve().parents[1]
     profile_name = _normalize_profile(profile)
@@ -416,21 +427,22 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
     telegram_bot_token = _profile_env(
         "TELEGRAM_BOT_TOKEN",
         profile_name,
-        required=True,
+        required=require_app_credentials,
         allow_base_fallback=is_default_profile,
     )
     telegram_allowed_user_id = int(
         _profile_env(
             "TELEGRAM_ALLOWED_USER_ID",
             profile_name,
-            required=True,
+            default="0" if not require_app_credentials else "",
+            required=require_app_credentials,
             allow_base_fallback=True,
         )
     )
     meta_access_token = _profile_env(
         "META_ACCESS_TOKEN",
         profile_name,
-        required=True,
+        required=require_app_credentials,
         allow_base_fallback=True,
     )
     if is_default_profile:
@@ -439,19 +451,19 @@ def load_settings(project_root: Path | None = None, profile: str | None = None) 
         meta_page_access_token = _profile_env(
             "META_PAGE_ACCESS_TOKEN",
             profile_name,
-            required=True,
+            required=require_app_credentials,
             allow_base_fallback=False,
         )
     meta_ad_account_id = _profile_env(
         "META_AD_ACCOUNT_ID",
         profile_name,
-        required=True,
+        required=require_app_credentials,
         allow_base_fallback=is_default_profile,
     )
     meta_page_id = _profile_env(
         "META_PAGE_ID",
         profile_name,
-        required=True,
+        required=require_app_credentials,
         allow_base_fallback=is_default_profile,
     )
     meta_api_version = _profile_env(

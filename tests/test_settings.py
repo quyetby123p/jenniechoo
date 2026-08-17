@@ -49,6 +49,27 @@ def test_load_settings_accepts_profile_instagram_token_alias(monkeypatch, tmp_pa
     assert settings.meta_creative_access_token == "ig_user_token_ads2"
 
 
+def test_focused_worker_settings_do_not_require_telegram_or_meta(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    _write_required_config(tmp_path)
+    for key in (
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_ALLOWED_USER_ID",
+        "META_ACCESS_TOKEN",
+        "META_AD_ACCOUNT_ID",
+        "META_PAGE_ID",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("PANCAKE_ACCESS_TOKEN", "pancake")
+    monkeypatch.setenv("PANCAKE_SHOP_ID", "123")
+
+    settings = load_settings(project_root=tmp_path, require_app_credentials=False)
+
+    assert settings.telegram_bot_token == ""
+    assert settings.telegram_allowed_user_id == 0
+    assert settings.pancake_access_token == "pancake"
+    assert settings.pancake_shop_id == 123
+
+
 def test_ads2_daily_report_uses_profile_pancake_and_chat_fallback(monkeypatch, tmp_path) -> None:  # noqa: ANN001
     _write_required_config(tmp_path, "ads2")
     _set_default_required_env(monkeypatch)
