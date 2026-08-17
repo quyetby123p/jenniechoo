@@ -255,6 +255,47 @@ def test_update_order_note_print_uses_default_endpoint(tmp_path: Path) -> None:
     assert calls[2] == ("GET", "/shops/123/orders/180157094927073", {})
 
 
+def test_update_order_shipping_address_preserves_order_fields(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))
+    calls: list[tuple[str, str, dict[str, object]]] = []
+    source_order = {
+        "id": 180157094927073,
+        "status": 0,
+        "total_price": 250000,
+        "total_quantity": 1,
+        "is_empty_cart": False,
+        "items": [{"product_id": "p1", "quantity": 1}],
+        "shipping_address": {"address": "raw", "post_code": "10120"},
+    }
+    updated_order = copy.deepcopy(source_order)
+    updated_order["shipping_address"] = {
+        "address": "raw",
+        "post_code": "10120",
+        "province_id": "66_R92277",
+        "district_id": "66_R589",
+        "commune_id": "66_R0000014",
+    }
+
+    def fake_request(method: str, path: str, *, params=None, data=None):  # noqa: ANN001
+        del params
+        calls.append((method, path, data or {}))
+        if method == "GET":
+            return {"success": True, "order": copy.deepcopy(source_order if len(calls) == 1 else updated_order)}
+        return {"success": True}
+
+    client._request = fake_request  # type: ignore[method-assign]
+    result = client.update_order_shipping_address(
+        "180157094927073",
+        updated_order["shipping_address"],
+    )
+    assert result["shipping_address"]["commune_id"] == "66_R0000014"
+    assert calls[1][0:2] == ("PUT", "/shops/123/orders/180157094927073")
+    assert calls[1][2]["items"] == source_order["items"]
+    assert calls[1][2]["total_price"] == source_order["total_price"]
+    assert calls[2][0] == "GET"
+
+
 def test_update_order_note_print_can_disable_safe_mode(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))
