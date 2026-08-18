@@ -359,17 +359,17 @@ class DropoPancakeBridge:
         if not codes:
             raise ValidationError("thiếu SKU sản phẩm Jennie trong lead")
 
+        # Landing dùng một cột Màu/Size chung khi khách chọn cùng một lựa
+        # chọn cho cả bundle. Nếu chỉ đọc các cột theo từng sản phẩm (mau1,
+        # size1...), đơn nhiều sản phẩm sẽ rơi xuống biến thể đầu tiên trong
+        # catalog và làm sai size/màu khách đặt.
+        shared_color = str(get("Màu", "mau", "color") or "").strip()
+        shared_size = str(get("Size", "size") or "").strip()
         items: list[dict[str, Any]] = []
         for index, raw_code in enumerate(codes, start=1):
             code = self._normalize_jennie_code(raw_code)
-            color = str(
-                get(f"mau{index}", f"color{index}", f"Màu {index}")
-                or (get("Màu", "mau", "color") if len(codes) == 1 else "")
-            ).strip()
-            size = str(
-                get(f"size{index}", f"Size {index}")
-                or (get("Size", "size") if len(codes) == 1 else "")
-            ).strip()
+            color = str(get(f"mau{index}", f"color{index}", f"Màu {index}") or shared_color).strip()
+            size = str(get(f"size{index}", f"Size {index}") or shared_size).strip()
             quantity_raw = get(f"sl{index}", f"qty{index}", f"Quantity {index}")
             if not quantity_raw and len(codes) == 1:
                 quantity_raw = get("Số lượng", "sl", "quantity", "qty")

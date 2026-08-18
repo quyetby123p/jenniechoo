@@ -199,6 +199,50 @@ def test_fallback_dung_cot_sku_khi_selected_rong():
     assert bridge.resolve_items("", "VXV002-DEN-L")[0]["variation_id"] == "var-den-l"
 
 
+def test_jennie_bundle_applies_shared_color_and_size_to_every_product():
+    bridge, _, _ = build_bridge([HEADER])
+    bridge._pancake_catalog = {
+        "JC-A-250": [
+            {
+                "variation_id": "jca250-kem-s",
+                "variation_sku": "JC-A-250-KEM-S",
+                "size": "S",
+                "field_values": ["Kem", "S"],
+                "retail_price": 250000,
+            },
+            {
+                "variation_id": "jca250-kem-l",
+                "variation_sku": "JC-A-250-KEM-L",
+                "size": "L",
+                "field_values": ["Kem", "L"],
+                "retail_price": 250000,
+            },
+        ],
+        "JC-A-248": [
+            {
+                "variation_id": "jca248-kem-s",
+                "variation_sku": "JC-A-248-KEM-S",
+                "size": "S",
+                "field_values": ["Kem", "S"],
+                "retail_price": 220000,
+            },
+            {
+                "variation_id": "jca248-kem-l",
+                "variation_sku": "JC-A-248-KEM-L",
+                "size": "L",
+                "field_values": ["Kem", "L"],
+                "retail_price": 220000,
+            },
+        ],
+    }
+    header = ["Mã sản phẩm", "Màu", "Size", "Số lượng"]
+    row = ["JC-A-250, JC-A-248", "Kem", "L", "2"]
+
+    items = bridge.resolve_jennie_items(row, header)
+
+    assert [item["variation_id"] for item in items] == ["jca250-kem-l", "jca248-kem-l"]
+
+
 # ───────────────────────────── build_payload ─────────────────────────────
 
 
