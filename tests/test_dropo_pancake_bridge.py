@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import requests
 
 from app.dropo_pancake_bridge import BridgeConfig, DropoPancakeBridge
 from app.exceptions import PancakeApiError, ValidationError
@@ -93,6 +94,25 @@ class FakeSession:
         raise AssertionError(f"URL không mong đợi: {url}")
 
 
+class FlakySheetsSession(FakeSession):
+    def __init__(self, values: list[list[Any]], failures: int) -> None:
+        super().__init__(values)
+        self.failures = failures
+
+    def request(self, *, method: str, url: str, headers=None, json=None, data=None, timeout=None):
+        if "/values/" in url and self.failures > 0:
+            self.failures -= 1
+            raise requests.ConnectionError("simulated connection reset")
+        return super().request(
+            method=method,
+            url=url,
+            headers=headers,
+            json=json,
+            data=data,
+            timeout=timeout,
+        )
+
+
 class FakePancake:
     def __init__(self, *, response: dict | None = None, error: Exception | None = None) -> None:
         self.response = response or {"id": "PC-1001"}
@@ -174,6 +194,18 @@ def test_gop_so_luong_khi_bundle_trung_sku():
     assert items == [
         {"variation_id": "var-den-m", "quantity": 2, "variation_info": {"sku": "VXV002-DEN-M"}}
     ]
+
+
+def test_sheets_request_retries_transient_connection_reset(monkeypatch):
+    bridge, _, _ = build_bridge([HEADER])
+    flaky = FlakySheetsSession([HEADER], failures=2)
+    bridge.session = flaky
+    monkeypatch.setattr("app.dropo_pancake_bridge.time.sleep", lambda _: None)
+
+    values = bridge._fetch_sheet_values()
+
+    assert values == [HEADER]
+    assert flaky.failures == 0
 
 
 def test_bundle_tron_mau_size_tach_dung_item():

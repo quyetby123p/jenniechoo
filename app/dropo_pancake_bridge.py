@@ -23,6 +23,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import time
 from typing import Any
 import unicodedata
 from zoneinfo import ZoneInfo
@@ -804,16 +805,12 @@ class DropoPancakeBridge:
             "Authorization": f"Bearer {self._google_access_token()}",
             "Accept": "application/json",
         }
-        response = self.session.request(
-            method=method.upper(), url=url, headers=headers, json=data, timeout=30
-        )
+        response = self._sheets_http_request(method, url, headers=headers, data=data)
         if response.status_code == 401:
             # token hết hạn giữa chừng -> refresh 1 lần rồi thử lại
             self._access_token = ""
             headers["Authorization"] = f"Bearer {self._google_access_token()}"
-            response = self.session.request(
-                method=method.upper(), url=url, headers=headers, json=data, timeout=30
-            )
+            response = self._sheets_http_request(method, url, headers=headers, data=data)
         if response.status_code >= 400:
             raise RuntimeError(
                 f"Google Sheets API lỗi ({response.status_code}): {str(response.text)[:300]}"
@@ -823,6 +820,45 @@ class DropoPancakeBridge:
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"Google Sheets API trả JSON không hợp lệ: {str(response.text)[:200]}") from exc
         return payload if isinstance(payload, dict) else {}
+
+    def _sheets_http_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str],
+        data: dict[str, Any] | None,
+    ) -> Any:
+        """Retry transient Google Sheets transport/API failures."""
+        configured_delays = getattr(self.settings, "retry_backoff_seconds", None)
+        delays = [int(delay) for delay in (configured_delays or [2, 5, 10]) if int(delay) >= 0]
+        for attempt in range(len(delays) + 1):
+            try:
+                response = self.session.request(
+                    method=method.upper(), url=url, headers=headers, json=data, timeout=30
+                )
+            except requests.RequestException as exc:
+                if attempt >= len(delays):
+                    raise
+                delay = delays[attempt]
+                self.logger.warning(
+                    "Google Sheets kết nối lỗi (%s), thử lại sau %ss (%s/%s).",
+                    str(exc)[:180], delay, attempt + 1, len(delays)
+                )
+                time.sleep(delay)
+                continue
+
+            if response.status_code not in {408, 429} and response.status_code < 500:
+                return response
+            if attempt >= len(delays):
+                return response
+            delay = delays[attempt]
+            self.logger.warning(
+                "Google Sheets trả HTTP %s, thử lại sau %ss (%s/%s).",
+                response.status_code, delay, attempt + 1, len(delays)
+            )
+            time.sleep(delay)
+        raise RuntimeError("Google Sheets request thất bại sau khi retry.")  # pragma: no cover
 
     def _google_access_token(self) -> str:
         if self._access_token:
