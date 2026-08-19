@@ -1,0 +1,75 @@
+name: Pancake Jennie Choo auto-confirm
+
+on:
+  # Runs independently of the local computer.
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pancake-jennie-choo-auto-confirm
+  cancel-in-progress: false
+
+jobs:
+  auto-confirm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      APP_TIMEZONE: ${{ secrets.APP_TIMEZONE || 'Asia/Ho_Chi_Minh' }}
+      APP_CURRENCY: ${{ secrets.APP_CURRENCY || 'VND' }}
+      APP_RETRY_MAX: ${{ secrets.APP_RETRY_MAX || '3' }}
+      APP_RETRY_BACKOFF: ${{ secrets.APP_RETRY_BACKOFF || '2,5,10' }}
+
+      # Settings validation requires the existing main-profile credentials.
+      # The worker below does not call Meta, Telegram, or Thai Duong.
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ALLOWED_USER_ID: ${{ secrets.TELEGRAM_ALLOWED_USER_ID }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      META_PAGE_ACCESS_TOKEN: ${{ secrets.META_PAGE_ACCESS_TOKEN }}
+      META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
+      META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+      META_API_VERSION: ${{ secrets.META_API_VERSION || 'v21.0' }}
+
+      # Main profile is the Jennie Choo Pancake shop.
+      PANCAKE_API_BASE_URL: ${{ secrets.PANCAKE_API_BASE_URL || 'https://pos.pancake.vn/api/v1' }}
+      PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
+      PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      PANCAKE_SHOP_ID: ${{ secrets.PANCAKE_SHOP_ID }}
+      PANCAKE_PAGE_SIZE: ${{ secrets.PANCAKE_PAGE_SIZE || '200' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check Pancake credentials
+        shell: bash
+        run: |
+          missing=()
+          for key in PANCAKE_SHOP_ID; do
+            if [ -z "${!key}" ]; then missing+=("$key"); fi
+          done
+          if [ -z "$PANCAKE_ACCESS_TOKEN" ] && [ -z "$PANCAKE_API_KEY" ]; then
+            missing+=("PANCAKE_ACCESS_TOKEN or PANCAKE_API_KEY")
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing GitHub Actions secrets:\n'
+            printf ' - %s\n' "${missing[@]}"
+            exit 1
+          fi
+
+      - name: Confirm Pancake orders only
+        run: python -m app.pancake_auto_confirm --profile main --lookback-hours 168 --max-batch 500
