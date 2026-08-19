@@ -44,6 +44,22 @@
     "payment_method_paths": ["payment_method", "paymentType", "payment.type"],
     "transferred_amount_paths": ["transferred_amount", "transfer_money", "paid_amount", "codTransferred", "payment.transferred_amount"],
     "deposit_amount_paths": ["deposit_amount", "deposit", "codTransferred", "payment.deposit_amount"],
+    "exchange_original_amount_paths": [
+      "payment_from_customers_exchange_order",
+      "order_returned.order_to_returned.payment_from_customers_order_returned",
+      "order_returned.order_to_returned.cod"
+    ],
+    "exchange_remaining_amount_paths": [
+      "cod",
+      "cod_amount",
+      "payment.remaining_amount",
+      "payment.cod"
+    ],
+    "exchange_marker_paths": [
+      "exchanged_returned_order_ids",
+      "order_returned",
+      "order_returned.order_id_to_returned"
+    ],
     "total_amount_paths": ["total_price", "total", "cod"],
     "money_minor_unit_factor": 100,
     "payment_method_transfer_keywords": [
@@ -54,6 +70,26 @@
     ],
     "payment_method_deposit_keywords": ["coc", "deposit"],
     "payment_method_cod_keywords": ["cod", "thu ho", "cash on delivery"],
+    "dropo_landing_rule": {
+      "enabled": true,
+      "note_paths": ["note", "note_internal", "internal_note", "noteInternal"],
+      "source_markers": ["Dropo landing"],
+      "order_status_value": "DRAFT",
+      "need_sale_value": true,
+      "config_fee_value": 1
+    },
+    "auto_confirm_after_stock": {
+      "enabled": true,
+      "from_status": 17,
+      "target_status": 1,
+      "update_endpoint": {
+        "method": "PUT",
+        "path": "/shops/{shop_id}/orders/{order_id}",
+        "status_field": "status",
+        "verify_after_update": true,
+        "extra_payload": {}
+      }
+    },
     "print_note_sync": {
       "enabled": true,
       "template": "{thai_duong_order_uid}",
@@ -146,10 +182,22 @@
       "order_confirm_status_value": "",
       "need_sale_field": "isNeedSale",
       "need_sale_value": false,
+      "config_fee_field": "configFee",
+      "config_fee_value": 0,
       "update_endpoint": {
         "base_url_env": "THAI_DUONG_API_BASE_URL",
         "method": "PUT",
         "path": "/api/v1/orders/update-status-order/{order_id}",
+        "use_session_login": true,
+        "login_path": "/api/v1/auth/login"
+      }
+    },
+    "payment_sync": {
+      "enabled": true,
+      "update_endpoint": {
+        "base_url_env": "THAI_DUONG_API_BASE_URL",
+        "method": "PUT",
+        "path": "/api/v1/orders/{order_id}",
         "use_session_login": true,
         "login_path": "/api/v1/auth/login"
       }
@@ -177,6 +225,7 @@
       "cod_amount_path": "cod",
       "need_sale_confirm_path": "isNeedSale",
       "need_sale_confirm_value": false,
+      "config_fee_path": "configFee",
       "order_status_path": "orderStatus",
       "order_status_value": "SALE_CONFIRM",
       "items_path": "products",

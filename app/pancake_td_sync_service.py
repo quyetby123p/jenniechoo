@@ -169,6 +169,11 @@ class PancakeToThaiDuongSyncService:
             "print_note_failed": 0,
             "sale_status_synced": 0,
             "sale_status_failed": 0,
+            "payment_synced": 0,
+            "payment_skipped": 0,
+            "payment_failed": 0,
+            "pancake_auto_confirmed": 0,
+            "pancake_auto_confirm_failed": 0,
             "manual_order_code": normalized_manual_order_code,
             "run_path": "",
             "notify": False,
@@ -231,12 +236,20 @@ class PancakeToThaiDuongSyncService:
                 summary["errors"] = [f"Không tìm thấy đơn Pancake mã {normalized_manual_order_code} trong dữ liệu gần đây."]
                 summary["notify"] = True
                 return self._finalize_run(summary, state)
+        self._auto_confirm_pancake_orders(
+            orders=sorted_orders,
+            cfg=cfg,
+            summary=summary,
+        )
         processed_store = state.get("processed_order_ids", {})
         if not isinstance(processed_store, dict):
             processed_store = {}
         failed_store = state.get("failed_order_ids", {})
         if not isinstance(failed_store, dict):
             failed_store = {}
+        payment_fingerprint_store = state.get("processed_order_payment_fingerprints", {})
+        if not isinstance(payment_fingerprint_store, dict):
+            payment_fingerprint_store = {}
         local_processed_ids = set(str(key).strip() for key in processed_store.keys() if str(key).strip())
         max_seen_ts = cursor_ts
         manual_force_retry_failed = bool(normalized_manual_order_code)
@@ -260,8 +273,17 @@ class PancakeToThaiDuongSyncService:
                 continue
             if order_id in local_processed_ids:
                 summary["skipped_local_duplicate"] += 1
+                self._sync_existing_order_payment_if_changed(
+                    order=order,
+                    order_id=order_id,
+                    order_code=order_code,
+                    cfg=cfg,
+                    payment_fingerprint_store=payment_fingerprint_store,
+                    summary=summary,
+                )
                 if manual_force_retry_failed:
                     self._sync_existing_order_metadata_manual(
+                        order=order,
                         order_id=order_id,
                         order_code=order_code,
                         cfg=cfg,
@@ -286,8 +308,17 @@ class PancakeToThaiDuongSyncService:
             try:
                 if self._exists_remote_order(order_id=order_id, order_code=order_code, cfg=cfg):
                     summary["skipped_remote_duplicate"] += 1
+                    self._sync_existing_order_payment_if_changed(
+                        order=order,
+                        order_id=order_id,
+                        order_code=order_code,
+                        cfg=cfg,
+                        payment_fingerprint_store=payment_fingerprint_store,
+                        summary=summary,
+                    )
                     if manual_force_retry_failed:
                         self._sync_existing_order_metadata_manual(
+                            order=order,
                             order_id=order_id,
                             order_code=order_code,
                             cfg=cfg,
@@ -415,6 +446,7 @@ class PancakeToThaiDuongSyncService:
                 continue
 
             self._sync_sale_status_to_thai_duong(
+                order=order,
                 order_id=order_id,
                 order_code=order_code,
                 create_result=create_result,
@@ -432,6 +464,7 @@ class PancakeToThaiDuongSyncService:
             summary["created_order_ids"].append(order_id)
             local_processed_ids.add(order_id)
             processed_store[order_id] = now_utc_iso()
+            payment_fingerprint_store[order_id] = self._payment_fingerprint(payment)
             failed_store.pop(order_id, None)
             summary["processed_order_ids"].append(order_id)
 
@@ -441,6 +474,11 @@ class PancakeToThaiDuongSyncService:
         )
         pruned = self._prune_processed_ids(processed_store, retention_days=state_retention_days)
         state["processed_order_ids"] = pruned
+        state["processed_order_payment_fingerprints"] = {
+            order_id: str(payment_fingerprint_store.get(order_id) or "")
+            for order_id in pruned.keys()
+            if str(payment_fingerprint_store.get(order_id) or "").strip()
+        }
         state["failed_order_ids"] = self._prune_failed_orders(failed_store, retention_days=state_retention_days)
         state["cursor_ts"] = max(cursor_ts, max_seen_ts)
         if auth_error_blocked:
@@ -503,6 +541,9 @@ class PancakeToThaiDuongSyncService:
                 "print_note_failed": 0,
                 "sale_status_synced": 0,
                 "sale_status_failed": 0,
+                "payment_synced": 0,
+                "payment_skipped": 0,
+                "payment_failed": 0,
                 "manual_order_code": "",
                 "run_path": "",
                 "notify": True,
@@ -530,6 +571,11 @@ class PancakeToThaiDuongSyncService:
                 f"Ghi chú in lỗi: {self._to_int(report.get('print_note_failed')):,}",
                 f"Sale xác nhận đã cập nhật: {self._to_int(report.get('sale_status_synced')):,}",
                 f"Sale xác nhận lỗi: {self._to_int(report.get('sale_status_failed')):,}",
+                f"Thanh toán đã cập nhật: {self._to_int(report.get('payment_synced')):,}",
+                f"Thanh toán bỏ qua: {self._to_int(report.get('payment_skipped')):,}",
+                f"Thanh toán lỗi: {self._to_int(report.get('payment_failed')):,}",
+                f"Pancake tự xác nhận: {self._to_int(report.get('pancake_auto_confirmed')):,}",
+                f"Pancake tự xác nhận lỗi: {self._to_int(report.get('pancake_auto_confirm_failed')):,}",
                 f"Trùng local: {self._to_int(report.get('skipped_local_duplicate')):,}",
                 f"Trùng remote: {self._to_int(report.get('skipped_remote_duplicate')):,}",
                 f"Không map được: {self._to_int(report.get('skipped_unmapped')):,}",
@@ -551,9 +597,63 @@ class PancakeToThaiDuongSyncService:
                 lines.append(f"- ... và {len(errors) - max_lines} lỗi khác")
         return "\n".join(lines)
 
+    def _auto_confirm_pancake_orders(
+        self,
+        *,
+        orders: list[dict[str, Any]],
+        cfg: dict[str, Any],
+        summary: dict[str, Any],
+    ) -> None:
+        pancake_cfg = cfg.get("pancake", {}) if isinstance(cfg.get("pancake"), dict) else {}
+        auto_cfg = pancake_cfg.get("auto_confirm_after_stock", {})
+        if not isinstance(auto_cfg, dict) or not bool(auto_cfg.get("enabled", True)):
+            return
+
+        from_status = self._to_int(auto_cfg.get("from_status"), fallback=17)
+        target_status = self._to_int(auto_cfg.get("target_status"), fallback=1)
+        update_cfg = auto_cfg.get("update_endpoint", {})
+        if not isinstance(update_cfg, dict):
+            update_cfg = {}
+
+        for order in orders:
+            if not isinstance(order, dict):
+                continue
+            current_status = self._to_int(order.get("status"), fallback=-1)
+            if current_status != from_status:
+                continue
+            order_id = self._extract_order_id(order, cfg)
+            order_code = self._extract_order_code(order, cfg) or order_id
+            if not order_id:
+                summary["pancake_auto_confirm_failed"] = self._to_int(
+                    summary.get("pancake_auto_confirm_failed")
+                ) + 1
+                summary["errors"].append(
+                    f"Pancake tự chuyển Đã xác nhận lỗi cho đơn {order_code}: thiếu order_id."
+                )
+                continue
+            try:
+                self.pancake.update_order_status(
+                    order_id,
+                    target_status,
+                    update_cfg=update_cfg,
+                )
+                # Keep the in-memory order aligned so the same poll can sync it onward.
+                order["status"] = target_status
+                summary["pancake_auto_confirmed"] = self._to_int(
+                    summary.get("pancake_auto_confirmed")
+                ) + 1
+            except Exception as exc:  # noqa: BLE001
+                summary["pancake_auto_confirm_failed"] = self._to_int(
+                    summary.get("pancake_auto_confirm_failed")
+                ) + 1
+                summary["errors"].append(
+                    f"Pancake tự chuyển Đã xác nhận lỗi cho đơn {order_code}: {exc}"
+                )
+
     def _sync_existing_order_metadata_manual(
         self,
         *,
+        order: dict[str, Any] | None = None,
         order_id: str,
         order_code: str,
         cfg: dict[str, Any],
@@ -587,6 +687,7 @@ class PancakeToThaiDuongSyncService:
         }
         errors_before = len(summary.get("errors", [])) if isinstance(summary.get("errors"), list) else 0
         self._sync_sale_status_to_thai_duong(
+            order=order,
             order_id=order_id,
             order_code=order_code,
             create_result=create_result_like,
@@ -603,6 +704,184 @@ class PancakeToThaiDuongSyncService:
         errors_after = len(summary.get("errors", [])) if isinstance(summary.get("errors"), list) else 0
         if errors_after > errors_before:
             summary["failed"] += 1
+
+    def _sync_existing_order_payment_if_changed(
+        self,
+        *,
+        order: dict[str, Any],
+        order_id: str,
+        order_code: str,
+        cfg: dict[str, Any],
+        payment_fingerprint_store: dict[str, Any],
+        summary: dict[str, Any],
+    ) -> None:
+        payment_cfg = self._resolve_payment_sync_cfg(cfg)
+        if not payment_cfg.get("enabled"):
+            return
+
+        payment = self._resolve_payment(order, cfg, mapped_items=[])
+        fingerprint = self._payment_fingerprint(payment)
+        previous_fingerprint = str(payment_fingerprint_store.get(order_id) or "").strip()
+        if previous_fingerprint and previous_fingerprint == fingerprint:
+            summary["payment_skipped"] = self._to_int(summary.get("payment_skipped")) + 1
+            return
+
+        rows = self._lookup_thai_duong_orders_with_retry(
+            order_id=order_id,
+            order_code=order_code,
+            cfg=cfg,
+            reference_candidates=[order_code, order_id],
+        )
+        if not rows:
+            summary["payment_failed"] = self._to_int(summary.get("payment_failed")) + 1
+            summary["errors"].append(
+                f"Không tìm thấy đơn Thái Dương để cập nhật thanh toán cho {order_code or order_id}."
+            )
+            return
+
+        first_row = rows[0] if isinstance(rows[0], dict) else {}
+        if not isinstance(first_row, dict) or not first_row:
+            summary["payment_failed"] = self._to_int(summary.get("payment_failed")) + 1
+            summary["errors"].append(
+                f"Dữ liệu đơn Thái Dương không hợp lệ khi cập nhật thanh toán cho {order_code or order_id}."
+            )
+            return
+
+        payload = self._build_payment_update_payload(payment=payment, cfg=cfg, payment_cfg=payment_cfg)
+        if not payload:
+            summary["payment_failed"] = self._to_int(summary.get("payment_failed")) + 1
+            summary["errors"].append(
+                f"Thiếu mapping field thanh toán để cập nhật Thái Dương cho {order_code or order_id}."
+            )
+            return
+
+        if self._remote_payment_matches(first_row, payload):
+            payment_fingerprint_store[order_id] = fingerprint
+            summary["payment_skipped"] = self._to_int(summary.get("payment_skipped")) + 1
+            return
+
+        create_result_like = {
+            **first_row,
+            "data": dict(first_row),
+            "result": dict(first_row),
+        }
+        td_order_id = self._extract_thai_duong_order_id(
+            create_result=create_result_like,
+            order_id=order_id,
+            order_code=order_code,
+            cfg=cfg,
+            sale_cfg=self._resolve_sale_status_sync_cfg(cfg),
+        )
+        if not td_order_id:
+            summary["payment_failed"] = self._to_int(summary.get("payment_failed")) + 1
+            summary["errors"].append(
+                f"Không lấy được ID đơn Thái Dương để cập nhật thanh toán cho {order_code or order_id}."
+            )
+            return
+
+        endpoint_cfg = payment_cfg.get("update_endpoint")
+        if not isinstance(endpoint_cfg, dict):
+            endpoint_cfg = {}
+        try:
+            self.thai_duong.update_order_fields_for_sync(
+                order_id=td_order_id,
+                payload=payload,
+                endpoint_cfg=endpoint_cfg,
+            )
+            payment_fingerprint_store[order_id] = fingerprint
+            summary["payment_synced"] = self._to_int(summary.get("payment_synced")) + 1
+        except Exception as exc:  # noqa: BLE001
+            summary["payment_failed"] = self._to_int(summary.get("payment_failed")) + 1
+            summary["errors"].append(
+                f"Cập nhật thanh toán Thái Dương lỗi cho đơn {order_code or order_id}: {exc}"
+            )
+
+    def _resolve_payment_sync_cfg(self, cfg: dict[str, Any]) -> dict[str, Any]:
+        td_cfg = cfg.get("thai_duong", {}) if isinstance(cfg.get("thai_duong"), dict) else {}
+        raw = td_cfg.get("payment_sync", {})
+        if not isinstance(raw, dict):
+            raw = {}
+        endpoint = raw.get("update_endpoint", {})
+        if not isinstance(endpoint, dict):
+            endpoint = {}
+        return {
+            "enabled": bool(raw.get("enabled", True)),
+            "update_endpoint": {
+                "base_url_env": str(endpoint.get("base_url_env", "THAI_DUONG_API_BASE_URL")).strip()
+                or "THAI_DUONG_API_BASE_URL",
+                "method": str(endpoint.get("method", "PUT")).strip().upper() or "PUT",
+                "path": str(endpoint.get("path", "/api/v1/orders/{order_id}")).strip()
+                or "/api/v1/orders/{order_id}",
+                "use_session_login": bool(endpoint.get("use_session_login", True)),
+                "login_path": str(endpoint.get("login_path", "/api/v1/auth/login")).strip()
+                or "/api/v1/auth/login",
+            },
+        }
+
+    def _build_payment_update_payload(
+        self,
+        *,
+        payment: dict[str, Any],
+        cfg: dict[str, Any],
+        payment_cfg: dict[str, Any],  # noqa: ARG002
+    ) -> dict[str, Any]:
+        td_cfg = cfg.get("thai_duong", {}) if isinstance(cfg.get("thai_duong"), dict) else {}
+        field_cfg = td_cfg.get("payload_fields", {})
+        if not isinstance(field_cfg, dict):
+            field_cfg = {}
+        result: dict[str, Any] = {}
+        mapping = {
+            "payment_type_path": payment.get("payment_type"),
+            "deposit_amount_path": payment.get("deposit_amount"),
+            "cod_amount_path": payment.get("cod_amount"),
+        }
+        for cfg_key, value in mapping.items():
+            path = str(field_cfg.get(cfg_key, "")).strip()
+            if path:
+                self._set_path(result, path, value)
+        return result
+
+    def _remote_payment_matches(self, remote_row: dict[str, Any], desired_payload: dict[str, Any]) -> bool:
+        for key, desired_value in desired_payload.items():
+            current_value = self._extract_first_value(remote_row, [key])
+            if isinstance(desired_value, (int, float)):
+                desired_number = self._to_payment_compare_float(desired_value)
+                current_number = self._to_payment_compare_float(current_value)
+                if desired_number is None or current_number is None:
+                    return False
+                if self._round_money(desired_number) != self._round_money(current_number):
+                    return False
+                continue
+            if str(current_value or "").strip().upper() != str(desired_value or "").strip().upper():
+                return False
+        return True
+
+    def _payment_fingerprint(self, payment: dict[str, Any]) -> str:
+        payload = {
+            "payment_type": str(payment.get("payment_type") or "").strip().upper(),
+            "deposit_amount": self._round_money(self._to_optional_float(payment.get("deposit_amount")) or 0.0),
+            "cod_amount": self._round_money(self._to_optional_float(payment.get("cod_amount")) or 0.0),
+            "rule": str(payment.get("rule") or "").strip().lower(),
+        }
+        return self._hash_text(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+    @staticmethod
+    def _to_payment_compare_float(value: Any) -> float | None:
+        if isinstance(value, bool):
+            return float(int(value))
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value or "").strip()
+        if not text:
+            return None
+        cleaned = text.replace(",", "").replace(" ", "")
+        cleaned = re.sub(r"[^\d\.\-]", "", cleaned)
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
 
     def _finalize_run(self, summary: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         if not summary.get("finished_at"):
@@ -664,36 +943,63 @@ class PancakeToThaiDuongSyncService:
         lookup_cfg = td_cfg.get("order_lookup_endpoint", {})
         if not isinstance(lookup_cfg, dict):
             return False
-        lookup_value = str(order_code or order_id).strip() or str(order_id).strip()
-        if not lookup_value:
+        lookup_values: list[str] = []
+        for raw in (order_id, order_code):
+            value = str(raw or "").strip()
+            if value and value not in lookup_values:
+                lookup_values.append(value)
+        if not lookup_values:
             return False
         reference_filter_field = str(td_cfg.get("reference_filter_field", "")).strip()
-        rows = self.thai_duong.find_orders_by_reference_for_sync(
-            endpoint_cfg=lookup_cfg,
-            reference_value=lookup_value,
-            reference_filter_field=reference_filter_field,
-            extra_filters=self._lookup_filters(td_cfg),
-        )
-        if not rows:
-            return False
         reference_paths = self._as_list(td_cfg.get("order_reference_paths"))
         if not reference_paths:
             reference_paths = ["orderUID", "pancakeOrderId", "referenceCode", "reference", "note"]
-        normalized_targets = {
-            self._normalize_reference(order_id),
-            self._normalize_reference(order_code),
-            self._normalize_reference(lookup_value),
-        }
-        normalized_targets.discard("")
-        for row in rows:
-            for ref in self._extract_values(row, reference_paths):
-                if self._normalize_reference(ref) in normalized_targets:
+        allow_order_code_match = bool(td_cfg.get("allow_order_code_remote_duplicate_match", False))
+        for lookup_value in lookup_values:
+            rows = self.thai_duong.find_orders_by_reference_for_sync(
+                endpoint_cfg=lookup_cfg,
+                reference_value=lookup_value,
+                reference_filter_field=reference_filter_field,
+                extra_filters=self._lookup_filters(td_cfg),
+            )
+            if not rows:
+                continue
+            for row in rows:
+                if self._remote_row_matches_order_identity(
+                    row=row,
+                    reference_paths=reference_paths,
+                    order_id=order_id,
+                    order_code=order_code,
+                    allow_order_code_match=allow_order_code_match,
+                ):
                     return True
+        return False
+
+    def _remote_row_matches_order_identity(
+        self,
+        *,
+        row: Any,
+        reference_paths: list[str],
+        order_id: str,
+        order_code: str,
+        allow_order_code_match: bool = False,
+    ) -> bool:
+        if not isinstance(row, dict):
+            return False
+        normalized_order_id = self._normalize_reference(order_id)
+        normalized_order_code = self._normalize_reference(order_code)
+        for ref in self._extract_values(row, reference_paths):
+            normalized_ref = self._normalize_reference(ref)
+            if normalized_order_id and normalized_ref == normalized_order_id:
+                return True
+            if allow_order_code_match and normalized_order_code and normalized_ref == normalized_order_code:
+                return True
         return False
 
     def _sync_sale_status_to_thai_duong(
         self,
         *,
+        order: dict[str, Any] | None = None,
         order_id: str,
         order_code: str,
         create_result: dict[str, Any],
@@ -718,9 +1024,10 @@ class PancakeToThaiDuongSyncService:
             )
             return
 
+        sale_behavior = self._resolve_sale_behavior(order or {}, cfg)
         payload: dict[str, Any] = {}
         order_status_field = str(sale_cfg.get("order_status_field", "orderStatus")).strip()
-        order_status_value = str(sale_cfg.get("order_status_value", "SALE_CONFIRM")).strip() or "SALE_CONFIRM"
+        order_status_value = str(sale_behavior["order_status_value"]).strip() or "SALE_CONFIRM"
         if order_status_field:
             payload[order_status_field] = order_status_value
         order_confirm_status_field = str(sale_cfg.get("order_confirm_status_field", "orderConfirmStatus")).strip()
@@ -729,7 +1036,10 @@ class PancakeToThaiDuongSyncService:
             payload[order_confirm_status_field] = order_confirm_status_value
         need_sale_field = str(sale_cfg.get("need_sale_field", "isNeedSale")).strip()
         if need_sale_field:
-            payload[need_sale_field] = bool(sale_cfg.get("need_sale_value", False))
+            payload[need_sale_field] = bool(sale_behavior["need_sale_value"])
+        config_fee_field = str(sale_cfg.get("config_fee_field", "configFee")).strip()
+        if config_fee_field:
+            payload[config_fee_field] = int(sale_behavior["config_fee_value"])
 
         endpoint_cfg = sale_cfg.get("update_endpoint")
         if not isinstance(endpoint_cfg, dict):
@@ -746,6 +1056,55 @@ class PancakeToThaiDuongSyncService:
             summary["errors"].append(
                 f"Cập nhật Sale xác nhận lỗi cho đơn {order_code or order_id}: {exc}"
             )
+
+    def _resolve_sale_behavior(self, order: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+        td_cfg = cfg.get("thai_duong", {}) if isinstance(cfg.get("thai_duong"), dict) else {}
+        sale_cfg = td_cfg.get("sale_status_sync", {})
+        if not isinstance(sale_cfg, dict):
+            sale_cfg = {}
+        default_status = str(sale_cfg.get("order_status_value", "SALE_CONFIRM")).strip() or "SALE_CONFIRM"
+        default_need_sale = bool(sale_cfg.get("need_sale_value", False))
+        default_config_fee = int(sale_cfg.get("config_fee_value", 0) or 0)
+
+        pancake_cfg = cfg.get("pancake", {}) if isinstance(cfg.get("pancake"), dict) else {}
+        dropo_cfg = pancake_cfg.get("dropo_landing_rule", {})
+        if not isinstance(dropo_cfg, dict) or not bool(dropo_cfg.get("enabled", True)):
+            return {
+                "is_dropo_landing": False,
+                "order_status_value": default_status,
+                "need_sale_value": default_need_sale,
+                "config_fee_value": default_config_fee,
+            }
+
+        note_paths = self._as_list(dropo_cfg.get("note_paths")) or [
+            "note",
+            "note_internal",
+            "internal_note",
+            "noteInternal",
+        ]
+        markers = [
+            str(value).strip().casefold()
+            for value in self._as_list(dropo_cfg.get("source_markers"))
+            if str(value).strip()
+        ] or ["dropo landing"]
+        note_text = " ".join(
+            str(value).strip().casefold()
+            for value in self._extract_values(order, note_paths)
+            if str(value).strip()
+        )
+        if not any(marker in note_text for marker in markers):
+            return {
+                "is_dropo_landing": False,
+                "order_status_value": default_status,
+                "need_sale_value": default_need_sale,
+                "config_fee_value": default_config_fee,
+            }
+        return {
+            "is_dropo_landing": True,
+            "order_status_value": str(dropo_cfg.get("order_status_value", "DRAFT")).strip() or "DRAFT",
+            "need_sale_value": bool(dropo_cfg.get("need_sale_value", True)),
+            "config_fee_value": int(dropo_cfg.get("config_fee_value", 1) or 1),
+        }
 
     def _resolve_sale_status_sync_cfg(self, cfg: dict[str, Any]) -> dict[str, Any]:
         td_cfg = cfg.get("thai_duong", {}) if isinstance(cfg.get("thai_duong"), dict) else {}
@@ -767,6 +1126,8 @@ class PancakeToThaiDuongSyncService:
             "order_confirm_status_value": str(raw.get("order_confirm_status_value", "")).strip(),
             "need_sale_field": str(raw.get("need_sale_field", "isNeedSale")).strip() or "isNeedSale",
             "need_sale_value": bool(raw.get("need_sale_value", False)),
+            "config_fee_field": str(raw.get("config_fee_field", "configFee")).strip() or "configFee",
+            "config_fee_value": int(raw.get("config_fee_value", 0) or 0),
             "update_endpoint": {
                 "base_url_env": str(endpoint.get("base_url_env", "THAI_DUONG_API_BASE_URL")).strip()
                 or "THAI_DUONG_API_BASE_URL",
@@ -1105,7 +1466,7 @@ class PancakeToThaiDuongSyncService:
             code_keys = self._candidate_sku_keys(code_raw)
             if not code_keys:
                 raise ValueError("SKU Pancake không hợp lệ.")
-            color_keys = self._color_candidate_keys(color_raw, color_alias)
+            color_keys = self._color_candidate_keys(color_raw, color_alias, sku=code_raw)
 
             candidates: list[dict[str, Any]] = []
             for code_key in code_keys:
@@ -1116,7 +1477,11 @@ class PancakeToThaiDuongSyncService:
                     candidates.extend(td_index.get(f"{code_key}|", []))
             if not candidates:
                 raise ValueError(f"Không tìm thấy SKU '{code_raw}' màu '{color_raw or 'trống'}' trên Thái Dương.")
-            pick = candidates[0]
+            pick = self._select_product_candidate(
+                candidates,
+                source_sku=code_raw,
+                color_keys=color_keys,
+            )
             mapped_items.append(
                 {
                     "product_id": pick.get("product_id"),
@@ -1129,6 +1494,138 @@ class PancakeToThaiDuongSyncService:
                 }
             )
         return mapped_items
+
+    def _select_product_candidate(
+        self,
+        candidates: list[dict[str, Any]],
+        *,
+        source_sku: str,
+        color_keys: list[str],
+    ) -> dict[str, Any]:
+        unique_candidates: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            signature = (
+                str(candidate.get("product_id") or ""),
+                str(candidate.get("variant_id") or ""),
+                str(candidate.get("sku") or ""),
+            )
+            if signature in seen:
+                continue
+            seen.add(signature)
+            unique_candidates.append(candidate)
+        if not unique_candidates:
+            raise ValueError(f"Không có biến thể Thái Dương hợp lệ cho SKU '{source_sku}'.")
+
+        source_size = self._extract_size_key(source_sku)
+        ignored_color_keys = {
+            "ao",
+            "vay",
+            "dam",
+            "quan",
+            "chan",
+            "mau",
+            "ren",
+            "color",
+            "dress",
+            "shirt",
+            "skirt",
+        }
+        preferred_colors = sorted(
+            {
+                self._normalize_compare_text(key)
+                for key in color_keys
+                if self._normalize_compare_text(key)
+                and self._normalize_compare_text(key) not in ignored_color_keys
+            },
+            key=len,
+            reverse=True,
+        )
+        source_color_tokens = self._sku_color_tokens(source_sku)
+
+        def _score(candidate: dict[str, Any]) -> tuple[int, int]:
+            candidate_sku = str(candidate.get("sku") or "")
+            normalized_sku = self._normalize_compare_text(candidate_sku)
+            score = 0
+            candidate_size = self._extract_size_key(candidate_sku)
+            if source_size and candidate_size:
+                score += 100 if source_size == candidate_size else -100
+            matched_color_length = 0
+            for color_key in preferred_colors:
+                if len(color_key) < 2 or color_key not in normalized_sku:
+                    continue
+                matched_color_length = max(matched_color_length, len(color_key))
+            if matched_color_length:
+                score += 30 + matched_color_length
+            candidate_color_tokens = self._sku_color_tokens(candidate_sku)
+            shared_source_colors = source_color_tokens & candidate_color_tokens
+            if shared_source_colors:
+                score += 20 + sum(len(token) for token in shared_source_colors)
+            return score, matched_color_length
+
+        return max(unique_candidates, key=_score)
+
+    @classmethod
+    def _sku_color_tokens(cls, value: str) -> set[str]:
+        known_colors = {
+            "be",
+            "beige",
+            "black",
+            "blue",
+            "brown",
+            "cam",
+            "cream",
+            "dao",
+            "den",
+            "do",
+            "ghi",
+            "green",
+            "hong",
+            "kem",
+            "mint",
+            "nau",
+            "nude",
+            "pink",
+            "purple",
+            "red",
+            "tim",
+            "trang",
+            "vang",
+            "white",
+            "xam",
+            "xanh",
+            "yellow",
+        }
+        result: set[str] = set()
+        normalized_value = cls._normalize_compare_text(str(value or ""))
+        if "xanhla" in normalized_value or "xanhlacay" in normalized_value:
+            result.update({"xanhla", "xanhlacay", "green"})
+        for token in re.split(r"[-_:/\s]+", str(value or "")):
+            normalized = cls._normalize_compare_text(token)
+            if normalized in known_colors:
+                result.add(normalized)
+        equivalent_groups = (
+            {"kem", "cream", "trang", "white"},
+            {"den", "black"},
+            {"do", "red"},
+            {"xanhla", "xanhlacay", "green"},
+            {"mint", "blue"},
+            {"tim", "purple"},
+        )
+        for group in equivalent_groups:
+            if result & group:
+                result.update(group)
+        return result
+
+    @staticmethod
+    def _extract_size_key(value: str) -> str:
+        text = str(value or "").strip().upper()
+        match = re.search(r"(?:^|[-_:/\s])((?:XX?L)|[SML])\s*$", text)
+        if not match:
+            return ""
+        return match.group(1)
 
     def _extract_item_color(self, item: dict[str, Any], color_paths: list[str]) -> str:
         direct = str(self._extract_first_value(item, color_paths) or "").strip()
@@ -1145,7 +1642,13 @@ class PancakeToThaiDuongSyncService:
                 return value
         return ""
 
-    def _color_candidate_keys(self, color_raw: str, alias_map: dict[str, str]) -> list[str]:
+    def _color_candidate_keys(
+        self,
+        color_raw: str,
+        alias_map: dict[str, str],
+        *,
+        sku: str = "",
+    ) -> list[str]:
         text = str(color_raw or "").strip()
         if not text:
             return [""]
@@ -1164,6 +1667,29 @@ class PancakeToThaiDuongSyncService:
         direct_alias = alias_map.get(normalized_text)
         if direct_alias:
             _add(direct_alias)
+
+        normalized_sku = self._normalize_compare_text(sku)
+        if "vxv" in normalized_sku:
+            vxv_alias_map = {
+                "den": "black",
+                "black": "black",
+                "do": "red",
+                "red": "red",
+                "tim": "purple",
+                "timpastel": "purple",
+                "purple": "purple",
+                "xanhmint": "blue",
+                "blue": "blue",
+                "xanhla": "green",
+                "xanhlacay": "green",
+                "green": "green",
+                "kem": "white",
+                "trang": "white",
+                "white": "white",
+            }
+            for alias_key, alias_value in vxv_alias_map.items():
+                if alias_key and alias_key in normalized_text:
+                    _add(alias_value)
 
         for alias_key, alias_value in alias_map.items():
             if alias_key and alias_key in normalized_text:
@@ -1192,6 +1718,13 @@ class PancakeToThaiDuongSyncService:
         method_paths = self._as_list(pancake_cfg.get("payment_method_paths"))
         transferred_paths = self._as_list(pancake_cfg.get("transferred_amount_paths"))
         deposit_paths = self._as_list(pancake_cfg.get("deposit_amount_paths"))
+        exchange_original_amount_paths = self._as_list(
+            pancake_cfg.get("exchange_original_amount_paths")
+        )
+        exchange_remaining_amount_paths = self._as_list(
+            pancake_cfg.get("exchange_remaining_amount_paths")
+        )
+        exchange_marker_paths = self._as_list(pancake_cfg.get("exchange_marker_paths"))
         total_paths = self._as_list(pancake_cfg.get("total_amount_paths"))
         transfer_keywords = self._to_keyword_set(pancake_cfg.get("payment_method_transfer_keywords"))
         deposit_keywords = self._to_keyword_set(pancake_cfg.get("payment_method_deposit_keywords"))
@@ -1208,6 +1741,25 @@ class PancakeToThaiDuongSyncService:
             transferred_paths = ["transferred_amount", "paid_amount", "codTransferred"]
         if not deposit_paths:
             deposit_paths = ["deposit_amount", "deposit", "codTransferred"]
+        if not exchange_original_amount_paths:
+            exchange_original_amount_paths = [
+                "payment_from_customers_exchange_order",
+                "order_returned.order_to_returned.payment_from_customers_order_returned",
+                "order_returned.order_to_returned.cod",
+            ]
+        if not exchange_remaining_amount_paths:
+            exchange_remaining_amount_paths = [
+                "cod",
+                "cod_amount",
+                "payment.remaining_amount",
+                "payment.cod",
+            ]
+        if not exchange_marker_paths:
+            exchange_marker_paths = [
+                "exchanged_returned_order_ids",
+                "order_returned",
+                "order_returned.order_id_to_returned",
+            ]
         if not total_paths:
             total_paths = ["total_price", "total", "cod"]
         if not transfer_keywords:
@@ -1220,9 +1772,24 @@ class PancakeToThaiDuongSyncService:
         method_text = self._normalize_compare_text(str(self._extract_first_value(order, method_paths) or ""))
         transferred_amount = self._to_optional_float(self._extract_first_value(order, transferred_paths))
         deposit_amount = self._to_optional_float(self._extract_first_value(order, deposit_paths))
+        exchange_original_amount = self._to_optional_float(
+            self._extract_first_value(order, exchange_original_amount_paths)
+        )
+        exchange_remaining_amount = self._to_optional_float(
+            self._extract_first_value(order, exchange_remaining_amount_paths)
+        )
+        exchange_marker = self._extract_first_value(order, exchange_marker_paths)
         total_amount = self._to_optional_float(self._extract_first_value(order, total_paths))
         transferred_amount = self._scale_money_to_major_unit(transferred_amount, money_minor_unit_factor)
         deposit_amount = self._scale_money_to_major_unit(deposit_amount, money_minor_unit_factor)
+        exchange_original_amount = self._scale_money_to_major_unit(
+            exchange_original_amount,
+            money_minor_unit_factor,
+        )
+        exchange_remaining_amount = self._scale_money_to_major_unit(
+            exchange_remaining_amount,
+            money_minor_unit_factor,
+        )
         total_amount = self._scale_money_to_major_unit(total_amount, money_minor_unit_factor)
         if total_amount is None:
             total_amount = self._scale_money_to_major_unit(
@@ -1238,6 +1805,21 @@ class PancakeToThaiDuongSyncService:
         has_transfer_amount = transferred_amount is not None and transferred_amount > 0
         has_transfer = has_transfer_keyword or (has_transfer_amount and not has_cod_keyword and not has_deposit_keyword)
         has_deposit = has_deposit_keyword
+        has_exchange_marker = self._has_meaningful_value(exchange_marker)
+        has_exchange_amount = exchange_original_amount is not None and exchange_original_amount > 0
+        if has_exchange_marker or has_exchange_amount:
+            original_amount = max(0.0, exchange_original_amount or 0.0)
+            remaining_amount = exchange_remaining_amount
+            if remaining_amount is None:
+                remaining_amount = max(0.0, float(total_amount) - original_amount)
+            else:
+                remaining_amount = max(0.0, remaining_amount)
+            return {
+                "payment_type": "COD",
+                "deposit_amount": 0.0,
+                "cod_amount": self._round_money(float(remaining_amount)),
+                "rule": "exchange",
+            }
         if has_transfer:
             transferred = transferred_amount if transferred_amount is not None else total_amount
             return {
@@ -1282,14 +1864,24 @@ class PancakeToThaiDuongSyncService:
             item_key_cfg = {}
 
         payload = copy.deepcopy(payload_template)
+        # Thai Duong validates this field as a JSON boolean on create-order.
+        # Keep custom templates safe when they were captured before the field existed.
+        buy_insurance = payload.get("buyInsurance", False)
+        if isinstance(buy_insurance, str):
+            buy_insurance = buy_insurance.strip().lower() in {"1", "true", "yes", "y"}
+        elif not isinstance(buy_insurance, bool):
+            buy_insurance = bool(buy_insurance)
+        payload["buyInsurance"] = buy_insurance
         payload_items = [self._build_payload_item(item, item_key_cfg) for item in mapped_items]
         payload_items = [item for item in payload_items if isinstance(item, dict) and item]
 
         order_label = order_code or order_id
-        note = f"Pancake order {order_label}"
+        note = f"{self._pancake_source_label()} order {order_label}"
         customer_code = self._resolve_td_customer_code()
-        need_sale_confirm_value = bool(field_cfg.get("need_sale_confirm_value", False))
-        order_status_value = str(field_cfg.get("order_status_value", "SALE_CONFIRM")).strip() or "SALE_CONFIRM"
+        sale_behavior = self._resolve_sale_behavior(order, cfg)
+        need_sale_confirm_value = bool(sale_behavior["need_sale_value"])
+        order_status_value = str(sale_behavior["order_status_value"]).strip() or "SALE_CONFIRM"
+        config_fee_value = int(sale_behavior["config_fee_value"])
         fields = {
             "reference_order_id_path": order_id,
             "pancake_order_id_path": order_id,
@@ -1299,6 +1891,7 @@ class PancakeToThaiDuongSyncService:
             "deposit_amount_path": payment.get("deposit_amount"),
             "cod_amount_path": payment.get("cod_amount"),
             "need_sale_confirm_path": need_sale_confirm_value,
+            "config_fee_path": config_fee_value,
             "order_status_path": order_status_value,
             "items_path": payload_items,
             "note_path": note,
@@ -1315,6 +1908,10 @@ class PancakeToThaiDuongSyncService:
                 if not source_path:
                     continue
                 value = self._extract_first_value(order, [source_path])
+                # Thai Duong's order schema rejects null for string fields such as address.
+                # Pancake may return an empty/missing shipping field for newly created orders.
+                if value is None:
+                    value = ""
                 self._set_path(payload, str(target_path), value)
         return payload
 
@@ -1342,14 +1939,28 @@ class PancakeToThaiDuongSyncService:
             result[path] = value
         return result
 
+    def _pancake_source_label(self) -> str:
+        profile_name = str(getattr(self.settings, "profile_name", "main") or "main").strip().lower()
+        if profile_name in {"", "main", "default"}:
+            return "Pancake"
+        return f"Pancake {profile_name}"
+
+    def _profile_env(self, key: str, default: str = "") -> str:
+        profile_name = str(getattr(self.settings, "profile_name", "main") or "main").strip().upper().replace("-", "_")
+        if profile_name and profile_name not in {"MAIN", "DEFAULT"}:
+            value = str(os.getenv(f"{profile_name}_{key}", "")).strip()
+            if value:
+                return value
+        return str(os.getenv(key, default) or "").strip()
+
     def _resolve_td_customer_code(self) -> str:
-        raw = str(os.getenv("THAI_DUONG_CUSTOMER_CODE", "")).strip()
+        raw = self._profile_env("THAI_DUONG_CUSTOMER_CODE", "")
         if raw:
             return raw
-        raw = str(os.getenv("THAI_DUONG_AUTH_USERNAME", "")).strip()
+        raw = self._profile_env("THAI_DUONG_AUTH_USERNAME", "")
         if raw:
             return raw
-        token = str(os.getenv("THAI_DUONG_API_TOKEN", "")).strip()
+        token = self._profile_env("THAI_DUONG_API_TOKEN", "")
         claims = self._decode_jwt_payload(token)
         for key in ("userName", "customerCode", "username"):
             value = str(claims.get(key, "")).strip()
@@ -1613,11 +2224,18 @@ class PancakeToThaiDuongSyncService:
                 "den",
                 "be",
                 "xanh",
+                "xanhla",
+                "xanhlacay",
+                "la",
+                "cay",
                 "do",
                 "hong",
                 "vang",
                 "cam",
+                "dao",
                 "tim",
+                "pastel",
+                "purple",
                 "xam",
                 "ghi",
                 "mint",
@@ -1700,7 +2318,24 @@ class PancakeToThaiDuongSyncService:
         path = self.settings.pancake_td_sync_state_file
         if not path.exists():
             return {"cursor_ts": 0, "processed_order_ids": {}}
-        payload = load_json(path)
+        try:
+            payload = load_json(path)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            backup_path = path.with_name(
+                f"{path.stem}.corrupt-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}{path.suffix}.bak"
+            )
+            try:
+                path.replace(backup_path)
+            except OSError:
+                self.logger.warning("Cannot backup corrupt Pancake TD sync state file: %s", path, exc_info=True)
+            else:
+                self.logger.warning(
+                    "Backed up corrupt Pancake TD sync state file %s to %s: %s",
+                    path,
+                    backup_path,
+                    exc,
+                )
+            return {"cursor_ts": 0, "processed_order_ids": {}}
         if not isinstance(payload, dict):
             return {"cursor_ts": 0, "processed_order_ids": {}}
         payload.setdefault("cursor_ts", 0)
@@ -1925,6 +2560,22 @@ class PancakeToThaiDuongSyncService:
                     "codTransferred",
                 ],
                 "deposit_amount_paths": ["deposit_amount", "deposit", "codTransferred"],
+                "exchange_original_amount_paths": [
+                    "payment_from_customers_exchange_order",
+                    "order_returned.order_to_returned.payment_from_customers_order_returned",
+                    "order_returned.order_to_returned.cod",
+                ],
+                "exchange_remaining_amount_paths": [
+                    "cod",
+                    "cod_amount",
+                    "payment.remaining_amount",
+                    "payment.cod",
+                ],
+                "exchange_marker_paths": [
+                    "exchanged_returned_order_ids",
+                    "order_returned",
+                    "order_returned.order_id_to_returned",
+                ],
                 "total_amount_paths": ["total_price", "total", "cod"],
                 "money_minor_unit_factor": 1,
                 "payment_method_transfer_keywords": [
@@ -1935,6 +2586,26 @@ class PancakeToThaiDuongSyncService:
                 ],
                 "payment_method_deposit_keywords": ["coc", "deposit"],
                 "payment_method_cod_keywords": ["cod", "thu ho", "cash on delivery"],
+                "dropo_landing_rule": {
+                    "enabled": True,
+                    "note_paths": ["note", "note_internal", "internal_note", "noteInternal"],
+                    "source_markers": ["Dropo landing"],
+                    "order_status_value": "DRAFT",
+                    "need_sale_value": True,
+                    "config_fee_value": 1,
+                },
+                "auto_confirm_after_stock": {
+                    "enabled": True,
+                    "from_status": 17,
+                    "target_status": 1,
+                    "update_endpoint": {
+                        "method": "PUT",
+                        "path": "/shops/{shop_id}/orders/{order_id}",
+                        "status_field": "status",
+                        "verify_after_update": True,
+                        "extra_payload": {},
+                    },
+                },
                 "print_note_sync": {
                     "enabled": False,
                     "template": "{thai_duong_order_uid}",
@@ -2019,10 +2690,22 @@ class PancakeToThaiDuongSyncService:
                     "order_confirm_status_value": "",
                     "need_sale_field": "isNeedSale",
                     "need_sale_value": False,
+                    "config_fee_field": "configFee",
+                    "config_fee_value": 0,
                     "update_endpoint": {
                         "base_url_env": "THAI_DUONG_API_BASE_URL",
                         "method": "PUT",
                         "path": "/api/v1/orders/update-status-order/{order_id}",
+                        "use_session_login": True,
+                        "login_path": "/api/v1/auth/login",
+                    },
+                },
+                "payment_sync": {
+                    "enabled": True,
+                    "update_endpoint": {
+                        "base_url_env": "THAI_DUONG_API_BASE_URL",
+                        "method": "PUT",
+                        "path": "/api/v1/orders/{order_id}",
                         "use_session_login": True,
                         "login_path": "/api/v1/auth/login",
                     },
@@ -2051,6 +2734,7 @@ class PancakeToThaiDuongSyncService:
                     "cod_amount_path": "cod",
                     "need_sale_confirm_path": "isNeedSale",
                     "need_sale_confirm_value": False,
+                    "config_fee_path": "configFee",
                     "order_status_path": "orderStatus",
                     "order_status_value": "SALE_CONFIRM",
                     "items_path": "products",
@@ -2128,7 +2812,7 @@ class PancakeToThaiDuongSyncService:
     @staticmethod
     def _normalize_compare_text(value: str) -> str:
         folded = unicodedata.normalize("NFD", str(value or "").lower())
-        no_accents = "".join(ch for ch in folded if unicodedata.category(ch) != "Mn")
+        no_accents = "".join(ch for ch in folded if unicodedata.category(ch) != "Mn").replace("đ", "d")
         return re.sub(r"[\s\-_]+", "", no_accents).strip()
 
     @staticmethod
@@ -2179,6 +2863,17 @@ class PancakeToThaiDuongSyncService:
             return float(cleaned)
         except ValueError:
             return None
+
+    @staticmethod
+    def _has_meaningful_value(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, (list, dict, tuple, set)):
+            return bool(value)
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        return text not in {"", "0", "false", "none", "null"}
 
     @staticmethod
     def _scale_money_to_major_unit(value: float | None, factor: int) -> float | None:

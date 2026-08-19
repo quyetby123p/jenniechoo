@@ -1,0 +1,187 @@
+name: Pancake to Thai Duong sync
+
+on:
+  # GitHub Actions continues running when the local computer is turned off.
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Pancake shop profile"
+        required: true
+        default: "main"
+        type: choice
+        options:
+          - main
+          - ads2
+      notify:
+        description: "Telegram notification mode"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - always
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pancake-thai-duong-sync-${{ matrix.profile }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: ${{ github.event_name == 'schedule' || inputs.profile == matrix.profile }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [main, ads2]
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      APP_TIMEZONE: ${{ secrets.APP_TIMEZONE || 'Asia/Ho_Chi_Minh' }}
+      APP_CURRENCY: ${{ secrets.APP_CURRENCY || 'VND' }}
+      APP_RETRY_MAX: ${{ secrets.APP_RETRY_MAX || '3' }}
+      APP_RETRY_BACKOFF: ${{ secrets.APP_RETRY_BACKOFF || '2,5,10' }}
+
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ALLOWED_USER_ID: ${{ secrets.TELEGRAM_ALLOWED_USER_ID }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      META_PAGE_ACCESS_TOKEN: ${{ secrets.META_PAGE_ACCESS_TOKEN }}
+      META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
+      META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+      META_API_VERSION: ${{ secrets.META_API_VERSION || 'v21.0' }}
+
+      ADS2_TELEGRAM_BOT_TOKEN: ${{ secrets.ADS2_TELEGRAM_BOT_TOKEN }}
+      ADS2_TELEGRAM_ALLOWED_USER_ID: ${{ secrets.ADS2_TELEGRAM_ALLOWED_USER_ID || secrets.TELEGRAM_ALLOWED_USER_ID }}
+      ADS2_META_ACCESS_TOKEN: ${{ secrets.ADS2_META_ACCESS_TOKEN || secrets.META_ACCESS_TOKEN }}
+      ADS2_META_PAGE_ACCESS_TOKEN: ${{ secrets.ADS2_META_PAGE_ACCESS_TOKEN }}
+      ADS2_META_AD_ACCOUNT_ID: ${{ secrets.ADS2_META_AD_ACCOUNT_ID }}
+      ADS2_META_PAGE_ID: ${{ secrets.ADS2_META_PAGE_ID }}
+      ADS2_META_API_VERSION: ${{ secrets.ADS2_META_API_VERSION || secrets.META_API_VERSION || 'v21.0' }}
+
+      PANCAKE_API_BASE_URL: ${{ secrets.PANCAKE_API_BASE_URL || 'https://pos.pancake.vn/api/v1' }}
+      PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
+      PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      PANCAKE_SHOP_ID: ${{ secrets.PANCAKE_SHOP_ID }}
+      PANCAKE_PAGE_SIZE: ${{ secrets.PANCAKE_PAGE_SIZE || '200' }}
+      PANCAKE_TD_SYNC_ENABLED: ${{ secrets.PANCAKE_TD_SYNC_ENABLED || '1' }}
+      PANCAKE_TD_SYNC_POLL_SECONDS: ${{ secrets.PANCAKE_TD_SYNC_POLL_SECONDS || '30' }}
+      PANCAKE_TD_SYNC_BATCH_LIMIT: ${{ secrets.PANCAKE_TD_SYNC_BATCH_LIMIT || '50' }}
+      PANCAKE_TD_SYNC_NOTIFY_CHAT_ID: ${{ secrets.PANCAKE_TD_SYNC_NOTIFY_CHAT_ID }}
+      PANCAKE_TD_SYNC_PRODUCT_REFRESH_MINUTES: ${{ secrets.PANCAKE_TD_SYNC_PRODUCT_REFRESH_MINUTES || '30' }}
+      PANCAKE_TD_SYNC_STATE_PATH: storage/pancake_td_sync/state.json
+
+      ADS2_PANCAKE_API_BASE_URL: ${{ secrets.ADS2_PANCAKE_API_BASE_URL || secrets.PANCAKE_API_BASE_URL || 'https://pos.pancake.vn/api/v1' }}
+      ADS2_PANCAKE_API_KEY: ${{ secrets.ADS2_PANCAKE_API_KEY }}
+      ADS2_PANCAKE_ACCESS_TOKEN: ${{ secrets.ADS2_PANCAKE_ACCESS_TOKEN || secrets.PANCAKE_ACCESS_TOKEN }}
+      ADS2_PANCAKE_SHOP_ID: ${{ secrets.ADS2_PANCAKE_SHOP_ID }}
+      ADS2_PANCAKE_PAGE_SIZE: ${{ secrets.ADS2_PANCAKE_PAGE_SIZE || secrets.PANCAKE_PAGE_SIZE || '200' }}
+      ADS2_PANCAKE_TD_SYNC_ENABLED: ${{ secrets.ADS2_PANCAKE_TD_SYNC_ENABLED || '1' }}
+      ADS2_PANCAKE_TD_SYNC_POLL_SECONDS: ${{ secrets.ADS2_PANCAKE_TD_SYNC_POLL_SECONDS || '30' }}
+      ADS2_PANCAKE_TD_SYNC_BATCH_LIMIT: ${{ secrets.ADS2_PANCAKE_TD_SYNC_BATCH_LIMIT || secrets.PANCAKE_TD_SYNC_BATCH_LIMIT || '50' }}
+      ADS2_PANCAKE_TD_SYNC_NOTIFY_CHAT_ID: ${{ secrets.ADS2_PANCAKE_TD_SYNC_NOTIFY_CHAT_ID }}
+      ADS2_PANCAKE_TD_SYNC_PRODUCT_REFRESH_MINUTES: ${{ secrets.ADS2_PANCAKE_TD_SYNC_PRODUCT_REFRESH_MINUTES || '30' }}
+      ADS2_PANCAKE_TD_SYNC_STATE_PATH: storage/ads2/pancake_td_sync/state.json
+
+      THAI_DUONG_API_BASE_URL: ${{ secrets.THAI_DUONG_API_BASE_URL }}
+      THAI_DUONG_API_TOKEN: ${{ secrets.THAI_DUONG_API_TOKEN }}
+      THAI_DUONG_AUTO_AUTH_ENABLED: ${{ secrets.THAI_DUONG_AUTO_AUTH_ENABLED }}
+      THAI_DUONG_AUTO_REFRESH_THRESHOLD_MINUTES: ${{ secrets.THAI_DUONG_AUTO_REFRESH_THRESHOLD_MINUTES }}
+      THAI_DUONG_AUTO_AUTH_MIN_RETRY_SECONDS: ${{ secrets.THAI_DUONG_AUTO_AUTH_MIN_RETRY_SECONDS }}
+      THAI_DUONG_AUTH_LOGIN_PATH: ${{ secrets.THAI_DUONG_AUTH_LOGIN_PATH }}
+      THAI_DUONG_AUTH_REFRESH_PATH: ${{ secrets.THAI_DUONG_AUTH_REFRESH_PATH }}
+      THAI_DUONG_AUTH_EMAIL: ${{ secrets.THAI_DUONG_AUTH_EMAIL }}
+      THAI_DUONG_AUTH_PASSWORD: ${{ secrets.THAI_DUONG_AUTH_PASSWORD }}
+      THAI_DUONG_AUTH_USERNAME: ${{ secrets.THAI_DUONG_AUTH_USERNAME }}
+      THAI_DUONG_CUSTOMER_CODE: ${{ secrets.THAI_DUONG_CUSTOMER_CODE }}
+      THAI_DUONG_AUTH_REFRESH_TOKEN: ${{ secrets.THAI_DUONG_AUTH_REFRESH_TOKEN }}
+      THAI_DUONG_AUTO_AUTH_STATE_PATH: storage/thai_duong_auth/state.json
+
+      ADS2_THAI_DUONG_API_BASE_URL: ${{ secrets.ADS2_THAI_DUONG_API_BASE_URL || secrets.THAI_DUONG_API_BASE_URL }}
+      ADS2_THAI_DUONG_API_TOKEN: ${{ secrets.ADS2_THAI_DUONG_API_TOKEN || secrets.THAI_DUONG_API_TOKEN }}
+      ADS2_THAI_DUONG_AUTO_AUTH_ENABLED: ${{ secrets.ADS2_THAI_DUONG_AUTO_AUTH_ENABLED || secrets.THAI_DUONG_AUTO_AUTH_ENABLED }}
+      ADS2_THAI_DUONG_AUTO_REFRESH_THRESHOLD_MINUTES: ${{ secrets.ADS2_THAI_DUONG_AUTO_REFRESH_THRESHOLD_MINUTES || secrets.THAI_DUONG_AUTO_REFRESH_THRESHOLD_MINUTES }}
+      ADS2_THAI_DUONG_AUTO_AUTH_MIN_RETRY_SECONDS: ${{ secrets.ADS2_THAI_DUONG_AUTO_AUTH_MIN_RETRY_SECONDS || secrets.THAI_DUONG_AUTO_AUTH_MIN_RETRY_SECONDS }}
+      ADS2_THAI_DUONG_AUTH_LOGIN_PATH: ${{ secrets.ADS2_THAI_DUONG_AUTH_LOGIN_PATH || secrets.THAI_DUONG_AUTH_LOGIN_PATH }}
+      ADS2_THAI_DUONG_AUTH_REFRESH_PATH: ${{ secrets.ADS2_THAI_DUONG_AUTH_REFRESH_PATH || secrets.THAI_DUONG_AUTH_REFRESH_PATH }}
+      ADS2_THAI_DUONG_AUTH_EMAIL: ${{ secrets.ADS2_THAI_DUONG_AUTH_EMAIL || secrets.THAI_DUONG_AUTH_EMAIL }}
+      ADS2_THAI_DUONG_AUTH_PASSWORD: ${{ secrets.ADS2_THAI_DUONG_AUTH_PASSWORD || secrets.THAI_DUONG_AUTH_PASSWORD }}
+      ADS2_THAI_DUONG_AUTH_USERNAME: ${{ secrets.ADS2_THAI_DUONG_AUTH_USERNAME || secrets.THAI_DUONG_AUTH_USERNAME }}
+      ADS2_THAI_DUONG_CUSTOMER_CODE: ${{ secrets.ADS2_THAI_DUONG_CUSTOMER_CODE || secrets.THAI_DUONG_CUSTOMER_CODE }}
+      ADS2_THAI_DUONG_AUTH_REFRESH_TOKEN: ${{ secrets.ADS2_THAI_DUONG_AUTH_REFRESH_TOKEN || secrets.THAI_DUONG_AUTH_REFRESH_TOKEN }}
+      ADS2_THAI_DUONG_AUTO_AUTH_STATE_PATH: storage/ads2/thai_duong_auth/state.json
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore profile state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            storage/pancake_td_sync
+            storage/ads2/pancake_td_sync
+            storage/thai_duong_auth
+            storage/ads2/thai_duong_auth
+          key: pancake-td-sync-${{ matrix.profile }}-${{ github.run_id }}
+          restore-keys: |
+            pancake-td-sync-${{ matrix.profile }}-
+
+      - name: Check required secrets
+        shell: bash
+        run: |
+          missing=()
+          profile="${{ matrix.profile }}"
+          if [ "$profile" = "ads2" ]; then
+            for key in ADS2_TELEGRAM_BOT_TOKEN ADS2_TELEGRAM_ALLOWED_USER_ID ADS2_META_ACCESS_TOKEN ADS2_META_PAGE_ACCESS_TOKEN ADS2_META_AD_ACCOUNT_ID ADS2_META_PAGE_ID ADS2_PANCAKE_SHOP_ID; do
+              if [ -z "${!key}" ]; then missing+=("$key"); fi
+            done
+            if [ -z "$ADS2_PANCAKE_ACCESS_TOKEN" ] && [ -z "$ADS2_PANCAKE_API_KEY" ]; then
+              missing+=("ADS2_PANCAKE_ACCESS_TOKEN or ADS2_PANCAKE_API_KEY or PANCAKE_ACCESS_TOKEN")
+            fi
+            if [ -z "$ADS2_THAI_DUONG_API_TOKEN" ] && [ -z "$ADS2_THAI_DUONG_AUTH_REFRESH_TOKEN" ] && [ -z "$ADS2_THAI_DUONG_AUTH_PASSWORD" ]; then
+              missing+=("ADS2_THAI_DUONG_API_TOKEN or ADS2_THAI_DUONG_AUTH_REFRESH_TOKEN or ADS2_THAI_DUONG_AUTH_PASSWORD")
+            fi
+          else
+            for key in TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USER_ID META_ACCESS_TOKEN META_PAGE_ACCESS_TOKEN META_AD_ACCOUNT_ID META_PAGE_ID PANCAKE_SHOP_ID; do
+              if [ -z "${!key}" ]; then missing+=("$key"); fi
+            done
+            if [ -z "$PANCAKE_ACCESS_TOKEN" ] && [ -z "$PANCAKE_API_KEY" ]; then
+              missing+=("PANCAKE_ACCESS_TOKEN or PANCAKE_API_KEY")
+            fi
+            if [ -z "$THAI_DUONG_API_TOKEN" ] && [ -z "$THAI_DUONG_AUTH_REFRESH_TOKEN" ] && [ -z "$THAI_DUONG_AUTH_PASSWORD" ]; then
+              missing+=("THAI_DUONG_API_TOKEN or THAI_DUONG_AUTH_REFRESH_TOKEN or THAI_DUONG_AUTH_PASSWORD")
+            fi
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing GitHub Actions secrets for %s:\n' "$profile"
+            printf ' - %s\n' "${missing[@]}"
+            exit 1
+          fi
+
+      - name: Sync Pancake to Thai Duong
+        run: python -m app.scheduled_tasks --profile "${{ matrix.profile }}" pancake-td-sync --notify "${{ github.event_name == 'workflow_dispatch' && inputs.notify || 'auto' }}"
+
+      - name: Save profile state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            storage/pancake_td_sync
+            storage/ads2/pancake_td_sync
+            storage/thai_duong_auth
+            storage/ads2/thai_duong_auth
+          key: pancake-td-sync-${{ matrix.profile }}-${{ github.run_id }}
