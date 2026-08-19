@@ -181,6 +181,50 @@ def test_update_order_status_verifies_persisted_status(tmp_path: Path) -> None:
     ]
 
 
+def test_update_order_status_safe_full_order_changes_status_only(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))
+    calls: list[tuple[str, str, dict[str, object]]] = []
+    source = {
+        "id": 180157102421209,
+        "status": 17,
+        "items": [{"variation_info": {"sku": "SP01"}, "quantity": 1}],
+        "total_price": 250000,
+    }
+
+    def fake_request(method: str, path: str, *, params=None, data=None):  # noqa: ANN001
+        del params
+        calls.append((method, path, data or {}))
+        if method == "GET":
+            latest = dict(source)
+            if len(calls) >= 3:
+                latest["status"] = 1
+            return {"success": True, "order": latest}
+        return {"success": True}
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    result = client.update_order_status(
+        "180157102421209",
+        1,
+        update_cfg={
+            **{
+                "method": "PUT",
+                "safe_full_order_update": True,
+                "expected_current_status": 17,
+                "verify_after_update": True,
+            }
+        },
+    )
+
+    assert result["success"] is True
+    assert calls[0][0:2] == ("GET", "/shops/123/orders/180157102421209")
+    assert calls[1][0:2] == ("PUT", "/shops/123/orders/180157102421209")
+    assert calls[1][2]["status"] == 1
+    assert calls[1][2]["items"] == source["items"]
+    assert calls[2][0:2] == ("GET", "/shops/123/orders/180157102421209")
+
+
 def test_update_order_status_rejects_success_response_when_status_did_not_change(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))

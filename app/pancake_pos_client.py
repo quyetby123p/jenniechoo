@@ -327,11 +327,9 @@ class PancakePosClient:
         path_template = str(cfg.get("path", "/shops/{shop_id}/orders/{order_id}")).strip()
         status_field = str(cfg.get("status_field", "status")).strip() or "status"
         verify_after_update = self._to_bool(cfg.get("verify_after_update"), default=False)
+        safe_full_order_update = self._to_bool(cfg.get("safe_full_order_update"), default=False)
+        expected_current_status = cfg.get("expected_current_status")
         extra_payload = cfg.get("extra_payload", {})
-        payload: dict[str, Any] = {}
-        if isinstance(extra_payload, dict):
-            payload.update(extra_payload)
-        payload[status_field] = int(status)
 
         try:
             path = path_template.format(
@@ -341,6 +339,37 @@ class PancakePosClient:
             )
         except KeyError as exc:
             raise ValidationError(f"Cấu hình update endpoint Pancake thiếu placeholder: {exc}") from exc
+
+        source_order: dict[str, Any] | None = None
+        if safe_full_order_update:
+            source_order = self.get_order_detail(
+                normalized_order_id,
+                path_template=path_template,
+            )
+            if expected_current_status is not None:
+                current_status = self._to_int(
+                    self._get_nested_value(source_order, status_field),
+                    fallback=-1,
+                )
+                if current_status != int(expected_current_status):
+                    return {
+                        "success": True,
+                        "skipped": True,
+                        "reason": f"current_status={current_status}",
+                    }
+            payload = copy.deepcopy(source_order)
+        else:
+            payload = {}
+        if isinstance(extra_payload, dict):
+            payload.update(extra_payload)
+        payload[status_field] = int(status)
+
+        if safe_full_order_update and source_order is not None:
+            self._assert_only_allowed_field_changes(
+                source=source_order,
+                target=payload,
+                allowed_paths=[status_field],
+            )
 
         result = self._request(method, path, data=payload)
         if verify_after_update:
@@ -582,7 +611,7 @@ class PancakePosClient:
             self._remove_nested_value(src, normalized)
             self._remove_nested_value(dst, normalized)
         if src != dst:
-            raise ValidationError("Payload cập nhật ghi chú in đang làm thay đổi field ngoài note_print.")
+            raise ValidationError("Payload cập nhật đang làm thay đổi field ngoài phạm vi cho phép.")
 
     @staticmethod
     def _split_path(path: str) -> list[str]:

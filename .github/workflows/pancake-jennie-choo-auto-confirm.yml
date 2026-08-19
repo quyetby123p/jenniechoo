@@ -72,4 +72,4 @@ jobs:
           fi
 
       - name: Confirm Pancake orders only
-        run: python -m app.pancake_auto_confirm --profile main --lookback-hours 168 --max-batch 500
+        run: python -m app.pancake_auto_confirm --profile main --lookback-hours 720 --max-batch 500

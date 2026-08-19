@@ -25,6 +25,8 @@ STATUS_UPDATE_CONFIG = {
     "method": "PUT",
     "path": "/shops/{shop_id}/orders/{order_id}",
     "status_field": "status",
+    "safe_full_order_update": True,
+    "expected_current_status": WAITING_CONFIRMATION_STATUS,
     "verify_after_update": True,
     "extra_payload": {},
 }
@@ -46,6 +48,7 @@ class PancakeAutoConfirmService:
             "fetched": 0,
             "candidates": 0,
             "updated": 0,
+            "skipped": 0,
             "failed": 0,
             "errors": [],
         }
@@ -81,12 +84,15 @@ class PancakeAutoConfirmService:
                 continue
 
             try:
-                self.pancake.update_order_status(
+                result = self.pancake.update_order_status(
                     order_id,
                     CONFIRMED_STATUS,
                     update_cfg=STATUS_UPDATE_CONFIG,
                 )
-                summary["updated"] += 1
+                if isinstance(result, dict) and result.get("skipped"):
+                    summary["skipped"] += 1
+                else:
+                    summary["updated"] += 1
             except Exception as exc:  # noqa: BLE001
                 summary["failed"] += 1
                 summary["errors"].append(f"Đổi trạng thái đơn {order_code} thất bại: {exc}")

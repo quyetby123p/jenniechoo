@@ -47,6 +47,7 @@ def test_only_waiting_confirmation_orders_are_updated() -> None:
     assert report["fetched"] == 4
     assert report["candidates"] == 2
     assert report["updated"] == 2
+    assert report["skipped"] == 0
     assert report["failed"] == 0
     assert [item["order_id"] for item in pancake.status_updates] == ["waiting", "waiting_string"]
     assert all(item["status"] == CONFIRMED_STATUS for item in pancake.status_updates)
