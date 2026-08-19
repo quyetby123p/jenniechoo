@@ -94,6 +94,9 @@ class PancakeAutoConfirmService:
                 else:
                     summary["updated"] += 1
             except Exception as exc:  # noqa: BLE001
+                if self._is_not_ready_error(exc):
+                    summary["skipped"] += 1
+                    continue
                 summary["failed"] += 1
                 summary["errors"].append(f"Đổi trạng thái đơn {order_code} thất bại: {exc}")
 
@@ -106,6 +109,11 @@ class PancakeAutoConfirmService:
             return int(value)
         except (TypeError, ValueError):
             return fallback
+
+    @staticmethod
+    def _is_not_ready_error(exc: Exception) -> bool:
+        text = str(exc).strip().lower()
+        return "chưa có thông tin sản phẩm" in text or "chua co thong tin san pham" in text
 
 
 def _build_service(profile: str | None) -> PancakeAutoConfirmService:

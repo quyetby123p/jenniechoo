@@ -379,6 +379,12 @@ class PancakePosClient:
             )
             latest_status = self._to_int(self._get_nested_value(latest_order, status_field), fallback=-1)
             if latest_status != int(status):
+                if expected_current_status is not None:
+                    return {
+                        "success": False,
+                        "skipped": True,
+                        "reason": f"expected={int(status)}, actual={latest_status}",
+                    }
                 raise PancakeApiError(
                     f"Pancake không lưu trạng thái mong muốn cho order_id={normalized_order_id}: "
                     f"expected={int(status)}, actual={latest_status}."
