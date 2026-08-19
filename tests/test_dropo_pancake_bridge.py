@@ -156,6 +156,36 @@ class GeoFakePancake(FakePancake):
         }]
 
 
+class AmbiguousBangkokGeoFakePancake(GeoFakePancake):
+    def list_geo_districts(self, province_id: str, **_: Any) -> list[dict[str, Any]]:
+        return [{
+            "id": "66_R586",
+            "name": "ลาดพร้าว/ Lat Pharo",
+            "name_en": "ลาดพร้าว",
+            "postcode": [10230],
+            "province_id": province_id,
+        }]
+
+    def list_geo_communes(self, province_id: str, district_id: str, **_: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "66_R0000094",
+                "name": "จรเข้บัว/ Chorakhe Bua",
+                "name_en": "จรเข้บัว",
+                "postcode": [10230],
+                "province_id": province_id,
+                "district_id": district_id,
+            },
+            {
+                "id": "66_R0000093",
+                "name": "ลาดพร้าว/ Lat Phrao",
+                "name_en": "ลาดพร้าว",
+                "postcode": [10230],
+                "province_id": province_id,
+                "district_id": district_id,
+            },
+        ]
+
 def build_bridge(
     values: list[list[Any]],
     *,
@@ -305,6 +335,22 @@ def test_payload_tu_chuan_hoa_dia_chi_thai_thanh_id_pancake():
     assert address["district_id"] == "66_R589"
     assert address["commune_id"] == "66_R0000014"
     assert address["commnue_name"] == "บางโพงพาง/ Bang Phongphang"
+
+
+def test_payload_uu_tien_tu_khoa_hanh_chinh_khi_ten_phuong_trung_ten_quan():
+    bridge, _, _ = build_bridge(
+        [HEADER],
+        pancake=AmbiguousBangkokGeoFakePancake(),
+        sku_map=SKU_MAP,
+    )
+    row = make_row(**{
+        "ที่อยู่เต็ม / Address + ZIP": "23/36 หมู่บ้านไพรเวท เนอวานา เกษตร-นวมินทร์ ซอยประเสริฐมนูกิจ 29 แยก 6 แขวงจรเข้บัว เขตลาดพร้าว กรุงเทพมหานคร",
+        "จังหวัด / Province": "กรุงเทพมหานคร",
+        "รหัสไปรษณีย์ / ZIP": "10230",
+    })
+    payload = bridge.build_order_payload(row, HEADER)
+    assert payload["shipping_address"]["district_id"] == "66_R586"
+    assert payload["shipping_address"]["commune_id"] == "66_R0000094"
 
 
 def test_thieu_sdt_thi_bao_loi():

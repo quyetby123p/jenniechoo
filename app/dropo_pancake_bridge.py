@@ -600,7 +600,13 @@ class DropoPancakeBridge:
         )
 
         district_rows = self._geo_rows("districts", province_id, "")
-        district_row = self._choose_geo_row(district_rows, "", address_key, postcode=postcode)
+        district_row = self._choose_geo_row(
+            district_rows,
+            "",
+            address_key,
+            postcode=postcode,
+            administrative_markers=("เขต", "อำเภอ", "khet", "amphoe", "district"),
+        )
         if not district_row:
             raise ValidationError(
                 "không chuẩn hóa được quận/huyện địa chỉ Thái từ địa chỉ tự do; "
@@ -617,7 +623,13 @@ class DropoPancakeBridge:
         )
 
         commune_rows = self._geo_rows("communes", province_id, district_id)
-        commune_row = self._choose_geo_row(commune_rows, "", address_key, postcode=postcode)
+        commune_row = self._choose_geo_row(
+            commune_rows,
+            "",
+            address_key,
+            postcode=postcode,
+            administrative_markers=("แขวง", "ตำบล", "khwaeng", "tambon", "subdistrict"),
+        )
         if not commune_row:
             raise ValidationError(
                 "không chuẩn hóa được phường/xã địa chỉ Thái từ địa chỉ tự do; "
@@ -666,6 +678,7 @@ class DropoPancakeBridge:
         address_key: str,
         *,
         postcode: str = "",
+        administrative_markers: tuple[str, ...] = (),
     ) -> dict[str, Any] | None:
         if not rows:
             return None
@@ -698,6 +711,20 @@ class DropoPancakeBridge:
             for row in (postcode_rows or rows)
             if any(value and value in address_key for value in names(row) if len(value) >= 3)
         ]
+        if len(address_hits) > 1 and administrative_markers:
+            marker_keys = [cls._norm_geo_match(marker) for marker in administrative_markers]
+            marked_hits = [
+                row
+                for row in address_hits
+                if any(
+                    marker_key and marker_key + value in address_key
+                    for marker_key in marker_keys
+                    for value in names(row)
+                    if len(value) >= 3
+                )
+            ]
+            if len(marked_hits) == 1:
+                return marked_hits[0]
         if len(address_hits) == 1:
             return address_hits[0]
         if len(postcode_rows) == 1:
