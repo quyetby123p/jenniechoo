@@ -18,6 +18,58 @@ def test_candidate_sku_keys_extracts_product_code_after_thai_duong_prefix() -> N
     assert "JCV123" in keys
 
 
+def test_sku_mapping_keeps_style_descriptor_and_embedded_size(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "pc_style_size",
+                "custom_id": "JC_STYLE_SIZE",
+                "status": 1,
+                "inserted_at_timestamp": 1_714_000_005,
+                "payment_method": "cod",
+                "total_price": 530000,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "JC-V-123-DEN COC-S",
+                            "color": "Đen cộc",
+                            "retail_price": 300000,
+                        },
+                    },
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "JC-A-158-S-NAU",
+                            "color": "Nâu",
+                            "retail_price": 230000,
+                        },
+                    },
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[
+            {"id": 1, "sku": "THA356-JCV123-Đen-S", "color": "Đen", "name": "JCV123 Tay Dài"},
+            {"id": 2, "sku": "THA356-JC-V-123_TAY_COC-Đen-S", "color": "Đen", "name": "JCV123 Tay cộc"},
+            {"id": 3, "sku": "THA356-JC-A-158-Nâu-S", "color": "Nâu", "name": "Ivy Chemise JCA158"},
+            {"id": 4, "sku": "THA356-JC-A-158-Nâu-L", "color": "Nâu", "name": "Ivy Chemise JCA158"},
+        ]
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    assert [item["sku"] for item in thai_duong.create_calls[0]["products"]] == [
+        "THA356-JC-V-123_TAY_COC-Đen-S",
+        "THA356-JC-A-158-Nâu-S",
+    ]
+
+
 def _dummy_settings(tmp_path: Path, **overrides) -> Settings:
     base = Settings(
         project_root=tmp_path,

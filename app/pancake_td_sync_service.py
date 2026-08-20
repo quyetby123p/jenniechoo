@@ -1183,6 +1183,7 @@ class PancakeToThaiDuongSyncService:
             reverse=True,
         )
         source_color_tokens = self._sku_color_tokens(source_sku)
+        source_descriptor_tokens = self._sku_descriptor_tokens(source_sku)
 
         def _score(candidate: dict[str, Any]) -> tuple[int, int]:
             candidate_sku = str(candidate.get("sku") or "")
@@ -1202,6 +1203,9 @@ class PancakeToThaiDuongSyncService:
             shared_source_colors = source_color_tokens & candidate_color_tokens
             if shared_source_colors:
                 score += 20 + sum(len(token) for token in shared_source_colors)
+            for descriptor in source_descriptor_tokens:
+                if descriptor in normalized_sku:
+                    score += 40 + len(descriptor)
             return score, matched_color_length
 
         return max(unique_candidates, key=_score)
@@ -1258,13 +1262,33 @@ class PancakeToThaiDuongSyncService:
                 result.update(group)
         return result
 
+    @classmethod
+    def _sku_descriptor_tokens(cls, value: str) -> set[str]:
+        """Return non-color style tokens such as COC from a source SKU."""
+        sizes = {"S", "M", "L", "XL", "XXL", "XXXL"}
+        result: set[str] = set()
+        color_tokens = cls._sku_color_tokens(value)
+        for token in re.split(r"[-_:/\s]+", str(value or "")):
+            normalized = cls._normalize_compare_text(token)
+            if len(normalized) < 2 or normalized.upper() in sizes:
+                continue
+            if normalized in color_tokens:
+                continue
+            if re.fullmatch(r"[A-Z]*\d+", normalized.upper()):
+                continue
+            result.add(normalized)
+        return result
+
     @staticmethod
     def _extract_size_key(value: str) -> str:
         text = str(value or "").strip().upper()
         match = re.search(r"(?:^|[-_:/\s])((?:XX?L)|[SML])\s*$", text)
-        if not match:
-            return ""
-        return match.group(1)
+        if match:
+            return match.group(1)
+        for token in re.split(r"[-_:/\s]+", text):
+            if token in {"S", "M", "L", "XL", "XXL", "XXXL"}:
+                return token
+        return ""
 
     def _extract_item_color(self, item: dict[str, Any], color_paths: list[str]) -> str:
         direct = str(self._extract_first_value(item, color_paths) or "").strip()
