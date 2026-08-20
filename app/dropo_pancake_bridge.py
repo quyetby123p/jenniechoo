@@ -269,7 +269,11 @@ class DropoPancakeBridge:
             processed += 1
 
             try:
-                payload = self.build_order_payload(row, header)
+                payload = self.build_order_payload(
+                    row,
+                    header,
+                    bundle_rows=self._bundle_detail_rows(data_rows, offset, header, row),
+                )
             except ValidationError as exc:
                 report.skipped += 1
                 report.rows.append(RowResult(row_index, "skipped", message=str(exc)))
@@ -346,7 +350,13 @@ class DropoPancakeBridge:
     def _uses_pancake_catalog(self) -> bool:
         return self.config.sku_map_path.strip().lower().startswith("pancake:")
 
-    def resolve_jennie_items(self, row: list[Any], header: list[str]) -> list[dict[str, Any]]:
+    def resolve_jennie_items(
+        self,
+        row: list[Any],
+        header: list[str],
+        *,
+        bundle_rows: list[list[Any]] | None = None,
+    ) -> list[dict[str, Any]]:
         """Map mã sản phẩm + màu + size Jennie sang biến thể Pancake."""
         if not self._pancake_catalog:
             _ = self.sku_map
@@ -366,12 +376,41 @@ class DropoPancakeBridge:
         # catalog và làm sai size/màu khách đặt.
         shared_color = str(get("Màu", "mau", "color") or "").strip()
         shared_size = str(get("Size", "size") or "").strip()
+        detail_rows = [row] + list(bundle_rows or [])
         items: list[dict[str, Any]] = []
         for index, raw_code in enumerate(codes, start=1):
             code = self._normalize_jennie_code(raw_code)
-            color = str(get(f"mau{index}", f"color{index}", f"Màu {index}") or shared_color).strip()
-            size = str(get(f"size{index}", f"Size {index}") or shared_size).strip()
+            detail_row = detail_rows[index - 1] if index <= len(detail_rows) else []
+            detail_get = lambda *names: self._cell(detail_row, header, *names)  # noqa: E731
+            detail_code = self._normalize_jennie_code(
+                detail_get("Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku")
+            )
+            if detail_code != code:
+                detail_row = next(
+                    (
+                        candidate
+                        for candidate in detail_rows[index:]
+                        if self._normalize_jennie_code(
+                            self._cell(candidate, header, "Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku")
+                        )
+                        == code
+                    ),
+                    detail_row,
+                )
+                detail_get = lambda *names: self._cell(detail_row, header, *names)  # noqa: E731
+            color = str(
+                get(f"mau{index}", f"color{index}", f"Màu {index}")
+                or detail_get("Màu", "mau", "color")
+                or shared_color
+            ).strip()
+            size = str(
+                get(f"size{index}", f"Size {index}")
+                or detail_get("Size", "size")
+                or shared_size
+            ).strip()
             quantity_raw = get(f"sl{index}", f"qty{index}", f"Quantity {index}")
+            if not quantity_raw:
+                quantity_raw = detail_get("Số lượng", "sl", "quantity", "qty")
             if not quantity_raw and len(codes) == 1:
                 quantity_raw = get("Số lượng", "sl", "quantity", "qty")
             quantity = self._to_int(quantity_raw) or 1
@@ -457,12 +496,18 @@ class DropoPancakeBridge:
             return 0
         return discount
 
-    def build_order_payload(self, row: list[Any], header: list[str]) -> dict[str, Any]:
+    def build_order_payload(
+        self,
+        row: list[Any],
+        header: list[str],
+        *,
+        bundle_rows: list[list[Any]] | None = None,
+    ) -> dict[str, Any]:
         get = lambda *names: self._cell(row, header, *names)  # noqa: E731
 
         scale = self.config.price_scale if self.config.price_scale > 0 else 1
         if self._uses_pancake_catalog:
-            items = self.resolve_jennie_items(row, header)
+            items = self.resolve_jennie_items(row, header, bundle_rows=bundle_rows)
         else:
             items = self.resolve_items(
                 get("Selected SKUs", "selected_skus"), get("SKU Code", "sku_code")
@@ -504,9 +549,8 @@ class DropoPancakeBridge:
         )
 
         address = str(get("ที่อยู่เต็ม / Address + ZIP", "Địa chỉ", "Địa chỉ giao hàng", "dia_chi_zip", "c_diachi")).strip()
+        raw_address = address
         province = str(get("จังหวัด / Province", "Tỉnh/Thành", "Tỉnh thành", "tinh", "c_tinh")).strip()
-        if province and province not in address:
-            address = ", ".join(part for part in (address, province) if part)
         post_code = str(get("รหัสไปรษณีย์ / ZIP", "ZIP", "Mã ZIP", "zip", "c_zip")).strip()
         shipping_address = self._enrich_thai_shipping_address(
             {
@@ -516,7 +560,7 @@ class DropoPancakeBridge:
                 "post_code": post_code,
                 "country_code": "66",
             },
-            raw_address=address,
+            raw_address=raw_address,
             province=province,
             post_code=post_code,
         )
@@ -582,7 +626,18 @@ class DropoPancakeBridge:
         postcode = re.sub(r"\D", "", str(post_code or ""))
         address_key = self._norm_geo_match(raw_address)
         province_rows = self._geo_rows("provinces", "", "")
-        province_row = self._choose_geo_row(province_rows, province, address_key)
+        province_from_address = self._choose_geo_row(
+            province_rows,
+            "",
+            address_key,
+            postcode=postcode,
+        )
+        province_row = province_from_address or self._choose_geo_row(
+            province_rows,
+            province,
+            address_key,
+            postcode=postcode,
+        )
         if not province_row:
             raise ValidationError(
                 "không chuẩn hóa được tỉnh/thành địa chỉ Thái theo Pancake; "
@@ -684,7 +739,9 @@ class DropoPancakeBridge:
             return None
 
         def names(row: dict[str, Any]) -> list[str]:
-            raw = [row.get("name"), row.get("name_en")]
+            raw: list[Any] = []
+            for value in (row.get("name"), row.get("name_en")):
+                raw.extend(str(value).split("/") if value is not None else [])
             result: list[str] = []
             for value in raw:
                 value_key = cls._norm_geo_match(value)
@@ -732,6 +789,60 @@ class DropoPancakeBridge:
         return None
 
     # ──────────────────────────── sheet ─────────────────────────────
+
+    def _bundle_detail_rows(
+        self,
+        data_rows: list[list[Any]],
+        main_offset: int,
+        header: list[str],
+        main_row: list[Any],
+    ) -> list[list[Any]]:
+        """Collect the hidden ``jcpost=1..N`` rows belonging to one bundle.
+
+        The web form submits the customer/address and combined SKU list only
+        on the first row. Each following iframe submit carries the individual
+        product code, color, and size but no phone number. Keep those detail
+        rows attached to the main row so mixed-color bundles map correctly.
+        """
+        codes = self._split_order_values(
+            self._cell(main_row, header, "SKU Code", "sku_code", "sku_codes")
+        )
+        if len(codes) <= 1:
+            return []
+
+        details: list[list[Any]] = []
+        for candidate in data_rows[main_offset + 1 :]:
+            candidate_row = self._pad(candidate, len(header))
+            candidate_phone = self._clean_phone(
+                self._cell(
+                    candidate_row,
+                    header,
+                    "เบอร์โทรศัพท์ / Phone",
+                    "Số điện thoại",
+                    "SĐT",
+                    "Điện thoại",
+                    "sdt",
+                    "c_sdt",
+                )
+            )
+            if candidate_phone or self._cell(candidate_row, header, "Order ID", "ma_don", "order_id"):
+                break
+            source = str(self._cell(candidate_row, header, "Nguồn", "source") or "").strip()
+            raw_code = self._cell(
+                candidate_row,
+                header,
+                "Mã SP",
+                "Mã sản phẩm",
+                "ma_sp",
+                "SKU",
+                "sku",
+            )
+            if not raw_code or not re.search(r"[?&]jcpost=\d+", source, re.IGNORECASE):
+                break
+            details.append(candidate_row)
+            if len(details) >= len(codes) - 1:
+                break
+        return details
 
     def _fetch_sheet_values(self) -> list[list[Any]]:
         """Đọc TOÀN BỘ dòng có dữ liệu của tab.

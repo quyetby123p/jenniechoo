@@ -305,6 +305,31 @@ def test_jennie_bundle_applies_shared_color_and_size_to_every_product():
     assert [item["variation_id"] for item in items] == ["jca250-kem-l", "jca248-kem-l"]
 
 
+def test_jennie_bundle_uses_jcpost_rows_for_per_item_color_and_size():
+    bridge, _, _ = build_bridge([HEADER])
+    bridge._pancake_catalog = {
+        "JC-V-123": [{"variation_id": "jcv123-den-s", "variation_sku": "JC-V-123-DEN COC-S", "size": "S", "field_values": ["Đen cộc", "S"], "retail_price": 300000}],
+        "JC-A-158": [{"variation_id": "jca158-nau-s", "variation_sku": "JC-A-158-S-NAU", "size": "S", "field_values": ["Nâu", "S"], "retail_price": 230000}],
+        "JC-Q-158": [{"variation_id": "jcq158-nau-s", "variation_sku": "JC-Q-158-NAU-S", "size": "S", "field_values": ["Nâu", "S"], "retail_price": 194000}],
+    }
+    header = ["SKU Code", "Mã sản phẩm", "Màu", "Size", "Số lượng"]
+    row = ["JCV123, JCA158, JCQ158", "JCV123", "Đen cộc", "S", "1"]
+    details = [["", "JCA158", "Nâu", "S", "1"], ["", "JCQ158", "Nâu", "S", "1"]]
+
+    items = bridge.resolve_jennie_items(row, header, bundle_rows=details)
+
+    assert [item["variation_id"] for item in items] == ["jcv123-den-s", "jca158-nau-s", "jcq158-nau-s"]
+
+
+def test_geo_match_tach_ten_thai_va_ten_anh():
+    bridge, _, _ = build_bridge([HEADER])
+    rows = [{"id": "ranong", "name": "ระนอง/ Ranong", "name_en": "ระนอง"}]
+
+    chosen = bridge._choose_geo_row(rows, "", bridge._norm_geo_match("Ranong Province 85000"))
+
+    assert chosen["id"] == "ranong"
+
+
 # ───────────────────────────── build_payload ─────────────────────────────
 
 
