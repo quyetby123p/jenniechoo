@@ -72,4 +72,7 @@ jobs:
           fi
 
       - name: Confirm Pancake orders only
+        # This is a silent background loop. A stale/not-ready order must not
+        # turn the scheduled job red or send a GitHub failure email.
+        continue-on-error: true
         run: python -m app.pancake_auto_confirm --profile main --lookback-hours 720 --max-batch 500
