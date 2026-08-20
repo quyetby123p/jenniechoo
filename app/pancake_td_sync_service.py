@@ -1793,6 +1793,16 @@ class PancakeToThaiDuongSyncService:
             result.append(normalized)
 
         _add(raw)
+        # Keep the stable product prefix as a fallback key. Some Pancake
+        # variants put the style name before/after the color, while Thai
+        # Duong stores that style inside the SKU (for example JCV123 COC vs
+        # JCV123_TAY_COC). Color and size matching still disambiguate it.
+        compact_raw = PancakeToThaiDuongSyncService._normalize_sku(raw)
+        # Thai Duong SKUs can start with a warehouse/customer prefix such as
+        # THA356 before the actual product code (JCV123). Keep every stable
+        # letter+number code so either source layout can meet on JCV123.
+        for base_match in re.finditer(r"[A-Z]{2,}\d+", compact_raw):
+            _add(base_match.group(0))
         tokens = [token.strip() for token in raw.split("-") if token.strip()]
         if len(tokens) >= 2 and re.fullmatch(r"[A-Za-z]{2,}\d+", tokens[0]):
             _add("-".join(tokens[1:]))

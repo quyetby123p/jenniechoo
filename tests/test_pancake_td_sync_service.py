@@ -10,6 +10,14 @@ from app.settings import Settings
 from app.utils import dump_json, load_json
 
 
+def test_candidate_sku_keys_extracts_product_code_after_thai_duong_prefix() -> None:
+    keys = PancakeToThaiDuongSyncService._candidate_sku_keys(
+        "THA356-JC-V-123_TAY_COC-Đen-S"
+    )
+
+    assert "JCV123" in keys
+
+
 def _dummy_settings(tmp_path: Path, **overrides) -> Settings:
     base = Settings(
         project_root=tmp_path,
