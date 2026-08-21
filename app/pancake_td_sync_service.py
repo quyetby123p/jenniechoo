@@ -1527,6 +1527,14 @@ class PancakeToThaiDuongSyncService:
             item_key_cfg = {}
 
         payload = copy.deepcopy(payload_template)
+        # Thai Duong validates buyInsurance as a JSON boolean, while a
+        # captured template or environment override may contain a string.
+        buy_insurance = payload.get("buyInsurance", False)
+        if isinstance(buy_insurance, str):
+            buy_insurance = buy_insurance.strip().lower() in {"1", "true", "yes", "y"}
+        elif not isinstance(buy_insurance, bool):
+            buy_insurance = bool(buy_insurance)
+        payload["buyInsurance"] = buy_insurance
         payload_items = [self._build_payload_item(item, item_key_cfg) for item in mapped_items]
         payload_items = [item for item in payload_items if isinstance(item, dict) and item]
 

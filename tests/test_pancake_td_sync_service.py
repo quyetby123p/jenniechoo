@@ -398,6 +398,9 @@ def _enable_print_note_sync(settings: Settings) -> None:
 def test_sync_transfer_order_sets_transfer_and_cod_zero(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     _write_basic_sync_config(settings)
+    template = load_json(settings.thai_duong_order_payload_template_path)
+    template["buyInsurance"] = "false"
+    dump_json(settings.thai_duong_order_payload_template_path, template)
     pancake = FakePancakeClient(
         [
             {
