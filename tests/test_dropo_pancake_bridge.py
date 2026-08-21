@@ -330,6 +330,24 @@ def test_geo_match_tach_ten_thai_va_ten_anh():
     assert chosen["id"] == "ranong"
 
 
+def test_geo_match_uu_tien_dia_chi_khi_zip_lech():
+    bridge, _, _ = build_bridge([HEADER])
+    rows = [
+        {"id": "kap-choeng", "name": "กาบเชิง/ Kap Choeng", "postcode": [32210]},
+        {"id": "sangkha", "name": "สังขะ/ Sangkha", "postcode": [32150]},
+    ]
+
+    chosen = bridge._choose_geo_row(
+        rows,
+        "",
+        bridge._norm_geo_match("504/2 ต.สังขะ อ.สังขะ"),
+        postcode="32210",
+        administrative_markers=("เขต", "อำเภอ", "อ.", "khet", "amphoe", "district"),
+    )
+
+    assert chosen["id"] == "sangkha"
+
+
 # ───────────────────────────── build_payload ─────────────────────────────
 
 

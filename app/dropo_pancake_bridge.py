@@ -660,7 +660,7 @@ class DropoPancakeBridge:
             "",
             address_key,
             postcode=postcode,
-            administrative_markers=("เขต", "อำเภอ", "khet", "amphoe", "district"),
+            administrative_markers=("เขต", "อำเภอ", "อ.", "khet", "amphoe", "district"),
         )
         if not district_row:
             raise ValidationError(
@@ -683,7 +683,7 @@ class DropoPancakeBridge:
             "",
             address_key,
             postcode=postcode,
-            administrative_markers=("แขวง", "ตำบล", "khwaeng", "tambon", "subdistrict"),
+            administrative_markers=("แขวง", "ตำบล", "ต.", "khwaeng", "tambon", "subdistrict"),
         )
         if not commune_row:
             raise ValidationError(
@@ -765,25 +765,46 @@ class DropoPancakeBridge:
         ]
         address_hits = [
             row
-            for row in (postcode_rows or rows)
+            for row in rows
             if any(value and value in address_key for value in names(row) if len(value) >= 3)
         ]
-        if len(address_hits) > 1 and administrative_markers:
-            marker_keys = [cls._norm_geo_match(marker) for marker in administrative_markers]
-            marked_hits = [
-                row
-                for row in address_hits
-                if any(
-                    marker_key and marker_key + value in address_key
-                    for marker_key in marker_keys
-                    for value in names(row)
-                    if len(value) >= 3
-                )
-            ]
-            if len(marked_hits) == 1:
-                return marked_hits[0]
-        if len(address_hits) == 1:
-            return address_hits[0]
+
+        def marked_hits(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            if not administrative_markers:
+                return []
+            marker_keys = sorted(
+                {cls._norm_geo_match(marker) for marker in administrative_markers if marker},
+                key=len,
+                reverse=True,
+            )
+            # Ưu tiên marker đầy đủ (แขวง/เขต/อำเภอ) trước marker viết tắt
+            # (ต./อ.). Nếu xét marker ngắn trước, ký tự ต trong เขต có thể
+            # bị hiểu nhầm là tiền tố của tên quận.
+            for marker_key in marker_keys:
+                hits = [
+                    row
+                    for row in candidates
+                    if any(
+                        marker_key + value in address_key
+                        for value in names(row)
+                        if len(value) >= 3
+                    )
+                ]
+                if hits:
+                    return hits
+            return []
+
+        # Giữ ưu tiên postcode khi postcode và tên cùng chỉ đúng một dòng;
+        # nếu postcode bị nhập lệch, vẫn phải cho tên hành chính trong địa chỉ
+        # thắng (ví dụ อ.สังขะ nhưng ZIP lại trỏ sang กาบเชิง).
+        postcode_address_hits = [row for row in postcode_rows if row in address_hits]
+        for candidates in (postcode_address_hits, address_hits):
+            if len(candidates) > 1:
+                marked = marked_hits(candidates)
+                if len(marked) == 1:
+                    return marked[0]
+            if len(candidates) == 1:
+                return candidates[0]
         if len(postcode_rows) == 1:
             return postcode_rows[0]
         return None
