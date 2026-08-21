@@ -628,7 +628,7 @@ def test_chuyen_timestamp_dropo_utc_sang_gio_hanoi():
     bridge._normalize_sheet_timestamps(rows, HEADER)
 
     ranges = {u["range"]: u["values"][0][0] for u in session.updates}
-    assert ranges["Leads!A2"] == "2026-08-17 13:21:07"
+    assert ranges["Leads!A2"] == "2026-08-17 13:21:07+07:00"
 
 
 # ───────────────────────────── config từ env ─────────────────────────────

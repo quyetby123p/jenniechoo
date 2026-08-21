@@ -873,8 +873,9 @@ class DropoPancakeBridge:
 
         Dropo hiện ghi chuỗi ISO có hậu tố ``+00:00`` vào Sheet. Vì đó là
         text, timezone của Google Sheet (Asia/Saigon) không tự chuyển giờ.
-        Chỉ chuẩn hóa các ô có timezone/ISO rõ ràng; các timestamp đã là text
-        địa phương hoặc giá trị không hợp lệ được giữ nguyên.
+        Đầu ra luôn là text có offset tường minh ``+07:00`` để không còn
+        phụ thuộc timezone hiển thị của từng trình đọc Sheet. Các timestamp
+        đã là giờ địa phương hoặc giá trị không hợp lệ được giữ nguyên.
         """
         time_index = next(
             (header.index(name) for name in ("Thời gian", "created_at", "time") if name in header),
@@ -897,7 +898,10 @@ class DropoPancakeBridge:
                 continue
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=timezone.utc)
-            normalized = parsed.astimezone(HANOI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+            local_time = parsed.astimezone(HANOI_TZ)
+            offset = local_time.strftime("%z")
+            offset = offset[:3] + ":" + offset[3:] if len(offset) == 5 else "+07:00"
+            normalized = f"{local_time.strftime('%Y-%m-%d %H:%M:%S')}{offset}"
             if raw == normalized:
                 continue
             updates.append(self._cell_update(time_index, row_index, normalized))
