@@ -484,13 +484,14 @@ def test_dong_khong_map_duoc_sku_bi_danh_dau_bo_qua():
     assert ranges["Leads!V2"].startswith("BỎ QUA")
 
 
-def test_dong_da_danh_dau_bo_qua_khong_thu_lai():
+def test_dong_da_danh_dau_bo_qua_duoc_thu_lai_de_tu_link():
     values = [HEADER, make_row(**{"Sync status": "BỎ QUA: không map được SKU"})]
     bridge, _, client = build_bridge(values)
     report = bridge.run_once()
 
-    assert report.pending == 0
-    assert client.payloads == []
+    assert report.pending == 1
+    assert report.created == 1
+    assert len(client.payloads) == 1
 
 
 def test_dong_thieu_sdt_bi_bo_qua_im_lang():

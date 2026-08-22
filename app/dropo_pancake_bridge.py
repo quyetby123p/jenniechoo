@@ -244,7 +244,12 @@ class DropoPancakeBridge:
                 continue
             status_note = str(row[columns[COL_SYNC_STATUS]] or "").strip()
             if status_note.startswith(SKIP_PREFIX):
-                continue
+                # BỎ QUA chỉ là lỗi dữ liệu tạm thời, không phải trạng thái
+                # hoàn tất. Địa chỉ/SKU có thể được Dropo cập nhật sau đó;
+                # nếu chặn vĩnh viễn ở đây thì đơn sẽ không bao giờ tự link
+                # lại dù dữ liệu đã đúng. Lần chạy này sẽ thử lại và ghi đè
+                # lý do mới nếu dữ liệu vẫn chưa đủ.
+                self.logger.info("Dòng %s đang ở trạng thái BỎ QUA; thử lại dữ liệu đã cập nhật.", row_index)
             phone = self._clean_phone(
                 self._cell(
                     row,
