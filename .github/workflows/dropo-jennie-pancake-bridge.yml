@@ -3,7 +3,7 @@ name: Jennie Choo Dropo to Pancake
 on:
   # GitHub scheduler có thể trễ vài phút, nhưng không cần máy của anh bật.
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       live:
