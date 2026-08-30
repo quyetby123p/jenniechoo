@@ -155,9 +155,11 @@ function base64Utf8(value) {
   return btoa(binary);
 }
 
-function githubDispatchConfig(env) {
+function githubDispatchConfig(env, workflowFileOverride = "") {
   const repo = String(env.GITHUB_REPO || "").trim();
-  const workflowFile = String(env.GITHUB_WORKFLOW_FILE || "free-scheduled-tasks.yml").trim();
+  const workflowFile = String(
+    workflowFileOverride || env.GITHUB_WORKFLOW_FILE || "free-scheduled-tasks.yml",
+  ).trim();
   const ref = String(env.GITHUB_REF || "main").trim();
   const token = String(env.GITHUB_TOKEN || "").trim();
   if (!repo || !workflowFile || !ref || !token) {
@@ -176,8 +178,8 @@ function githubHeaders(token) {
   };
 }
 
-async function dispatchGitHubInputs(inputs, env) {
-  const { repo, workflowFile, ref, token } = githubDispatchConfig(env);
+async function dispatchGitHubInputs(inputs, env, workflowFileOverride = "") {
+  const { repo, workflowFile, ref, token } = githubDispatchConfig(env, workflowFileOverride);
   const response = await fetch(
     `https://api.github.com/repos/${repo}/actions/workflows/${workflowFile}/dispatches`,
     {
@@ -253,6 +255,12 @@ function localHalfHourBucket(timestamp) {
   return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}T${pad2(parts.hour)}:${pad2(minute)}`;
 }
 
+function localTenMinuteBucket(timestamp) {
+  const parts = localDateParts(timestamp);
+  const minute = Math.floor(parts.minute / 10) * 10;
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}T${pad2(parts.hour)}:${pad2(minute)}`;
+}
+
 function scheduleMarkKey(parts) {
   const task = String(parts.task || "").trim();
   if (!task) return "";
@@ -267,6 +275,10 @@ function scheduleMarkKey(parts) {
     task === "pancake-td-sync"
     || task === "bot3-event-reminders"
   ) {
+    const bucket = String(parts.bucket || "").trim();
+    return bucket ? `${task}:${bucket}` : "";
+  }
+  if (task === "jennie-pancake-bridge") {
     const bucket = String(parts.bucket || "").trim();
     return bucket ? `${task}:${bucket}` : "";
   }
@@ -289,6 +301,12 @@ function scheduleMarkPartsFromCloud(inputs, scheduledTime) {
     return {
       task,
       bucket: localHalfHourBucket(scheduledTime),
+    };
+  }
+  if (task === "jennie-pancake-bridge") {
+    return {
+      task,
+      bucket: localTenMinuteBucket(scheduledTime),
     };
   }
   return {
@@ -419,6 +437,12 @@ async function handleScheduleMark(request, env) {
 function scheduledInputsFromCron(cron, scheduledTime) {
   const parts = localDateParts(scheduledTime);
   switch (String(cron || "").trim()) {
+    case "*/10 * * * *":
+      return [{
+        task: "jennie-pancake-bridge",
+        workflow_file: "dropo-jennie-pancake-bridge.yml",
+        dispatch_inputs: { live: "true" },
+      }];
     case "5,35 * * * *": {
       const inputs = [{
         task: "pancake-td-sync",
@@ -649,7 +673,13 @@ export default {
           console.log(`Skipped GitHub task ${label} from cron ${event.cron}; local completion mark exists.`);
           continue;
         }
-        await dispatchGitHubInputs(inputs, env);
+        const workflowFile = String(inputs.workflow_file || "").trim();
+        const dispatchInputs = inputs.dispatch_inputs && typeof inputs.dispatch_inputs === "object"
+          ? inputs.dispatch_inputs
+          : Object.fromEntries(
+            Object.entries(inputs).filter(([key]) => !["task", "workflow_file", "dispatch_inputs"].includes(key)),
+          );
+        await dispatchGitHubInputs(dispatchInputs, env, workflowFile);
         console.log(`Dispatched GitHub task ${label} from cron ${event.cron}`);
       } catch (error) {
         failures.push(label);

@@ -1,9 +1,8 @@
 name: Jennie Choo Dropo to Pancake
 
 on:
-  # GitHub scheduler có thể trễ vài phút, nhưng không cần máy của anh bật.
-  schedule:
-    - cron: "*/10 * * * *"
+  # Cloudflare Worker là scheduler duy nhất; tránh GitHub cron chạy song song
+  # hoặc bị GitHub bỏ lượt khi tải cao.
   workflow_dispatch:
     inputs:
       live:
@@ -16,7 +15,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: jenniechoo-dropo-pancake-bridge
+  # Khóa cứng một phiên live trên toàn repository. Phiên mới chỉ xếp hàng,
+  # không hủy phiên đang xử lý và không tạo hai đơn từ cùng một lead.
+  group: jenniechoo-dropo-pancake-bridge-live
   cancel-in-progress: false
 
 jobs:

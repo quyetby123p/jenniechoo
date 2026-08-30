@@ -87,6 +87,7 @@ def _apply_config_defaults(profile: str) -> list[str]:
 
 from app.dropo_pancake_bridge import BridgeConfig, DropoPancakeBridge  # noqa: E402
 from app.exceptions import ValidationError  # noqa: E402
+from app.instance_lock import single_instance_lock  # noqa: E402
 from app.settings import load_settings  # noqa: E402
 
 
@@ -98,6 +99,52 @@ def build_logger(verbose: bool) -> logging.Logger:
         logger.addHandler(handler)
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
     return logger
+
+
+def _run_bridge_loop(bridge: DropoPancakeBridge, config: BridgeConfig, args, logger: logging.Logger) -> int:
+    """Chạy bridge trong phiên duy nhất đã được khóa ở cấp process."""
+
+    exit_code = 0
+    while True:
+        try:
+            report = bridge.run_once()
+        except ValidationError as exc:
+            logger.error("Cấu hình sai: %s", exc)
+            return 2
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Chạy thất bại: %s", exc)
+            exit_code = 1
+            if not args.loop:
+                return exit_code
+            time.sleep(config.poll_seconds)
+            continue
+
+        logger.info(
+            "scanned=%s pending=%s created=%s dry_run=%s skipped=%s failed=%s",
+            report.scanned,
+            report.pending,
+            report.created,
+            report.dry_run,
+            report.skipped,
+            report.failed,
+        )
+        for row in report.rows:
+            if row.status == "dry_run":
+                logger.info("[DRY] dòng %s -> %s", row.row_index, row.message)
+            elif row.status == "created":
+                logger.info("dòng %s -> đơn Pancake %s", row.row_index, row.order_id)
+            else:
+                logger.warning("dòng %s -> %s: %s", row.row_index, row.status, row.message)
+
+        if report.failed:
+            exit_code = 1
+
+        if os.getenv("GITHUB_STEP_SUMMARY"):
+            _write_actions_summary(report.as_dict(), dry_run=config.dry_run)
+
+        if not args.loop:
+            return exit_code
+        time.sleep(config.poll_seconds)
 
 
 def main() -> int:
@@ -148,47 +195,17 @@ def main() -> int:
         config.sheet_tab,
     )
 
-    exit_code = 0
-    while True:
-        try:
-            report = bridge.run_once()
-        except ValidationError as exc:
-            logger.error("Cấu hình sai: %s", exc)
-            return 2
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Chạy thất bại: %s", exc)
-            exit_code = 1
-            if not args.loop:
-                return exit_code
-            time.sleep(config.poll_seconds)
-            continue
-
-        logger.info(
-            "scanned=%s pending=%s created=%s dry_run=%s skipped=%s failed=%s",
-            report.scanned,
-            report.pending,
-            report.created,
-            report.dry_run,
-            report.skipped,
-            report.failed,
-        )
-        for row in report.rows:
-            if row.status == "dry_run":
-                logger.info("[DRY] dòng %s -> %s", row.row_index, row.message)
-            elif row.status == "created":
-                logger.info("dòng %s -> đơn Pancake %s", row.row_index, row.order_id)
-            else:
-                logger.warning("dòng %s -> %s: %s", row.row_index, row.status, row.message)
-
-        if report.failed:
-            exit_code = 1
-
-        if os.getenv("GITHUB_STEP_SUMMARY"):
-            _write_actions_summary(report.as_dict(), dry_run=config.dry_run)
-
-        if not args.loop:
-            return exit_code
-        time.sleep(config.poll_seconds)
+    lock_file = Path(
+        os.getenv("DROPO_PANCAKE_BRIDGE_LOCK_FILE", "").strip()
+        or (REPO_ROOT / "storage" / "dropo_pancake_bridge.lock")
+    )
+    try:
+        with single_instance_lock(lock_file):
+            logger.info("Đã khóa phiên bridge: %s", lock_file)
+            return _run_bridge_loop(bridge, config, args, logger)
+    except RuntimeError as exc:
+        logger.error("Không chạy phiên mới: bridge đang có phiên khác giữ khóa (%s).", exc)
+        return 3
 
 
 def _write_actions_summary(report: dict, *, dry_run: bool) -> None:
