@@ -67,9 +67,12 @@ cd D:\clawagent-main\clawagent-main\codex\projects\fb-ads-automation
 
 Mã thoát: `0` = ổn · `1` = có đơn lỗi · `2` = thiếu cấu hình.
 
-## Đưa lên GitHub để chạy khi tắt máy
+## Chạy cloud khi tắt máy
 
-Workflow `.github/workflows/dropo-jennie-pancake-bridge.yml` chạy mỗi 5 phút trên hạ tầng GitHub.
+Cloudflare Worker là scheduler duy nhất và dispatch workflow
+`.github/workflows/dropo-jennie-pancake-bridge.yml` đúng 10 phút/lần (các phút
+`00/10/20/30/40/50`, giờ Việt Nam). GitHub Actions giữ khóa cứng một phiên; nếu
+phiên trước chưa xong, phiên mới không chạy song song.
 
 **Secrets cần thêm** (Settings → Secrets and variables → Actions):
 
@@ -87,9 +90,9 @@ dry-run; muốn thử tạo thật thì vào Actions → Jennie Choo Dropo to Pa
 
 Mỗi lần chạy có bảng tóm tắt ngay trong tab Actions (dòng nào tạo đơn, dòng nào lỗi).
 
-**Lưu ý về cron GitHub:** lịch là "sớm nhất có thể", không đúng giờ tuyệt đối —
-lúc GitHub tải nặng có thể trễ 5–15 phút. Đơn vẫn nằm trong Sheet nên không mất,
-chỉ vào Pancake muộn hơn.
+**Lưu ý về scheduler cloud:** Cloudflare có thể trễ ngắn khi hệ thống tải cao,
+nhưng đơn vẫn nằm trong Sheet và lượt kế tiếp sẽ quét bù; không phụ thuộc máy
+của anh bật hay tắt.
 
 ## Trạng thái ghi vào cột `Sync status`
 
