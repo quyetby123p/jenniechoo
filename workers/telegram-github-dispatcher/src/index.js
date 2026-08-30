@@ -437,13 +437,17 @@ async function handleScheduleMark(request, env) {
 function scheduledInputsFromCron(cron, scheduledTime) {
   const parts = localDateParts(scheduledTime);
   switch (String(cron || "").trim()) {
-    case "*/10 * * * *":
-      return [{
-        task: "jennie-pancake-bridge",
-        workflow_file: "dropo-jennie-pancake-bridge.yml",
-        dispatch_inputs: { live: "true" },
-      }];
-    case "5,35 * * * *": {
+    case "*/5 * * * *": {
+      if (parts.minute % 10 === 0) {
+        return [{
+          task: "jennie-pancake-bridge",
+          workflow_file: "dropo-jennie-pancake-bridge.yml",
+          dispatch_inputs: { live: "true" },
+        }];
+      }
+      if (parts.minute !== 5 && parts.minute !== 35) {
+        return [];
+      }
       const inputs = [{
         task: "pancake-td-sync",
         pancake_notify: "auto",

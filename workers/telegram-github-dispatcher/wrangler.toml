@@ -8,8 +8,7 @@ enabled = true
 
 [triggers]
 crons = [
-  "*/10 * * * *",       # Sole scheduler for Jennie Dropo -> Pancake bridge.
-  "5,35 * * * *",      # Backup +5m for 30-minute Pancake -> Thai Duong sync buckets.
+  "*/5 * * * *",       # Bridge every 10m + backup at :05/:35, one free trigger.
   "5 1 * * *",         # Backup 08:05 Asia/Ho_Chi_Minh morning daily report.
   "5 2 * * *",         # Backup 09:05 Asia/Ho_Chi_Minh token health.
   "5 8 * * 1,5,6",     # Backup 15:05 Asia/Ho_Chi_Minh Mon/Fri cash-in, Sat weekly summary.
