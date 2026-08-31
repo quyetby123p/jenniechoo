@@ -69,10 +69,11 @@ Mã thoát: `0` = ổn · `1` = có đơn lỗi · `2` = thiếu cấu hình.
 
 ## Chạy cloud khi tắt máy
 
-Cloudflare Worker là scheduler duy nhất và dispatch workflow
+Cloudflare Worker là scheduler chính và dispatch workflow
 `.github/workflows/dropo-jennie-pancake-bridge.yml` đúng 10 phút/lần (các phút
-`00/10/20/30/40/50`, giờ Việt Nam). GitHub Actions giữ khóa cứng một phiên; nếu
-phiên trước chưa xong, phiên mới không chạy song song.
+`00/10/20/30/40/50`, giờ Việt Nam). GitHub Actions có thêm cron `*/10` làm
+đường dự phòng khi Cloudflare bị trễ/mất lượt. Concurrency giữ khóa cứng một
+phiên; nếu phiên trước chưa xong, phiên mới không chạy song song.
 
 **Secrets cần thêm** (Settings → Secrets and variables → Actions):
 

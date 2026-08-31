@@ -1,8 +1,10 @@
 name: Jennie Choo Dropo to Pancake
 
 on:
-  # Cloudflare Worker là scheduler duy nhất; tránh GitHub cron chạy song song
-  # hoặc bị GitHub bỏ lượt khi tải cao.
+  # Cloudflare Worker là scheduler chính. GitHub cron là đường dự phòng nếu
+  # Cloudflare bị trễ/mất một lượt; concurrency + marker trên Sheet chống trùng.
+  schedule:
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       live:
@@ -68,8 +70,8 @@ jobs:
         shell: bash
         run: |
           args=("--profile" "main" "--once" "--verbose")
-          # Lịch tự động chạy live để lead mới tự lên Pancake. Workflow chạy
-          # tay mặc định dry-run; chỉ tạo thật khi anh tick live.
+          # Hai lịch tự động (Cloudflare dispatch và GitHub cron) đều chạy live;
+          # workflow chạy tay mặc định dry-run, chỉ tạo thật khi tick live.
           if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.live }}" = "true" ]; then
             args+=("--live")
           fi
