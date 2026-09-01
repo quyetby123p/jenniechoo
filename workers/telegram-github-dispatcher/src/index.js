@@ -233,8 +233,22 @@ function pad2(value) {
   return String(value).padStart(2, "0");
 }
 
+function timestampMillis(timestamp) {
+  if (typeof timestamp === "number" && Number.isFinite(timestamp)) {
+    return timestamp;
+  }
+  const numeric = Number(timestamp);
+  if (Number.isFinite(numeric)) {
+    return numeric;
+  }
+  const parsed = Date.parse(String(timestamp || ""));
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
 function localDateParts(timestamp) {
-  const local = new Date(Number(timestamp || Date.now()) + 7 * 60 * 60 * 1000);
+  // Cloudflare normally supplies epoch milliseconds, but accepting ISO strings
+  // keeps the HCM 10-minute gate correct in replay/tests and future runtimes.
+  const local = new Date(timestampMillis(timestamp) + 7 * 60 * 60 * 1000);
   return {
     year: local.getUTCFullYear(),
     month: local.getUTCMonth() + 1,
