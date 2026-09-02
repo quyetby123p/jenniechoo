@@ -503,6 +503,19 @@ def test_dong_thieu_sdt_bi_bo_qua_im_lang():
     assert client.payloads == []
 
 
+def test_sdt_ngan_bi_bo_qua_va_khong_goi_lai_pancake():
+    values = [HEADER, make_row(**{"เบอร์โทรศัพท์ / Phone": "06463242"})]
+    bridge, session, client = build_bridge(values)
+
+    report = bridge.run_once()
+
+    assert report.skipped == 1
+    assert report.failed == 0
+    assert client.payloads == []
+    ranges = {u["range"]: u["values"][0][0] for u in session.updates}
+    assert ranges["Leads!V2"].startswith("BỎ QUA: SĐT không hợp lệ")
+
+
 def test_tu_them_cot_theo_doi_khi_sheet_chua_co():
     header_short = HEADER[:-2]
     row = make_row()[:-2]
