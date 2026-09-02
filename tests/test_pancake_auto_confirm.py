@@ -83,3 +83,4 @@ def test_product_not_ready_is_skipped_without_failing_workflow() -> None:
     assert report["updated"] == 0
     assert report["skipped"] == 1
     assert report["failed"] == 0
+    assert len(report["skipped_reasons"]) == 1

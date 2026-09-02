@@ -49,6 +49,7 @@ class PancakeAutoConfirmService:
             "candidates": 0,
             "updated": 0,
             "skipped": 0,
+            "skipped_reasons": [],
             "failed": 0,
             "errors": [],
         }
@@ -96,6 +97,7 @@ class PancakeAutoConfirmService:
             except Exception as exc:  # noqa: BLE001
                 if self._is_not_ready_error(exc):
                     summary["skipped"] += 1
+                    summary["skipped_reasons"].append(f"Đơn {order_code}: {exc}")
                     continue
                 summary["failed"] += 1
                 summary["errors"].append(f"Đổi trạng thái đơn {order_code} thất bại: {exc}")
