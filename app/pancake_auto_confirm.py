@@ -22,11 +22,11 @@ from app.settings import load_settings
 WAITING_CONFIRMATION_STATUS = 17
 CONFIRMED_STATUS = 1
 STATUS_UPDATE_CONFIG = {
+    # Chỉ đổi trạng thái; không PUT lại toàn bộ items vì Pancake sẽ kiểm tra
+    # tồn kho lần nữa và có thể trả 422 dù đơn đã hợp lệ.
     "method": "PUT",
     "path": "/shops/{shop_id}/orders/{order_id}",
     "status_field": "status",
-    "safe_full_order_update": True,
-    "expected_current_status": WAITING_CONFIRMATION_STATUS,
     "verify_after_update": True,
     "extra_payload": {},
 }
@@ -118,7 +118,12 @@ class PancakeAutoConfirmService:
 
 def _build_service(profile: str | None) -> PancakeAutoConfirmService:
     project_root = Path(__file__).resolve().parents[1]
-    settings = load_settings(project_root=project_root, profile=profile)
+    # Main profile dùng bộ biến PANCAKE_* không tiền tố. Chỉ profile phụ như
+    # ads2 mới dùng nhóm biến có tiền tố; truyền "main" vào settings sẽ khiến
+    # loader đòi MAIN_TELEGRAM_BOT_TOKEN dù worker chỉ cần Pancake.
+    normalized_profile = str(profile or "").strip().lower()
+    settings_profile = None if normalized_profile in {"", "main", "default"} else profile
+    settings = load_settings(project_root=project_root, profile=settings_profile)
     logger = configure_logger(
         settings.app_logs_dir,
         secrets=[settings.pancake_api_key, settings.pancake_access_token],
@@ -142,10 +147,10 @@ def main() -> int:
             max_batch=args.max_batch,
         )
     except Exception as exc:  # noqa: BLE001
-        print(json.dumps({"ok": False, "failed": 1, "errors": [str(exc)]}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "failed": 1, "errors": [str(exc)]}, ensure_ascii=True))
         return 1
 
-    print(json.dumps(report, ensure_ascii=False))
+    print(json.dumps(report, ensure_ascii=True))
     return 0 if report.get("ok") else 1
 
 

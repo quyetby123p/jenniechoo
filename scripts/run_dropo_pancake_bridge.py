@@ -136,7 +136,10 @@ def _run_bridge_loop(bridge: DropoPancakeBridge, config: BridgeConfig, args, log
             else:
                 logger.warning("dòng %s -> %s: %s", row.row_index, row.status, row.message)
 
-        if report.failed:
+        fail_on_row_errors = os.getenv("DROPO_PANCAKE_BRIDGE_FAIL_ON_ROW_ERRORS", "1").strip().lower() not in {
+            "0", "false", "no", "off",
+        }
+        if report.failed and fail_on_row_errors:
             exit_code = 1
 
         if os.getenv("GITHUB_STEP_SUMMARY"):

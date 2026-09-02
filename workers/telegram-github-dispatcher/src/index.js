@@ -292,7 +292,7 @@ function scheduleMarkKey(parts) {
     const bucket = String(parts.bucket || "").trim();
     return bucket ? `${task}:${bucket}` : "";
   }
-  if (task === "jennie-pancake-bridge") {
+  if (task === "jennie-pancake-bridge" || task === "jennie-pancake-auto-confirm") {
     const bucket = String(parts.bucket || "").trim();
     return bucket ? `${task}:${bucket}` : "";
   }
@@ -317,7 +317,7 @@ function scheduleMarkPartsFromCloud(inputs, scheduledTime) {
       bucket: localHalfHourBucket(scheduledTime),
     };
   }
-  if (task === "jennie-pancake-bridge") {
+  if (task === "jennie-pancake-bridge" || task === "jennie-pancake-auto-confirm") {
     return {
       task,
       bucket: localTenMinuteBucket(scheduledTime),
@@ -452,23 +452,28 @@ function scheduledInputsFromCron(cron, scheduledTime) {
   const parts = localDateParts(scheduledTime);
   switch (String(cron || "").trim()) {
     case "*/5 * * * *": {
+      const inputs = [];
       if (parts.minute % 10 === 0) {
-        return [{
+        inputs.push({
           task: "jennie-pancake-bridge",
           workflow_file: "dropo-jennie-pancake-bridge.yml",
           dispatch_inputs: { live: "true" },
-        }];
+        });
+        inputs.push({
+          task: "jennie-pancake-auto-confirm",
+          workflow_file: "pancake-jennie-choo-auto-confirm.yml",
+        });
       }
       if (parts.minute !== 5 && parts.minute !== 35) {
-        return [];
+        return inputs;
       }
-      const inputs = [{
+      const backupInputs = [{
         task: "pancake-td-sync",
         pancake_notify: "auto",
         source: "cloudflare-cron",
       }];
       if (parts.hour === 17 && parts.minute === 5) {
-        inputs.push({
+        backupInputs.push({
           task: "bot3-daily-checkin",
           slot: "evening",
           source: "cloudflare-cron",
@@ -477,14 +482,14 @@ function scheduledInputsFromCron(cron, scheduledTime) {
       if (parts.hour === 16 && parts.minute === 5) {
         const dayOfWeek = new Date(scheduledTime || Date.now()).getUTCDay();
         if (dayOfWeek === 6) {
-          inputs.push({
+          backupInputs.push({
             task: "media-performance",
             profile: "ads2",
             source: "cloudflare-cron",
           });
         }
       }
-      return inputs;
+      return backupInputs;
     }
     case "5 1 * * *":
       return [

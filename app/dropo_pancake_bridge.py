@@ -299,9 +299,18 @@ class DropoPancakeBridge:
             except (PancakeApiError, ValidationError) as exc:
                 report.failed += 1
                 report.rows.append(RowResult(row_index, "failed", message=str(exc)))
-                self._write_updates(
-                    [self._cell_update(columns[COL_SYNC_STATUS], row_index, f"LỖI: {str(exc)[:200]}")]
-                )
+                try:
+                    self._write_updates(
+                        [self._cell_update(columns[COL_SYNC_STATUS], row_index, f"LỖI: {str(exc)[:200]}")]
+                    )
+                except Exception as write_exc:  # noqa: BLE001
+                    # Lỗi dữ liệu của một dòng không được biến thành lỗi hạ tầng
+                    # của cả phiên; phiên 10 phút sau sẽ quét lại dòng này.
+                    self.logger.error(
+                        "Không ghi được lỗi của dòng %s vào Sheet: %s",
+                        row_index,
+                        write_exc,
+                    )
                 continue
 
             order_id = self._extract_order_id(created)

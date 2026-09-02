@@ -69,11 +69,14 @@ Mã thoát: `0` = ổn · `1` = có đơn lỗi · `2` = thiếu cấu hình.
 
 ## Chạy cloud khi tắt máy
 
-Cloudflare Worker là scheduler chính và dispatch workflow
+Cloudflare Worker là scheduler duy nhất và dispatch workflow
 `.github/workflows/dropo-jennie-pancake-bridge.yml` đúng 10 phút/lần (các phút
-`00/10/20/30/40/50`, giờ Việt Nam). GitHub Actions có thêm cron `*/10` làm
-đường dự phòng khi Cloudflare bị trễ/mất lượt. Concurrency giữ khóa cứng một
-phiên; nếu phiên trước chưa xong, phiên mới không chạy song song.
+`00/10/20/30/40/50`, giờ Việt Nam). Worker cũng dispatch
+`.github/workflows/pancake-jennie-choo-auto-confirm.yml` trong cùng phiên để đổi
+đơn `chờ xác nhận`. GitHub Actions chỉ giữ `workflow_dispatch` cho chạy tay;
+không dùng native cron để tránh chạy lệch phiên, chạy trùng và gửi mail lỗi lặp.
+Concurrency giữ khóa cứng từng loại worker; nếu phiên trước chưa xong, phiên mới
+không chạy song song cùng loại.
 
 **Secrets cần thêm** (Settings → Secrets and variables → Actions):
 
@@ -85,11 +88,13 @@ phiên; nếu phiên trước chưa xong, phiên mới không chạy song song.
 | `DROPO_PANCAKE_OAUTH_CLIENT_SECRET` | OAuth Google dùng đọc/ghi Sheet |
 | `DROPO_PANCAKE_OAUTH_REFRESH_TOKEN` | OAuth Google dùng đọc/ghi Sheet |
 
-Workflow chạy lịch tự động ở chế độ live để lead mới tự lên Pancake. Chạy tay mặc định
+Workflow được Cloudflare dispatch ở chế độ live để lead mới tự lên Pancake. Chạy tay mặc định
 dry-run; muốn thử tạo thật thì vào Actions → Jennie Choo Dropo to Pancake → Run workflow
 → tick `live`. Không có đơn thật nào được tạo trong bước kiểm thử local hiện tại.
 
 Mỗi lần chạy có bảng tóm tắt ngay trong tab Actions (dòng nào tạo đơn, dòng nào lỗi).
+Lỗi dữ liệu của một dòng vẫn được ghi vào Sheet để quét lại ở phiên sau nhưng không
+đánh đỏ toàn bộ workflow; lỗi cấu hình/hạ tầng vẫn bị báo rõ trong log.
 
 **Lưu ý về scheduler cloud:** Cloudflare có thể trễ ngắn khi hệ thống tải cao,
 nhưng đơn vẫn nằm trong Sheet và lượt kế tiếp sẽ quét bù; không phụ thuộc máy
