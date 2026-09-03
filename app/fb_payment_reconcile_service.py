@@ -1003,25 +1003,60 @@ def account_from_ad_account(ad_account_id: str, jc_id: str, vayxa_id: str) -> st
 
 
 def _extract_account_id(text: str) -> str:
-    match = re.search(r"(?:ad\s*account|account\s*id|tai\s*khoan)[^\n]{0,40}?act[_\s:-]*(\d{5,})", text, flags=re.I)
-    return match.group(1) if match else ""
+    labels = r"(?:ad\s*account(?:\s*id)?|account\s*id|tai\s*khoan)"
+    for candidate_text in (text, " ".join(text.split())):
+        match = re.search(rf"{labels}[^\n]{{0,60}}?act[_\s:-]*(\d{{5,}})", candidate_text, flags=re.I)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _label_value_candidates(text: str, labels: str, *, lookahead: int = 2) -> list[str]:
+    """Return values on a label line and the following non-empty lines.
+
+    Facebook's PDF text layer often places a label and its value in separate
+    text boxes. A line-only regex therefore misses fields even though the PDF
+    is selectable/searchable.
+    """
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    candidates: list[str] = []
+    for index, line in enumerate(lines):
+        match = re.search(labels, line, flags=re.I)
+        if not match:
+            continue
+        suffix = line[match.end():].strip(" :#-\t")
+        if suffix:
+            candidates.append(suffix)
+        for offset in range(1, lookahead + 1):
+            if index + offset < len(lines):
+                candidates.append(lines[index + offset])
+    return candidates
 
 
 def _extract_invoice_id(text: str) -> str:
-    patterns = [
-        r"(?:invoice\s*(?:number|no\.?|id)|receipt\s*(?:number|no\.?|id)|ma\s*hoa\s*don)[^\n:]*[:#\s]+([A-Z0-9][A-Z0-9\-_/]{4,})",
-        r"\b(FB[A-Z0-9][A-Z0-9\-_/]{5,})\b",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.I)
-        if match:
-            return match.group(1).strip()
+    labels = (
+        r"(?:invoice\s*(?:number|no\.?|id|reference)|receipt\s*(?:number|no\.?|id)|"
+        r"payment\s*(?:id|reference|number)|transaction\s*(?:id|reference|number)|"
+        r"billing\s*(?:id|reference|number)|ma\s*hoa\s*don)"
+    )
+    for candidate in _label_value_candidates(text, labels):
+        value = re.sub(r"^(?:no\.?|number|id|reference)\s*[:#-]?\s*", "", candidate, flags=re.I).strip()
+        token_match = re.search(r"(?<![A-Za-z0-9])([A-Z0-9][A-Z0-9._/-]{4,})(?![A-Za-z0-9])", value, flags=re.I)
+        if not token_match:
+            continue
+        token = token_match.group(1).strip("._/-")
+        if parse_date_value(token) or token.lower() in {"invoice", "receipt", "payment", "transaction", "reference"}:
+            continue
+        return token
+    match = re.search(r"\b(FB[A-Z0-9][A-Z0-9._/-]{5,})\b", text, flags=re.I)
+    if match:
+        return match.group(1).strip()
     return ""
 
 
 def _extract_invoice_date(text: str) -> str:
-    label = re.search(r"(?:invoice\s*date|billing\s*date|statement\s*date|date|ngay)[^\n:]{0,20}[:\s]+([^\n]{3,30})", text, flags=re.I)
-    candidates = [label.group(1)] if label else []
+    labels = r"(?:invoice\s*date|billing\s*date|statement\s*date|date|ngay)"
+    candidates = _label_value_candidates(text, labels, lookahead=1)
     candidates.extend(re.findall(r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b|\b\d{1,2}[-/]\d{1,2}[-/]\d{4}\b|\b[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4}\b", text))
     for candidate in candidates:
         parsed = parse_date_value(candidate)
@@ -1032,7 +1067,7 @@ def _extract_invoice_date(text: str) -> str:
 
 def _extract_currency(text: str) -> str:
     upper = text.upper()
-    if "US$" in upper:
+    if "US$" in upper or "US $" in upper:
         return "USD"
     for token in ("USD", "THB", "VND", "EUR", "SGD", "AUD", "CAD", "GBP"):
         if re.search(rf"\b{token}\b", upper):
@@ -1043,9 +1078,12 @@ def _extract_currency(text: str) -> str:
 
 
 def _extract_total(text: str, currency: str) -> Decimal | None:
-    labels = r"(?:amount\s+charged|total\s+amount|grand\s+total|total|balance\s+due|tong\s*tien)"
-    matches = re.findall(rf"{labels}[^\n:]*[:\s]+([^\n]{{1,60}})", text, flags=re.I)
-    for value in reversed(matches):
+    labels = (
+        r"(?:amount\s+charged|amount\s+paid|payment\s+amount|paid\s+amount|"
+        r"total\s+amount|grand\s+total|balance\s+due|amount\s+due|"
+        r"total|paid|tong\s*(?:tien|cong)|so\s*tien)"
+    )
+    for value in reversed(_label_value_candidates(text, labels)):
         amount = _amount_from_text(value)
         if amount is not None:
             return amount
