@@ -251,6 +251,23 @@ class AssistantGoogleService:
             data={"majorDimension": "ROWS", "values": values},
         )
 
+    def batch_update_sheet_values(
+        self,
+        *,
+        spreadsheet_id: str,
+        data: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        clean_id = str(spreadsheet_id or "").strip()
+        if not clean_id or not data:
+            return {"totalUpdatedCells": 0, "totalUpdatedRows": 0, "totalUpdatedSheets": 0}
+        access_token = self._get_access_token()
+        return self._request_json(
+            "POST",
+            f"{self._SHEETS_API_BASE}/{clean_id}/values:batchUpdate",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json", "Content-Type": "application/json"},
+            data={"valueInputOption": "USER_ENTERED", "includeValuesInResponse": False, "data": data},
+        )
+
     def add_sheet_tabs(self, *, spreadsheet_id: str, sheet_names: list[str]) -> dict[str, Any]:
         clean_names = [str(name).strip() for name in sheet_names if str(name).strip()]
         if not clean_names:

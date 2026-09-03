@@ -350,12 +350,14 @@ class FbPaymentReconcileService:
         label_column = FB_LABEL_COLUMN_INDEX
         updates = 0
         labels_written: dict[str, str] = {}
+        batch_data: list[dict[str, Any]] = []
         if len(values[0]) <= label_column or not _cell(values[0], label_column):
-            self.google.update_sheet_values(
-                spreadsheet_id=self.settings.fb_reconcile_sheet_id,
-                sheet_name=INPUT_SHEET_NAME,
-                cell_range="M1",
-                values=[[LEGACY_LABEL_HEADER]],
+            batch_data.append(
+                {
+                    "range": f"'{INPUT_SHEET_NAME}'!M1",
+                    "majorDimension": "ROWS",
+                    "values": [[LEGACY_LABEL_HEADER]],
+                }
             )
         row_lookup: dict[str, tuple[int, list[Any]]] = {}
         data_start = 1
@@ -376,13 +378,19 @@ class FbPaymentReconcileService:
             labels_written[payment_id] = label
             existing = _cell(row, label_column)
             if existing != label:
-                self.google.update_sheet_values(
-                    spreadsheet_id=self.settings.fb_reconcile_sheet_id,
-                    sheet_name=INPUT_SHEET_NAME,
-                    cell_range=f"{_column_letter(label_column + 1)}{row_number}",
-                    values=[[label]],
+                batch_data.append(
+                    {
+                        "range": f"'{INPUT_SHEET_NAME}'!{_column_letter(label_column + 1)}{row_number}",
+                        "majorDimension": "ROWS",
+                        "values": [[label]],
+                    }
                 )
                 updates += 1
+        if batch_data:
+            self.google.batch_update_sheet_values(
+                spreadsheet_id=self.settings.fb_reconcile_sheet_id,
+                data=batch_data,
+            )
         return {"ok": True, "updated_rows": updates, "labels": labels_written}
 
     def ensure_sheet_layout(self) -> dict[str, Any]:

@@ -124,6 +124,10 @@ def test_payment_labels_are_written_to_column_m_only() -> None:
                 ]
             }
 
+        def batch_update_sheet_values(self, **kwargs):  # noqa: ANN003
+            self.updates.append(kwargs)
+            return {"ok": True}
+
         def update_sheet_values(self, **kwargs):  # noqa: ANN003
             self.updates.append(kwargs)
             return {"ok": True}
@@ -139,8 +143,11 @@ def test_payment_labels_are_written_to_column_m_only() -> None:
     result = service._write_payment_labels({"detail_rows": [detail_row]})
 
     assert result["labels"] == {"P3036": "JC"}
-    assert [item["cell_range"] for item in fake_google.updates] == ["M1", "M2"]
-    assert [item["values"] for item in fake_google.updates] == [[["FB_label"]], [["JC"]]]
+    assert len(fake_google.updates) == 1
+    assert fake_google.updates[0]["data"] == [
+        {"range": "'Tiền trừ thẻ'!M1", "majorDimension": "ROWS", "values": [["FB_label"]]},
+        {"range": "'Tiền trừ thẻ'!M2", "majorDimension": "ROWS", "values": [["JC"]]},
+    ]
 
 
 def test_parser_reads_meta_billing_report_as_transactions_and_filters_card(monkeypatch) -> None:  # noqa: ANN001
