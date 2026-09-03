@@ -218,13 +218,14 @@ class AssistantGoogleService:
         clean_id = str(spreadsheet_id or "").strip()
         title = str(sheet_name or "").strip()
         access_token = self._get_access_token()
-        encoded_range = quote(f"'{self._escape_sheet_title(title)}'!{str(cell_range).strip()}", safe="")
+        qualified_range = f"'{self._escape_sheet_title(title)}'!{str(cell_range).strip()}"
+        encoded_range = quote(qualified_range, safe="")
         return self._request_json(
             "PUT",
             f"{self._SHEETS_API_BASE}/{clean_id}/values/{encoded_range}",
             headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json", "Content-Type": "application/json"},
             params={"valueInputOption": "USER_ENTERED", "includeValuesInResponse": "false"},
-            data={"range": cell_range, "majorDimension": "ROWS", "values": values},
+            data={"range": qualified_range, "majorDimension": "ROWS", "values": values},
         )
 
     def append_sheet_values(
