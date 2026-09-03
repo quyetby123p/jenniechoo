@@ -1,9 +1,8 @@
 name: Jennie Choo Dropo to Pancake
 
 on:
-  # GitHub scheduler có thể trễ vài phút, nhưng không cần máy của anh bật.
-  schedule:
-    - cron: "*/5 * * * *"
+  # Cloudflare Worker là scheduler duy nhất: dispatch đúng phiên 10 phút,
+  # tránh lịch GitHub rời gây chạy trùng và gửi mail lỗi lặp.
   workflow_dispatch:
     inputs:
       live:
@@ -16,7 +15,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: jenniechoo-dropo-pancake-bridge
+  # Khóa cứng một phiên live trên toàn repository. Phiên mới chỉ xếp hàng,
+  # không hủy phiên đang xử lý và không tạo hai đơn từ cùng một lead.
+  group: jenniechoo-dropo-pancake-bridge-live
   cancel-in-progress: false
 
 jobs:
@@ -35,6 +36,9 @@ jobs:
       # An toàn mặc định; runner chỉ chuyển sang live ở lịch tự động hoặc khi
       # người quản trị tick live trong workflow_dispatch.
       DROPO_PANCAKE_BRIDGE_DRY_RUN: "1"
+      # Lỗi dữ liệu của một dòng được ghi vào Sheet để xử lý lại, không làm cả
+      # phiên đỏ và không phát mail thất bại lặp mỗi 10 phút.
+      DROPO_PANCAKE_BRIDGE_FAIL_ON_ROW_ERRORS: "0"
 
     steps:
       - name: Checkout
@@ -67,9 +71,9 @@ jobs:
         shell: bash
         run: |
           args=("--profile" "main" "--once" "--verbose")
-          # Lịch tự động chạy live để lead mới tự lên Pancake. Workflow chạy
-          # tay mặc định dry-run; chỉ tạo thật khi anh tick live.
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.live }}" = "true" ]; then
+          # Cloudflare dispatch chạy live; workflow chạy tay mặc định dry-run,
+          # chỉ tạo thật khi người quản trị tick live.
+          if [ "${{ inputs.live }}" = "true" ]; then
             args+=("--live")
           fi
           python scripts/run_dropo_pancake_bridge.py "${args[@]}"

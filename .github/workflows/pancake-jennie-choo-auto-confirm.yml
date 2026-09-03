@@ -1,9 +1,8 @@
 name: Pancake Jennie Choo auto-confirm
 
 on:
-  # Runs independently of the local computer.
-  schedule:
-    - cron: "*/30 * * * *"
+  # Cloudflare Worker dispatches this worker every 10 minutes in HCM time.
+  # Keeping one scheduler avoids delayed native GitHub cron runs.
   workflow_dispatch:
 
 permissions:

@@ -264,6 +264,23 @@ class DropoPancakeBridge:
             )
             if not phone:
                 continue
+            if self._is_invalid_phone(phone):
+                message = "SĐT không hợp lệ sau khi chuẩn hóa; sửa lại SĐT rồi xóa Sync status để thử lại."
+                if status_note.startswith(SKIP_PREFIX) and "sđt không hợp lệ" in status_note.lower():
+                    continue
+                report.skipped += 1
+                report.rows.append(RowResult(row_index, "skipped", message=message))
+                try:
+                    self._write_updates(
+                        [self._cell_update(columns[COL_SYNC_STATUS], row_index, f"{SKIP_PREFIX}: {message}")]
+                    )
+                except Exception as write_exc:  # noqa: BLE001
+                    self.logger.error(
+                        "Không ghi được trạng thái SĐT không hợp lệ của dòng %s vào Sheet: %s",
+                        row_index,
+                        write_exc,
+                    )
+                continue
 
             if processed >= self.config.batch_limit:
                 self.logger.info(
@@ -299,9 +316,18 @@ class DropoPancakeBridge:
             except (PancakeApiError, ValidationError) as exc:
                 report.failed += 1
                 report.rows.append(RowResult(row_index, "failed", message=str(exc)))
-                self._write_updates(
-                    [self._cell_update(columns[COL_SYNC_STATUS], row_index, f"LỖI: {str(exc)[:200]}")]
-                )
+                try:
+                    self._write_updates(
+                        [self._cell_update(columns[COL_SYNC_STATUS], row_index, f"LỖI: {str(exc)[:200]}")]
+                    )
+                except Exception as write_exc:  # noqa: BLE001
+                    # Lỗi dữ liệu của một dòng không được biến thành lỗi hạ tầng
+                    # của cả phiên; phiên 10 phút sau sẽ quét lại dòng này.
+                    self.logger.error(
+                        "Không ghi được lỗi của dòng %s vào Sheet: %s",
+                        row_index,
+                        write_exc,
+                    )
                 continue
 
             order_id = self._extract_order_id(created)
@@ -1218,6 +1244,13 @@ class DropoPancakeBridge:
     @staticmethod
     def _clean_phone(value: Any) -> str:
         return re.sub(r"[^\d+]", "", str(value or "")).strip()
+
+    @staticmethod
+    def _is_invalid_phone(phone: str) -> bool:
+        digits = re.sub(r"[^\d]", "", str(phone or ""))
+        # Thai local/country-format numbers are normally 9–15 digits. Do not
+        # call Pancake with an 8-digit typo; it only creates a red retry loop.
+        return not 9 <= len(digits) <= 15
 
     @staticmethod
     def _to_int(value: Any) -> int:

@@ -67,9 +67,16 @@ cd D:\clawagent-main\clawagent-main\codex\projects\fb-ads-automation
 
 Mã thoát: `0` = ổn · `1` = có đơn lỗi · `2` = thiếu cấu hình.
 
-## Đưa lên GitHub để chạy khi tắt máy
+## Chạy cloud khi tắt máy
 
-Workflow `.github/workflows/dropo-jennie-pancake-bridge.yml` chạy mỗi 5 phút trên hạ tầng GitHub.
+Cloudflare Worker là scheduler duy nhất và dispatch workflow
+`.github/workflows/dropo-jennie-pancake-bridge.yml` đúng 10 phút/lần (các phút
+`00/10/20/30/40/50`, giờ Việt Nam). Worker cũng dispatch
+`.github/workflows/pancake-jennie-choo-auto-confirm.yml` trong cùng phiên để đổi
+đơn `chờ xác nhận`. GitHub Actions chỉ giữ `workflow_dispatch` cho chạy tay;
+không dùng native cron để tránh chạy lệch phiên, chạy trùng và gửi mail lỗi lặp.
+Concurrency giữ khóa cứng từng loại worker; nếu phiên trước chưa xong, phiên mới
+không chạy song song cùng loại.
 
 **Secrets cần thêm** (Settings → Secrets and variables → Actions):
 
@@ -81,15 +88,17 @@ Workflow `.github/workflows/dropo-jennie-pancake-bridge.yml` chạy mỗi 5 phú
 | `DROPO_PANCAKE_OAUTH_CLIENT_SECRET` | OAuth Google dùng đọc/ghi Sheet |
 | `DROPO_PANCAKE_OAUTH_REFRESH_TOKEN` | OAuth Google dùng đọc/ghi Sheet |
 
-Workflow chạy lịch tự động ở chế độ live để lead mới tự lên Pancake. Chạy tay mặc định
+Workflow được Cloudflare dispatch ở chế độ live để lead mới tự lên Pancake. Chạy tay mặc định
 dry-run; muốn thử tạo thật thì vào Actions → Jennie Choo Dropo to Pancake → Run workflow
 → tick `live`. Không có đơn thật nào được tạo trong bước kiểm thử local hiện tại.
 
 Mỗi lần chạy có bảng tóm tắt ngay trong tab Actions (dòng nào tạo đơn, dòng nào lỗi).
+Lỗi dữ liệu của một dòng vẫn được ghi vào Sheet để quét lại ở phiên sau nhưng không
+đánh đỏ toàn bộ workflow; lỗi cấu hình/hạ tầng vẫn bị báo rõ trong log.
 
-**Lưu ý về cron GitHub:** lịch là "sớm nhất có thể", không đúng giờ tuyệt đối —
-lúc GitHub tải nặng có thể trễ 5–15 phút. Đơn vẫn nằm trong Sheet nên không mất,
-chỉ vào Pancake muộn hơn.
+**Lưu ý về scheduler cloud:** Cloudflare có thể trễ ngắn khi hệ thống tải cao,
+nhưng đơn vẫn nằm trong Sheet và lượt kế tiếp sẽ quét bù; không phụ thuộc máy
+của anh bật hay tắt.
 
 ## Trạng thái ghi vào cột `Sync status`
 
