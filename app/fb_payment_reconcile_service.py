@@ -33,6 +33,7 @@ PAYMENT_HEADERS = [
     "bank_fee",
     "fx_rate",
     "description",
+    "merchant_name",
     "account_hint",
     "reference",
     "note",
@@ -124,6 +125,7 @@ class PaymentRow:
     reference: str
     note: str
     source_row: int
+    merchant_name: str = ""
 
     @property
     def effective_date(self) -> date | None:
@@ -442,7 +444,7 @@ class FbPaymentReconcileService:
         response = self.google.fetch_sheet_values(
             spreadsheet_id=self.settings.fb_reconcile_sheet_id,
             sheet_name=INPUT_SHEET_NAME,
-            cell_range="A1:K1000",
+            cell_range="A1:Z1000",
         )
         values = response.get("values", []) if isinstance(response.get("values"), list) else []
         if not values:
@@ -460,6 +462,7 @@ class FbPaymentReconcileService:
             "bank_fee": ["bank_fee", "phi_ngan_hang", "fee"],
             "fx_rate": ["fx_rate", "ty_gia", "exchange_rate"],
             "description": ["description", "mo_ta", "noi_dung"],
+            "merchant_name": ["merchant_name", "merchant", "merchantname", "ten_thuong_nhan", "ten_don_vi"],
             "account_hint": ["account_hint", "tai_khoan_goi_y", "account"],
             "reference": ["reference", "tham_chieu", "ref"],
             "note": ["note", "ghi_chu"],
@@ -534,6 +537,7 @@ class FbPaymentReconcileService:
                     bank_fee=abs(parse_decimal(_cell(row, indexes["bank_fee"])) or Decimal("0")),
                     fx_rate=fx_rate,
                     description=_cell(row, indexes["description"]),
+                    merchant_name=_cell(row, indexes["merchant_name"]),
                     account_hint=normalize_account(_cell(row, indexes["account_hint"])),
                     reference=reference,
                     note=_cell(row, indexes["note"]),
@@ -774,7 +778,14 @@ def match_invoices(
     return details, exceptions
 
 
+def _is_facebook_merchant(value: Any) -> bool:
+    merchant = _fold(str(value or "")).upper()
+    return bool(re.search(r"(?:FACEBK|FACEBOOK|META)", merchant))
+
+
 def _candidate_for(invoice: dict[str, Any], payment: PaymentRow, *, date_window_days: int, tolerance: Decimal) -> dict[str, Any] | None:
+    if payment.merchant_name and not _is_facebook_merchant(payment.merchant_name):
+        return None
     account = normalize_account(invoice.get("account"))
     if payment.account_hint and account and payment.account_hint != account:
         return None
@@ -783,8 +794,9 @@ def _candidate_for(invoice: dict[str, Any], payment: PaymentRow, *, date_window_
     if invoice_date and payment_date and abs((payment_date - invoice_date).days) > date_window_days:
         return None
     invoice_id = str(invoice.get("invoice_id", "")).strip().lower()
-    searchable = " ".join([payment.payment_id, payment.description, payment.reference, payment.note]).lower()
+    searchable = " ".join([payment.payment_id, payment.description, payment.merchant_name, payment.reference, payment.note]).lower()
     ref_hit = bool(invoice_id and invoice_id in searchable)
+    merchant_hit = _is_facebook_merchant(payment.merchant_name)
     expected = _expected_for(invoice, payment)
     if expected is not None:
         residual = payment.amount - expected
@@ -796,7 +808,7 @@ def _candidate_for(invoice: dict[str, Any], payment: PaymentRow, *, date_window_
             "expected": expected,
             "residual": residual,
             "strong": exact or ref_hit,
-            "score": ((1000 if ref_hit else 0) + (500 if exact else 0) + (100 if payment.account_hint == account and account else 0) - abs((payment_date - invoice_date).days)) if payment_date and invoice_date else (1000 if ref_hit else 0),
+            "score": ((1000 if ref_hit else 0) + (500 if exact else 0) + (250 if merchant_hit else 0) + (100 if payment.account_hint == account and account else 0) - abs((payment_date - invoice_date).days)) if payment_date and invoice_date else ((1000 if ref_hit else 0) + (250 if merchant_hit else 0)),
         }
     if normalize_currency(invoice.get("currency")) != payment.currency and payment_date and invoice_date:
         return {
@@ -804,7 +816,7 @@ def _candidate_for(invoice: dict[str, Any], payment: PaymentRow, *, date_window_
             "expected": None,
             "residual": None,
             "strong": False,
-            "score": (100 if payment.account_hint == account and account else 0) - abs((payment_date - invoice_date).days),
+            "score": (250 if merchant_hit else 0) + (100 if payment.account_hint == account and account else 0) - abs((payment_date - invoice_date).days),
         }
     return None
 
