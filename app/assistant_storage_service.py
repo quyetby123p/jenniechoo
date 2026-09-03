@@ -25,6 +25,7 @@ class AssistantStorageService:
             self.settings.conversation_logs_dir,
             self.settings.run_logs_dir,
             self.settings.state_root / "task_drafts",
+            self.settings.state_root / "fb_reconcile_drafts",
         ):
             path.mkdir(parents=True, exist_ok=True)
 
@@ -179,9 +180,44 @@ class AssistantStorageService:
         if path.exists():
             path.unlink()
 
+    def clear_task_drafts(self) -> int:
+        """Remove all saved task wizard/check-in drafts for this bot."""
+        draft_dir = self.settings.state_root / "task_drafts"
+        removed = 0
+        for path in draft_dir.glob("*.json"):
+            if path.is_file():
+                path.unlink()
+                removed += 1
+        return removed
+
+    def clear_daily_task_checkin_state(self) -> None:
+        """Reset historical daily check-in references after task cleanup."""
+        self.save_daily_task_checkin_state({})
+
     def _task_draft_file(self, user_id: int) -> Path:
         safe_user_id = max(0, int(user_id))
         return self.settings.state_root / "task_drafts" / f"{safe_user_id}.json"
+
+    def load_fb_reconcile_draft(self, *, user_id: int) -> dict[str, Any] | None:
+        path = self._fb_reconcile_draft_file(user_id)
+        if not path.exists():
+            return None
+        payload = load_json(path)
+        return payload if isinstance(payload, dict) else None
+
+    def save_fb_reconcile_draft(self, *, user_id: int, payload: dict[str, Any]) -> None:
+        record = dict(payload)
+        record["updated_at"] = now_utc_iso()
+        dump_json(self._fb_reconcile_draft_file(user_id), record)
+
+    def delete_fb_reconcile_draft(self, *, user_id: int) -> None:
+        path = self._fb_reconcile_draft_file(user_id)
+        if path.exists():
+            path.unlink()
+
+    def _fb_reconcile_draft_file(self, user_id: int) -> Path:
+        safe_user_id = max(0, int(user_id))
+        return self.settings.state_root / "fb_reconcile_drafts" / f"{safe_user_id}.json"
 
 
 def _json_line(payload: dict[str, Any]) -> str:

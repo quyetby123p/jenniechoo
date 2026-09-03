@@ -135,15 +135,17 @@ class AssistantTaskService:
         return [by_uid[item] for item in cleaned if item in by_uid]
 
     def list_tasks(self, *, status: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-        normalized_status = _normalize_status(status) if status else ""
+        raw_status = str(status or "").strip().lower()
         safe_limit = max(1, min(100, int(limit)))
         where = ""
         params: list[Any] = []
-        if normalized_status:
-            where = "WHERE status = ?"
-            params.append(normalized_status)
-        elif str(status or "").strip().lower() in {"pending", "open"}:
+        if raw_status in {"pending", "open"}:
             where = "WHERE status != 'done'"
+        else:
+            normalized_status = _normalize_status(status) if status else ""
+            if normalized_status:
+                where = "WHERE status = ?"
+                params.append(normalized_status)
         params.append(safe_limit)
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -152,6 +154,16 @@ class AssistantTaskService:
                 params,
             ).fetchall()
         return [_row_to_dict(row) for row in rows if row is not None]
+
+    def delete_all_tasks(self) -> dict[str, int]:
+        """Delete all locally stored tasks and their report history."""
+        with sqlite3.connect(self.db_path) as conn:
+            task_count = int(conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] or 0)
+            update_count = int(conn.execute("SELECT COUNT(*) FROM task_updates").fetchone()[0] or 0)
+            conn.execute("DELETE FROM task_updates")
+            conn.execute("DELETE FROM tasks")
+            conn.commit()
+        return {"tasks_deleted": task_count, "updates_deleted": update_count}
 
     def find_tasks_by_title(self, title_query: str, *, include_done: bool = True, limit: int = 12) -> list[dict[str, Any]]:
         normalized_query = _normalize_lookup(title_query)

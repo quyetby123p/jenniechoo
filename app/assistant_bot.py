@@ -4,6 +4,7 @@ import asyncio
 from contextlib import suppress
 from datetime import date, datetime, timedelta
 import html
+import io
 import logging
 from pathlib import Path
 import re
@@ -35,6 +36,7 @@ from app.assistant_scheduler_service import AssistantSchedulerService
 from app.assistant_settings import AssistantSettings
 from app.assistant_storage_service import AssistantStorageService
 from app.assistant_task_service import AssistantTaskService
+from app.fb_payment_reconcile_service import FbPaymentReconcileService
 from app.exceptions import CommandParseError
 
 
@@ -51,6 +53,7 @@ class TelegramAssistantBot:
         approval: AssistantApprovalService,
         scheduler: AssistantSchedulerService,
         tasks: AssistantTaskService,
+        fb_reconcile_service: FbPaymentReconcileService | None = None,
     ) -> None:
         self.settings = settings
         self.logger = logger
@@ -62,6 +65,7 @@ class TelegramAssistantBot:
         self.approval = approval
         self.scheduler = scheduler
         self.tasks = tasks
+        self.fb_reconcile_service = fb_reconcile_service
         self.cloud_schedule_guard = CloudScheduleGuardClient.from_env(logger=logger)
         self.router = Router(name="assistant_router")
         self._bot: Bot | None = None
@@ -82,6 +86,8 @@ class TelegramAssistantBot:
         self.router.message.register(self.handle_run_command, Command("run"))
         self.router.message.register(self.handle_ask_command, Command("ask"))
         self.router.message.register(self.handle_task_command, Command("task"))
+        self.router.message.register(self.handle_fb_reconcile_command, Command("fb_reconcile"))
+        self.router.message.register(self.handle_document_message, F.document)
         self.router.message.register(self.handle_text_message, F.text)
         self.router.callback_query.register(self.handle_callback, F.data)
 
@@ -201,8 +207,120 @@ class TelegramAssistantBot:
     async def handle_task_command(self, message: Message) -> None:
         await self._handle_message_by_parser(message)
 
+    async def handle_fb_reconcile_command(self, message: Message) -> None:
+        await self._handle_fb_reconcile_text(message, str(message.text or ""))
+
+    async def handle_document_message(self, message: Message) -> None:
+        if not self._is_authorized(message.from_user.id if message.from_user else None):
+            return
+        service = self.fb_reconcile_service
+        document = message.document
+        if not service or not service.enabled() or not document:
+            return
+        if not self._is_private_chat(message):
+            return
+        file_name = str(document.file_name or "invoice.pdf").strip()
+        if not file_name.lower().endswith(".pdf"):
+            await message.answer("Job này chỉ nhận file PDF hóa đơn Facebook.")
+            return
+        try:
+            content = await self._download_document_bytes(message, str(document.file_id))
+            draft = self.storage.load_fb_reconcile_draft(user_id=int(message.from_user.id))
+            if not draft or str(draft.get("mode", "")) != "fb_reconcile":
+                draft = service.new_draft(user_id=int(message.from_user.id), chat_id=int(message.chat.id))
+            updated, parsed = await asyncio.to_thread(
+                service.ingest_pdf,
+                draft=draft,
+                file_name=file_name,
+                content=content,
+                account_hint=str(message.caption or ""),
+            )
+            await asyncio.to_thread(
+                self.storage.save_fb_reconcile_draft,
+                user_id=int(message.from_user.id),
+                payload=updated,
+            )
+            file_count = len(updated.get("files", [])) if isinstance(updated.get("files"), list) else 0
+            lines = [
+                f"Đã nhận PDF {file_count}/2: {file_name}",
+                f"- Tài khoản: {parsed.account or 'chưa xác định'}",
+                f"- Invoice: {parsed.invoice_id or 'chưa xác định'}",
+                f"- Tổng: {parsed.total if parsed.total is not None else 'chưa đọc được'} {parsed.currency}",
+            ]
+            if parsed.warning:
+                lines.append(f"- Cảnh báo: {parsed.warning}")
+            if file_count < 2:
+                lines.append("Anh gửi nốt PDF còn lại; sau đó dùng `/fb_reconcile run` để xem bản đối soát nháp.")
+            else:
+                precheck = await asyncio.to_thread(service.precheck, updated)
+                lines.append(self._format_fb_precheck(precheck))
+                lines.append("Nếu dữ liệu đúng, anh dùng `/fb_reconcile run` để tạo kết quả và nút ghi Sheet.")
+            await self._send_and_log(message.chat.id, raw_text=file_name, intent="fb_reconcile_pdf", reply="\n".join(lines))
+        except Exception as exc:  # noqa: BLE001
+            self.logger.exception("FB reconcile PDF failed: %s", exc)
+            await message.answer(f"Không xử lý được PDF: {str(exc)[:240]}")
+
     async def handle_text_message(self, message: Message) -> None:
+        if await self._handle_fb_reconcile_text(message, str(message.text or "")):
+            return
         await self._handle_message_by_parser(message)
+
+    async def _handle_fb_reconcile_text(self, message: Message, raw: str) -> bool:
+        service = self.fb_reconcile_service
+        if not service or not self._is_authorized(message.from_user.id if message.from_user else None):
+            return False
+        if not self._is_private_chat(message):
+            return False
+        command = parse_fb_reconcile_command(raw)
+        if not command:
+            return False
+        if not service.enabled():
+            await message.answer("Job đối soát FB đang tắt. Cần bật `FB_RECONCILE_ENABLED=1` sau khi kiểm tra cấu hình Google OAuth/GitHub secrets.")
+            return True
+        user_id = int(message.from_user.id if message.from_user else 0)
+        chat_id = int(message.chat.id)
+        action = command[0]
+        try:
+            if action in {"help", "status"}:
+                draft = self.storage.load_fb_reconcile_draft(user_id=user_id)
+                await message.answer(self._format_fb_status(draft, service))
+                return True
+            if action == "start":
+                draft = service.new_draft(user_id=user_id, chat_id=chat_id, period_text=command[1])
+                await asyncio.to_thread(self.storage.save_fb_reconcile_draft, user_id=user_id, payload=draft)
+                await message.answer("Đã mở phiên đối soát hóa đơn FB. Anh gửi đủ 2 file PDF; có thể ghi tháng ngay sau lệnh, ví dụ `đối soát hóa đơn FB tháng 08/2026`.")
+                return True
+            if action == "cancel":
+                await asyncio.to_thread(self.storage.delete_fb_reconcile_draft, user_id=user_id)
+                await message.answer("Đã hủy phiên đối soát hóa đơn FB.")
+                return True
+            if action == "run":
+                draft = self.storage.load_fb_reconcile_draft(user_id=user_id)
+                if not draft:
+                    await message.answer("Chưa có phiên đối soát. Anh gửi PDF hoặc dùng `/fb_reconcile start` trước.")
+                    return True
+                result = await asyncio.to_thread(service.run, draft)
+                await asyncio.to_thread(self.storage.save_fb_reconcile_draft, user_id=user_id, payload={**draft, "status": "report_ready", "run_id": result["run_id"]})
+                request_id = self.storage.create_pending_request(
+                    {
+                        "action_name": "fb_reconcile_write",
+                        "action_args": {"run_id": result["run_id"], "user_id": user_id},
+                        "raw_text": raw,
+                        "chat_id": chat_id,
+                        "risk_level": "high",
+                    },
+                    request_type="assistant_action",
+                )
+                await message.answer(
+                    self._format_fb_run_result(result)
+                    + "\n\nAnh bấm `Xác nhận chạy` để ghi các tab kết quả vào Google Sheet, hoặc `Hủy`.",
+                    reply_markup=self.approval.action_confirm_keyboard(request_id=request_id),
+                )
+                return True
+        except Exception as exc:  # noqa: BLE001
+            self.logger.exception("FB reconcile command failed: %s", exc)
+            await message.answer(f"Đối soát FB thất bại: {str(exc)[:240]}")
+        return True
 
     async def handle_callback(self, query: CallbackQuery) -> None:
         if not self._is_authorized(query.from_user.id if query.from_user else None):
@@ -227,6 +345,14 @@ class TelegramAssistantBot:
         if not raw:
             return
         if self._is_private_chat(message) and self._is_authorized(user_id) and self.settings.tasks_enabled:
+            start_progress_reply = self._try_start_task_progress_bulk(
+                raw=raw,
+                user_id=int(user_id or 0),
+                chat_id=int(chat_id or 0),
+            )
+            if start_progress_reply:
+                await self._send_and_log(chat_id or 0, raw_text=raw, intent="task_progress_bulk", reply=start_progress_reply)
+                return
             daily_reply = self._continue_daily_task_checkin_if_active(
                 raw=raw,
                 user_id=int(user_id or 0),
@@ -238,6 +364,10 @@ class TelegramAssistantBot:
             draft_reply = self._continue_task_wizard_if_active(raw=raw, user_id=int(user_id or 0), chat_id=int(chat_id or 0))
             if draft_reply:
                 await self._send_and_log(chat_id or 0, raw_text=raw, intent="task_wizard", reply=draft_reply)
+                return
+            if _normalize_question_text(raw) == "luu viec":
+                reply = "Anh nhập theo mẫu: `lưu việc: <tên việc>` để em ghi task."
+                await self._send_and_log(chat_id or 0, raw_text=raw, intent="task_wizard", reply=reply)
                 return
             start_reply = self._try_start_task_wizard(raw=raw, user_id=int(user_id or 0), chat_id=int(chat_id or 0))
             if start_reply:
@@ -327,6 +457,36 @@ class TelegramAssistantBot:
             "Nếu muốn hủy: `/cancel`."
         )
 
+    def _try_start_task_progress_bulk(self, *, raw: str, user_id: int, chat_id: int) -> str:
+        normalized = _normalize_question_text(raw)
+        if normalized not in {"tien do", "cap nhat tien do", "update tien do", "progress"}:
+            return ""
+
+        tasks = self.tasks.list_tasks(status="pending", limit=int(self.settings.daily_task_max_items))
+        if not tasks:
+            self.storage.delete_task_draft(user_id=user_id)
+            return "Hiện không còn task chưa hoàn thành để cập nhật tiến độ."
+
+        self.storage.save_task_draft(
+            user_id=user_id,
+            payload={
+                "mode": "task_progress_bulk",
+                "chat_id": int(chat_id),
+                "user_id": int(user_id),
+                "task_uids": [str(item.get("task_uid", "")).strip() for item in tasks if str(item.get("task_uid", "")).strip()],
+            },
+        )
+        lines = ["Anh cập nhật tiến độ các task đang mở nhé:"]
+        for idx, task in enumerate(tasks, start=1):
+            lines.append(f"{idx}. {task.get('title')} [{self._status_label_vi(str(task.get('status', '')))}] {task.get('progress_percent', 0)}%")
+        lines.append("")
+        lines.append("Anh trả lời một tin nhiều dòng, ví dụ:")
+        lines.append("1. xong")
+        lines.append("2. đang làm 60% - còn phần test")
+        lines.append("3. blocked - thiếu data, mai xin Huy")
+        lines.append("Nếu muốn hủy: `/cancel`.")
+        return "\n".join(lines)
+
     def _continue_task_wizard_if_active(self, *, raw: str, user_id: int, chat_id: int) -> str:
         draft = self.storage.load_task_draft(user_id=user_id)
         if not draft or str(draft.get("mode", "")).strip() != "task_create_wizard":
@@ -409,23 +569,27 @@ class TelegramAssistantBot:
                 f"- Trạng thái: {self._status_label_vi(str(task.get('status', '')))}"
             )
         self.storage.delete_task_draft(user_id=user_id)
-        return "Phiên tạo task bị lỗi bước xử lý, anh thử lại: `thêm công việc: <tên task>`."
+        return "Phiên tạo task bị lỗi bước xử lý, anh thử lại: `lưu việc: <tên việc>`."
 
     def _continue_daily_task_checkin_if_active(self, *, raw: str, user_id: int, chat_id: int) -> str:
         draft = self.storage.load_task_draft(user_id=user_id)
         if not draft:
             return ""
         mode = str(draft.get("mode", "")).strip()
-        if mode not in {"daily_task_morning", "daily_task_evening"}:
+        if mode not in {"daily_task_morning", "daily_task_evening", "task_progress_bulk"}:
             return ""
 
         normalized = _normalize_question_text(raw)
         if normalized in {"cancel", "huy", "huy bo", "bo qua"} or str(raw).strip().lower() == "/cancel":
             self.storage.delete_task_draft(user_id=user_id)
+            if mode == "task_progress_bulk":
+                return "Đã hủy phiên cập nhật tiến độ."
             return "Đã hủy phiên check-in task hôm nay."
 
         if mode == "daily_task_morning":
             return self._handle_daily_task_morning_reply(raw=raw, user_id=user_id, chat_id=chat_id, draft=draft)
+        if mode == "task_progress_bulk":
+            return self._handle_task_progress_bulk_reply(raw=raw, user_id=user_id, chat_id=chat_id, draft=draft)
         return self._handle_daily_task_evening_reply(raw=raw, user_id=user_id, chat_id=chat_id, draft=draft)
 
     def _handle_daily_task_morning_reply(
@@ -451,7 +615,7 @@ class TelegramAssistantBot:
 
         titles = self._parse_daily_task_title_lines(raw)
         if not titles:
-            return "Em chưa tách được task nào. Anh gửi mỗi dòng một việc, hoặc gửi `không có`."
+            return "Em chưa lưu việc nào. Anh dùng mỗi dòng bắt đầu bằng `lưu việc`, ví dụ: `lưu việc: đối soát hoá đơn FB`; hoặc gửi `không có`."
 
         max_items = int(self.settings.daily_task_max_items)
         if len(titles) > max_items:
@@ -536,25 +700,60 @@ class TelegramAssistantBot:
         self.storage.delete_task_draft(user_id=user_id)
         return "\n".join(lines) if lines else "Em chưa thấy dòng tiến độ nào để cập nhật."
 
+    def _handle_task_progress_bulk_reply(
+        self,
+        *,
+        raw: str,
+        user_id: int,
+        chat_id: int,
+        draft: dict[str, Any],
+    ) -> str:
+        task_uids = [str(item).strip() for item in draft.get("task_uids", []) if str(item).strip()]
+        tasks = self.tasks.list_tasks_by_uids(task_uids)
+        if not tasks:
+            self.storage.delete_task_draft(user_id=user_id)
+            return "Em không còn thấy task nào để cập nhật tiến độ."
+
+        updates, errors = self._parse_daily_task_progress_lines(raw, tasks)
+        updated_items: list[dict[str, Any]] = []
+        for item in updates:
+            task = item["task"]
+            payload = self.tasks.update_task(
+                task_uid=str(task.get("task_uid", "")),
+                updated_by=int(user_id),
+                chat_id=int(chat_id),
+                status=str(item.get("status", "")),
+                progress_percent=int(item.get("progress_percent", 0)),
+                note=str(item.get("note", "")),
+                blocked_reason=str(item.get("blocked_reason", "")),
+                next_step=str(item.get("next_step", "")),
+                action_name="bulk_progress_update",
+            )
+            updated_items.append(payload)
+
+        lines: list[str] = []
+        if updated_items:
+            lines.append(f"Em đã cập nhật {len(updated_items)} task:")
+            for item in updated_items:
+                lines.append(f"- {self._format_task_item(item)}")
+        if errors:
+            if lines:
+                lines.append("")
+            lines.append("Có dòng em chưa khớp được, anh gửi lại riêng các dòng này nhé:")
+            lines.extend(f"- {item}" for item in errors)
+            return "\n".join(lines)
+
+        self.storage.delete_task_draft(user_id=user_id)
+        return "\n".join(lines) if lines else "Em chưa thấy dòng tiến độ nào để cập nhật."
+
     def _extract_task_title_from_natural(self, raw: str) -> str:
         text = " ".join(str(raw or "").split()).strip()
         if not text:
             return ""
         normalized = _normalize_question_text(text)
-        if not (
-            normalized.startswith("them cong viec")
-            or normalized.startswith("tao cong viec")
-            or normalized.startswith("them task")
-            or normalized.startswith("tao task")
-        ):
+        if not normalized.startswith("luu viec"):
             return ""
-        if ":" in text:
-            title = text.split(":", 1)[1].strip()
-            return title
-        parts = text.split()
-        if len(parts) >= 4:
-            return " ".join(parts[3:]).strip()
-        return ""
+        return _extract_explicit_save_task_title(text)
 
     def _parse_deadline_input(self, raw: str) -> tuple[bool, str, str]:
         text = " ".join(str(raw or "").split()).strip()
@@ -604,7 +803,7 @@ class TelegramAssistantBot:
         titles: list[str] = []
         seen: set[str] = set()
         for line in _split_nonempty_lines(raw):
-            title = _strip_daily_task_line_prefix(line)
+            title = _extract_explicit_save_task_title(line)
             if not title:
                 continue
             normalized = _normalize_question_text(title)
@@ -1095,6 +1294,14 @@ class TelegramAssistantBot:
                 payload = self.internal_ops.sync_media_sheet(run_id)
                 ok = bool(payload.get("ok"))
                 return {"ok": ok, "text": self._format_action_result("media_sheet_sync", payload)}
+            if action_name == "fb_reconcile_write":
+                if not self.fb_reconcile_service:
+                    return {"ok": False, "text": "Job đối soát FB chưa được khởi tạo trong Bot 3."}
+                run_id = str(action_args.get("run_id", "")).strip()
+                payload = self.fb_reconcile_service.write_run(run_id)
+                if payload.get("ok") and action_args.get("user_id"):
+                    self.storage.delete_fb_reconcile_draft(user_id=int(action_args["user_id"]))
+                return {"ok": bool(payload.get("ok")), "text": self._format_fb_write_result(payload)}
             return {"ok": False, "text": f"Action chưa hỗ trợ: {action_name}"}
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("Thuc thi assistant action that bai: %s", action_name)
@@ -1230,7 +1437,7 @@ class TelegramAssistantBot:
         if not self.settings.internal_qa_enabled:
             return (
                 "Bot hiện chỉ theo dõi task công việc. "
-                "Anh có thể gửi: `thêm công việc: <tên task>`, `tiến độ` hoặc `/task`."
+                "Anh có thể gửi: `lưu việc: <tên việc>`, `tiến độ` hoặc `/task`."
             )
 
         normalized_lookup = _normalize_question_text(normalized_question)
@@ -1484,7 +1691,7 @@ class TelegramAssistantBot:
         await self._bot_send_message(
             user_id,
             "Anh ơi, hôm nay anh có công việc gì?\n"
-            "Anh gửi mỗi dòng một việc nhé. Nếu không có, gửi: `không có`.",
+            "Anh gửi mỗi dòng theo mẫu `lưu việc: <tên việc>` nhé. Nếu không có, gửi: `không có`.",
         )
         day_state["morning_sent"] = True
         self._save_daily_task_day_state(state, day_key, day_state)
@@ -1567,6 +1774,7 @@ class TelegramAssistantBot:
             BotCommand(command="agenda", description="Xem lich"),
             BotCommand(command="plan", description="Xem ke hoach"),
             BotCommand(command="result", description="Xem ket qua tong hop"),
+            BotCommand(command="fb_reconcile", description="Doi soat hoa don FB voi the"),
         ]
         group_commands = [
             BotCommand(command="task", description="Bao cao task: /task report | /task week | /task pending"),
@@ -1599,6 +1807,72 @@ class TelegramAssistantBot:
             raise RuntimeError("Telegram bot chua duoc khoi tao.")
         await self._bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
+    async def _download_document_bytes(self, message: Message, file_id: str) -> bytes:
+        bot = getattr(message, "bot", None) or self._bot
+        if not bot:
+            raise RuntimeError("Bot chưa khởi tạo để tải PDF Telegram.")
+        if not file_id:
+            raise ValueError("Thiếu Telegram file_id của PDF.")
+        destination = io.BytesIO()
+        await bot.download(file_id, destination=destination)
+        destination.seek(0)
+        content = destination.read()
+        if not content:
+            raise ValueError("PDF tải về từ Telegram đang trống.")
+        return content
+
+    def _format_fb_precheck(self, payload: dict[str, Any]) -> str:
+        totals = payload.get("invoice_totals", {}) if isinstance(payload.get("invoice_totals"), dict) else {}
+        total_lines = [f"- {account}: {values}" for account, values in totals.items()]
+        errors = payload.get("payment_errors", []) if isinstance(payload.get("payment_errors"), list) else []
+        lines = [
+            "\nBản kiểm tra trước:",
+            f"- Kỳ: {payload.get('period_start') or '?'} đến {payload.get('period_end') or '?'}",
+            f"- Hóa đơn: {payload.get('invoice_count', 0)} | Giao dịch thẻ: {payload.get('payment_count', 0)}",
+        ]
+        lines.extend(total_lines or ["- Chưa đọc được tổng hóa đơn theo tài khoản."])
+        card_totals = payload.get("card_totals", {}) if isinstance(payload.get("card_totals"), dict) else {}
+        lines.append(f"- Tổng thẻ: {card_totals or 'chưa có giao dịch trong kỳ'}")
+        if errors:
+            lines.append("- Lỗi Sheet: " + "; ".join(str(item) for item in errors[:3]))
+        invoice_errors = payload.get("invoice_errors", []) if isinstance(payload.get("invoice_errors"), list) else []
+        if invoice_errors:
+            lines.append("- Lỗi PDF: " + "; ".join(str(item) for item in invoice_errors[:3]))
+        lines.append(f"- Trạng thái dữ liệu: {'Đủ để chạy' if payload.get('ready') else 'Cần bổ sung/kiểm tra'}")
+        return "\n".join(lines)
+
+    def _format_fb_status(self, draft: dict[str, Any] | None, service: FbPaymentReconcileService) -> str:
+        if not service.enabled():
+            return "Job đối soát FB đang tắt. Bật `FB_RECONCILE_ENABLED=1` sau khi cấu hình Bot 3/GitHub secrets."
+        if not draft:
+            return "Chưa có phiên đối soát FB nào. Anh gửi PDF hoặc dùng `/fb_reconcile start`."
+        files = draft.get("files", []) if isinstance(draft.get("files"), list) else []
+        return (
+            "Trạng thái đối soát FB:\n"
+            f"- PDF: {len(files)}/2\n"
+            f"- Kỳ: {draft.get('period_start') or '?'} đến {draft.get('period_end') or '?'}\n"
+            f"- Trạng thái: {draft.get('status', 'collecting')}\n"
+            f"- Run gần nhất: {draft.get('run_id') or 'chưa có'}"
+        )
+
+    def _format_fb_run_result(self, payload: dict[str, Any]) -> str:
+        counts = payload.get("status_counts", {}) if isinstance(payload.get("status_counts"), dict) else {}
+        exceptions = payload.get("exceptions", []) if isinstance(payload.get("exceptions"), list) else []
+        lines = [
+            "Kết quả đối soát hóa đơn FB:",
+            f"- Run: {payload.get('run_id', '')}",
+            f"- Kỳ: {payload.get('period_start') or '?'} đến {payload.get('period_end') or '?'}",
+        ]
+        for status, count in counts.items():
+            lines.append(f"- {status}: {count}")
+        if exceptions:
+            lines.append(f"- Ngoại lệ cần kiểm tra: {len(exceptions)}")
+        return "\n".join(lines)
+
+    def _format_fb_write_result(self, payload: dict[str, Any]) -> str:
+        written = payload.get("written", {}) if isinstance(payload.get("written"), dict) else {}
+        return "Đã ghi kết quả đối soát FB vào Google Sheet.\n- Run: " + str(payload.get("run_id", "")) + "\n- Tab: " + ", ".join(written.keys())
+
     def _status_text(self) -> str:
         google_ok, google_reason = self.google.is_configured()
         openai_ok, openai_reason = self.openai.is_configured()
@@ -1621,6 +1895,7 @@ class TelegramAssistantBot:
             f"({self.settings.daily_task_morning_hour:02d}:{self.settings.daily_task_morning_minute:02d}/"
             f"{self.settings.daily_task_evening_hour:02d}:{self.settings.daily_task_evening_minute:02d})\n"
             f"- Daily task local scheduler: {'Bật' if self.settings.daily_task_local_scheduler_enabled else 'Tắt (cloud phụ trách)'}\n"
+            f"- Đối soát hóa đơn FB: {'Bật' if self.settings.fb_reconcile_enabled else 'Tắt'}\n"
             f"- Google connector: {'OK' if google_ok else f'LỖI ({google_reason})'}\n"
             f"- OpenAI connector: {openai_status}\n"
             f"- Memory index: {memory_status.get('doc_count', 0)} docs"
@@ -1720,7 +1995,10 @@ class TelegramAssistantBot:
             "- /run report|reconcile cod|reconcile sheet|media sheet\n"
             "- /ask <câu hỏi bất kỳ>\n"
             "- /task add|update|done|list|report|week|pending\n"
-            "- Hoặc nhập tự nhiên: thêm công việc: <tên task>\n"
+            "- /fb_reconcile start|status|run|cancel\n"
+            "- Gửi 2 PDF hóa đơn Facebook trong chat riêng rồi chạy /fb_reconcile run\n"
+            "- Lưu việc: `lưu việc: <tên việc>` (chỉ tin nhắn có câu lệnh này mới tạo task)\n"
+            "- Nhập `Tiến độ` để bot liệt kê task đang mở và chờ anh cập nhật nhiều dòng\n"
             "- Check-in task ngày: bot hỏi 09:00 và 17:00 từ T2-T7 nếu đang bật"
         )
 
@@ -1880,6 +2158,15 @@ def _strip_daily_task_line_prefix(line: str) -> str:
     text = re.sub(r"^\s*[-*•]+\s*", "", text)
     text = re.sub(r"^\s*\d{1,2}[\).\-\s]+", "", text)
     return text.strip(" -:\t")
+
+
+def _extract_explicit_save_task_title(line: str) -> str:
+    """Return a task title only when the line explicitly starts with 'lưu việc'."""
+    text = _strip_daily_task_line_prefix(line)
+    match = re.match(r"^(?:lưu|luu)\s+(?:việc|viec)(?:\s*[:\-]\s*|\s+)(.+)$", text, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    return match.group(1).strip(" -:\t")
 
 
 def _parse_iso_date(raw: Any) -> date | None:
@@ -2324,6 +2611,41 @@ def _strip_html(text: str) -> str:
     cleaned = re.sub(r"<[^>]+>", " ", str(text or ""))
     cleaned = html.unescape(cleaned)
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _local_half_hour_bucket(value: datetime) -> str:
+    minute = 30 if int(value.minute) >= 30 else 0
+    return f"{value.date().isoformat()}T{int(value.hour):02d}:{minute:02d}"
+
+
+def parse_fb_reconcile_command(raw: str) -> tuple[str, str] | None:
+    text = " ".join(str(raw or "").strip().split())
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered.startswith("/fb_reconcile"):
+        payload = text[len("/fb_reconcile") :].strip()
+        parts = payload.split(maxsplit=1) if payload else []
+        action = parts[0].lower() if parts else "start"
+        if action in {"help", "h"}:
+            return "help", ""
+        if action in {"status", "st"}:
+            return "status", ""
+        if action in {"cancel", "huy", "stop"}:
+            return "cancel", ""
+        if action in {"run", "chay", "start", "bat_dau"}:
+            period = parts[1] if len(parts) > 1 else ("" if action != "start" else payload)
+            if action == "start" and period.lower() == "start":
+                period = ""
+            return ("run" if action in {"run", "chay"} else "start"), period
+        return None
+
+    normalized = _normalize_question_text(text)
+    if "doi soat" not in normalized:
+        return None
+    if not ("hoa don" in normalized or "facebook" in normalized):
+        return None
+    return "start", text
 
 
 def _extract_related_topic_text(item: Any) -> str:

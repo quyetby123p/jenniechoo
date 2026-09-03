@@ -61,7 +61,7 @@ def test_daily_task_morning_reply_creates_tasks_and_state(tmp_path: Path) -> Non
     storage.save_task_draft(user_id=1, payload={"mode": "daily_task_morning", "date": "2026-06-04"})
 
     reply = bot._continue_daily_task_checkin_if_active(
-        raw="- Báo cáo task công việc hằng ngày AI\n2. Kiểm tra web report",
+        raw="- lưu việc: Báo cáo task công việc hằng ngày AI\n2. lưu việc: Kiểm tra web report",
         user_id=1,
         chat_id=1,
     )
@@ -73,6 +73,24 @@ def test_daily_task_morning_reply_creates_tasks_and_state(tmp_path: Path) -> Non
     day_state = state["days"]["2026-06-04"]
     assert day_state["morning_answered"] is True
     assert len(day_state["task_uids"]) == 2
+
+
+def test_daily_task_morning_ignores_lines_without_explicit_save_command(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    storage = AssistantStorageService(settings=settings, logger=_fake_logger())
+    tasks = AssistantTaskService(settings=settings, logger=_fake_logger())
+    bot = _build_bot(settings=settings, storage=storage, tasks=tasks)
+    storage.save_task_draft(user_id=1, payload={"mode": "daily_task_morning", "date": "2026-06-04"})
+
+    reply = bot._continue_daily_task_checkin_if_active(
+        raw="Đối soát hoá đơn FB",
+        user_id=1,
+        chat_id=1,
+    )
+
+    assert "lưu việc" in reply
+    assert tasks.list_tasks(status="pending", limit=10) == []
+    assert storage.load_task_draft(user_id=1)["mode"] == "daily_task_morning"
 
 
 def test_cloud_owned_daily_scheduler_disables_local_loop(tmp_path: Path) -> None:
