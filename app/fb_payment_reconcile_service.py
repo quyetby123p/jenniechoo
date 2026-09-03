@@ -109,6 +109,7 @@ class ParsedInvoice:
     total: Decimal | None
     warning: str
     text_excerpt: str
+    line_items: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -190,14 +191,12 @@ class FbPaymentReconcileService:
             account_hint=account_hint,
             jc_ad_account_id=self.settings.fb_reconcile_jc_ad_account_id,
             vayxa_ad_account_id=self.settings.fb_reconcile_vayxa_ad_account_id,
+            card_last4=self.settings.fb_reconcile_card_last4,
         )
         invoices = [item for item in draft.get("invoices", []) if isinstance(item, dict)]
+        parsed_rows = [dict(item) for item in parsed.line_items] or [invoice_to_dict(parsed)]
+        invoices = [item for item in invoices if str(item.get("source_sha256", "")) != digest]
         if duplicate_index is not None:
-            replacement = invoice_to_dict(parsed)
-            for index, item in enumerate(invoices):
-                if str(item.get("source_sha256", "")) == digest:
-                    invoices[index] = replacement
-                    break
             files = list(existing)
             files[duplicate_index] = {
                 **existing[duplicate_index],
@@ -216,7 +215,7 @@ class FbPaymentReconcileService:
                     "received_at": now_utc_iso(),
                 }
             )
-            invoices.append(invoice_to_dict(parsed))
+            invoices.extend(parsed_rows)
         updated = dict(draft)
         updated["files"] = files
         updated["invoices"] = invoices
@@ -611,6 +610,7 @@ def parse_invoice_pdf(
     account_hint: str,
     jc_ad_account_id: str,
     vayxa_ad_account_id: str,
+    card_last4: str = "",
 ) -> ParsedInvoice:
     warning_parts: list[str] = []
     try:
@@ -631,6 +631,31 @@ def parse_invoice_pdf(
             account = "JC"
     if not account:
         warning_parts.append("Chưa nhận diện được tài khoản JC/Vayxa.")
+
+    report_rows = _extract_meta_report_rows(
+        text,
+        file_name=file_name,
+        source_sha256=source_sha256,
+        account=account,
+        ad_account_id=ad_account_id,
+        card_last4=card_last4,
+    )
+    if report_rows:
+        report_total = sum((parse_decimal(item.get("invoice_total")) or Decimal("0") for item in report_rows), Decimal("0"))
+        report_dates = [str(item.get("invoice_date", "")) for item in report_rows if str(item.get("invoice_date", ""))]
+        return ParsedInvoice(
+            source_file=file_name,
+            source_sha256=source_sha256,
+            account=account,
+            ad_account_id=ad_account_id,
+            invoice_id="",
+            invoice_date=min(report_dates) if report_dates else "",
+            currency="VND",
+            total=report_total,
+            warning=" ".join(warning_parts),
+            text_excerpt=" ".join(text.split())[:500],
+            line_items=tuple(report_rows),
+        )
 
     invoice_id = _extract_invoice_id(text)
     invoice_date = _extract_invoice_date(text)
@@ -1066,6 +1091,48 @@ def _extract_invoice_id(text: str) -> str:
     return ""
 
 
+def _extract_meta_report_rows(
+    text: str,
+    *,
+    file_name: str,
+    source_sha256: str,
+    account: str,
+    ad_account_id: str,
+    card_last4: str,
+) -> list[dict[str, Any]]:
+    """Extract each paid Meta transaction from the Vietnamese billing report PDF."""
+    row_pattern = re.compile(
+        r"(?m)^\s*(?P<date>\d{1,2}/\d{1,2}/\d{4})\s+"
+        r"(?P<transaction_id>[0-9-]+)\s*\n\s*(?P<wrapped_id>\d{3,6})\s+"
+        r"(?P<method>MasterCard|Visa)\s+[^\n]*?(?P<card_last4>\d{4})\s+"
+        r"(?P<amount>[0-9][0-9., ]*)\s+₫\s+\(VND\)\s+(?P<status>[^\n]+)$",
+        flags=re.I,
+    )
+    configured_last4 = re.sub(r"\D", "", str(card_last4 or ""))[-4:]
+    rows: list[dict[str, Any]] = []
+    for match in row_pattern.finditer(text):
+        if configured_last4 and match.group("card_last4") != configured_last4:
+            continue
+        parsed_date = parse_date_value(match.group("date"))
+        amount = _amount_from_text(match.group("amount"))
+        if not parsed_date or amount is None:
+            continue
+        transaction_id = match.group("transaction_id") + match.group("wrapped_id")
+        rows.append({
+            "source_file": file_name,
+            "source_sha256": source_sha256,
+            "account": account,
+            "ad_account_id": ad_account_id,
+            "invoice_id": transaction_id,
+            "invoice_date": parsed_date.isoformat(),
+            "currency": "VND",
+            "invoice_total": decimal_text(amount),
+            "parse_status": "OK",
+            "warning": "",
+        })
+    return rows
+
+
 def _extract_invoice_date(text: str) -> str:
     labels = r"(?:invoice\s*date|billing\s*date|statement\s*date|date|ngay)"
     candidates = _label_value_candidates(text, labels, lookahead=1)
@@ -1158,7 +1225,10 @@ def decimal_text(value: Any) -> str:
     parsed = parse_decimal(value)
     if parsed is None:
         return ""
-    return format(parsed, "f").rstrip("0").rstrip(".") or "0"
+    formatted = format(parsed, "f")
+    if "." in formatted:
+        formatted = formatted.rstrip("0").rstrip(".")
+    return formatted or "0"
 
 
 def _parse_iso_date(value: Any) -> date | None:

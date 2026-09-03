@@ -244,9 +244,17 @@ class TelegramAssistantBot:
             lines = [
                 f"Đã nhận PDF {file_count}/2: {file_name}",
                 f"- Tài khoản: {parsed.account or 'chưa xác định'}",
-                f"- Invoice: {parsed.invoice_id or 'chưa xác định'}",
-                f"- Tổng: {parsed.total if parsed.total is not None else 'chưa đọc được'} {parsed.currency}",
             ]
+            if parsed.line_items:
+                lines.extend([
+                    f"- Dạng: báo cáo Meta, đọc được {len(parsed.line_items)} giao dịch trên thẻ {service.settings.fb_reconcile_card_last4 or 'đã chọn'}",
+                    f"- Tổng các giao dịch trong PDF: {parsed.total if parsed.total is not None else 'chưa đọc được'} {parsed.currency}",
+                ])
+            else:
+                lines.extend([
+                    f"- Invoice: {parsed.invoice_id or 'chưa xác định'}",
+                    f"- Tổng: {parsed.total if parsed.total is not None else 'chưa đọc được'} {parsed.currency}",
+                ])
             if parsed.warning:
                 lines.append(f"- Cảnh báo: {parsed.warning}")
             if file_count < 2:

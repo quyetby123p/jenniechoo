@@ -3,7 +3,7 @@ from datetime import date
 import logging
 
 from app import fb_payment_reconcile_service as reconcile
-from app.fb_payment_reconcile_service import FbPaymentReconcileService, parse_invoice_pdf
+from app.fb_payment_reconcile_service import FbPaymentReconcileService, decimal_text, parse_invoice_pdf
 
 
 def test_parser_reads_facebook_fields_when_values_are_on_following_lines(monkeypatch) -> None:  # noqa: ANN001
@@ -100,3 +100,47 @@ def test_payment_reader_keeps_merchant_name_and_reads_sheet_beyond_column_k() ->
     rows, errors = service.read_payments(period_start=date(2026, 8, 1), period_end=date(2026, 8, 31))
     assert errors == []
     assert rows[0].merchant_name == "FACEBK *FEGZYHM2"
+
+
+def test_parser_reads_meta_billing_report_as_transactions_and_filters_card(monkeypatch) -> None:  # noqa: ANN001
+    class FakePage:
+        @staticmethod
+        def extract_text() -> str:
+            return (
+                "Tài khoản: 2123778324821105\n"
+                "Báo cáo lập hóa đơn: 25/7/2026 - 1/9/2026\n"
+                "Ngày ID giao dịch Phương thức thanh toán Số tiền Trạng thái thanh toán\n"
+                "31/8/2026 28250390024647339-283257447404\n"
+                "45203 MasterCard ···· 3036 4.000.000 ₫ (VND) Đã thanh toán\n"
+                "25/7/2026 27911319241887762-277565480640\n"
+                "02342 Visa ···· 3691 1.135.877 ₫ (VND) Đã thanh toán\n"
+                "Tổng số tiền đã lập hóa đơn 5.135.877 ₫ (VND)"
+            )
+
+    class FakeReader:
+        pages = [FakePage()]
+
+        def __init__(self, _stream) -> None:  # noqa: ANN001
+            pass
+
+    monkeypatch.setattr(reconcile, "PdfReader", FakeReader)
+    parsed = parse_invoice_pdf(
+        b"pdf",
+        file_name="Đối soát JC.pdf",
+        source_sha256="hash-report",
+        account_hint="JC",
+        jc_ad_account_id="",
+        vayxa_ad_account_id="",
+        card_last4="3036",
+    )
+    assert len(parsed.line_items) == 1
+    assert parsed.line_items[0]["invoice_id"] == "28250390024647339-28325744740445203"
+    assert parsed.line_items[0]["invoice_total"] == "4000000"
+    assert parsed.total == Decimal("4000000")
+    assert parsed.currency == "VND"
+    assert parsed.warning == ""
+
+
+def test_decimal_text_preserves_integer_zeroes() -> None:
+    assert decimal_text(Decimal("4000000")) == "4000000"
+    assert decimal_text(Decimal("123.4500")) == "123.45"
