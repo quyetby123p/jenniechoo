@@ -1253,7 +1253,12 @@ class TelegramAssistantBot:
             await query.answer("Yêu cầu không hợp lệ.", show_alert=True)
             return
 
-        await query.answer("Đang chạy tác vụ...")
+        # The update is dispatched through Cloudflare/GitHub Actions and may
+        # arrive after Telegram's callback-query acknowledgement window. A
+        # stale acknowledgement must not prevent the confirmed action from
+        # running.
+        with suppress(Exception):
+            await query.answer("Đang chạy tác vụ...")
         action_name = str(request.get("action_name", "")).strip()
         action_args = request.get("action_args", {}) if isinstance(request.get("action_args"), dict) else {}
         result = await asyncio.to_thread(self._execute_action, action_name, action_args)
@@ -1268,7 +1273,8 @@ class TelegramAssistantBot:
     async def _on_cancel_action(self, query: CallbackQuery, request_id: str) -> None:
         self.storage.mark_request_processed(request_id)
         self.storage.delete_pending_request(request_id)
-        await query.answer("Đã hủy tác vụ.")
+        with suppress(Exception):
+            await query.answer("Đã hủy tác vụ.")
         if query.message:
             with suppress(Exception):
                 await query.message.edit_reply_markup(reply_markup=None)
