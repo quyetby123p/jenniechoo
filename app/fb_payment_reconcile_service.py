@@ -1101,23 +1101,35 @@ def _extract_meta_report_rows(
     card_last4: str,
 ) -> list[dict[str, Any]]:
     """Extract each paid Meta transaction from the Vietnamese billing report PDF."""
-    row_pattern = re.compile(
+    wrapped_row_pattern = re.compile(
         r"(?m)^\s*(?P<date>\d{1,2}/\d{1,2}/\d{4})\s+"
         r"(?P<transaction_id>[0-9-]+)\s*\n\s*(?P<wrapped_id>\d{3,6})\s+"
         r"(?P<method>MasterCard|Visa)\s+[^\n]*?(?P<card_last4>\d{4})\s+"
         r"(?P<amount>[0-9][0-9., ]*)\s+₫\s+\(VND\)\s+(?P<status>[^\n]+)$",
         flags=re.I,
     )
+    compact_row_pattern = re.compile(
+        r"(?m)^\s*(?P<date>\d{1,2}/\d{1,2}/\d{4})\s+"
+        r"(?P<transaction_id>[0-9-]+)\s+(?P<amount>[0-9][0-9., ]*)\s+"
+        r"₫\s+\(VND\)\s+(?P<status>[^\n]+)$",
+        flags=re.I,
+    )
     configured_last4 = re.sub(r"\D", "", str(card_last4 or ""))[-4:]
     rows: list[dict[str, Any]] = []
-    for match in row_pattern.finditer(text):
-        if configured_last4 and match.group("card_last4") != configured_last4:
-            continue
+    matches = list(wrapped_row_pattern.finditer(text))
+    if matches:
+        row_matches = [(match, match.group("transaction_id") + match.group("wrapped_id")) for match in matches if not configured_last4 or match.group("card_last4") == configured_last4]
+    else:
+        report_card = re.search(r"phuong\s*thuc\s*thanh\s*toan[^\n]*?(\d{4})", _fold(text), flags=re.I)
+        report_card_last4 = report_card.group(1) if report_card else ""
+        if configured_last4 and report_card_last4 != configured_last4:
+            return []
+        row_matches = [(match, match.group("transaction_id")) for match in compact_row_pattern.finditer(text)]
+    for match, transaction_id in row_matches:
         parsed_date = parse_date_value(match.group("date"))
         amount = _amount_from_text(match.group("amount"))
         if not parsed_date or amount is None:
             continue
-        transaction_id = match.group("transaction_id") + match.group("wrapped_id")
         rows.append({
             "source_file": file_name,
             "source_sha256": source_sha256,

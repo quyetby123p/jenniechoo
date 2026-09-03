@@ -141,6 +141,40 @@ def test_parser_reads_meta_billing_report_as_transactions_and_filters_card(monke
     assert parsed.warning == ""
 
 
+def test_parser_reads_meta_report_with_card_in_header(monkeypatch) -> None:  # noqa: ANN001
+    class FakePage:
+        @staticmethod
+        def extract_text() -> str:
+            return (
+                "Phương thức thanh toán: MasterCard ···· 3036\n"
+                "Ngày ID giao dịch Số tiền Trạng thái thanh toán\n"
+                "28/8/2026 28536038986087147-28270933995930977 62 ₫ (VND) Đã thanh toán\n"
+                "25/7/2026 27862005590157161-27992498120441233 1.925.310 ₫ (VND) Đã thanh toán\n"
+                "Tổng số tiền đã lập hóa đơn 1.925.372 ₫ (VND)"
+            )
+
+    class FakeReader:
+        pages = [FakePage()]
+
+        def __init__(self, _stream) -> None:  # noqa: ANN001
+            pass
+
+    monkeypatch.setattr(reconcile, "PdfReader", FakeReader)
+    parsed = parse_invoice_pdf(
+        b"pdf",
+        file_name="Đối soát Vayxa.pdf",
+        source_sha256="hash-report-2",
+        account_hint="Vayxa",
+        jc_ad_account_id="",
+        vayxa_ad_account_id="",
+        card_last4="3036",
+    )
+    assert len(parsed.line_items) == 2
+    assert parsed.total == Decimal("1925372")
+    assert parsed.line_items[0]["invoice_id"] == "28536038986087147-28270933995930977"
+    assert parsed.warning == ""
+
+
 def test_decimal_text_preserves_integer_zeroes() -> None:
     assert decimal_text(Decimal("4000000")) == "4000000"
     assert decimal_text(Decimal("123.4500")) == "123.45"
