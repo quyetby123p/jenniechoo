@@ -23,6 +23,7 @@ DETAIL_SHEET_NAME = "FB Chi tiết"
 SUMMARY_SHEET_NAME = "FB Tổng hợp"
 EXCEPTION_SHEET_NAME = "FB Ngoại lệ"
 LEGACY_LABEL_HEADER = "FB_label"
+FB_LABEL_COLUMN_INDEX = 12  # Column M: keep the reconciliation label separate from payment fields.
 
 PAYMENT_HEADERS = [
     "payment_id",
@@ -338,7 +339,7 @@ class FbPaymentReconcileService:
         response = self.google.fetch_sheet_values(
             spreadsheet_id=self.settings.fb_reconcile_sheet_id,
             sheet_name=INPUT_SHEET_NAME,
-            cell_range="A1:L1000",
+            cell_range="A1:M1000",
         )
         values = response.get("values", []) if isinstance(response.get("values"), list) else []
         if not values:
@@ -346,15 +347,14 @@ class FbPaymentReconcileService:
         headers = [_normalize_header(value) for value in values[0]]
         header_index = {name: idx for idx, name in enumerate(headers) if name}
         canonical = "payment_id" in header_index and "account_hint" in header_index
-        label_column = header_index.get("account_hint") if canonical else 11
-        note_column = header_index.get("note") if canonical else None
+        label_column = FB_LABEL_COLUMN_INDEX
         updates = 0
         labels_written: dict[str, str] = {}
-        if not canonical and len(values[0]) <= label_column:
+        if len(values[0]) <= label_column or not _cell(values[0], label_column):
             self.google.update_sheet_values(
                 spreadsheet_id=self.settings.fb_reconcile_sheet_id,
                 sheet_name=INPUT_SHEET_NAME,
-                cell_range="L1",
+                cell_range="M1",
                 values=[[LEGACY_LABEL_HEADER]],
             )
         row_lookup: dict[str, tuple[int, list[Any]]] = {}
@@ -383,17 +383,6 @@ class FbPaymentReconcileService:
                     values=[[label]],
                 )
                 updates += 1
-            if note_column is not None:
-                note = _cell(row, note_column)
-                marker = f"FB_label={label}"
-                if marker not in note:
-                    new_note = f"{note}; {marker}".strip("; ")
-                    self.google.update_sheet_values(
-                        spreadsheet_id=self.settings.fb_reconcile_sheet_id,
-                        sheet_name=INPUT_SHEET_NAME,
-                        cell_range=f"{_column_letter(note_column + 1)}{row_number}",
-                        values=[[new_note]],
-                    )
         return {"ok": True, "updated_rows": updates, "labels": labels_written}
 
     def ensure_sheet_layout(self) -> dict[str, Any]:

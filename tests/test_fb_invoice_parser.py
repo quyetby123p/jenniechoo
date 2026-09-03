@@ -102,6 +102,47 @@ def test_payment_reader_keeps_merchant_name_and_reads_sheet_beyond_column_k() ->
     assert rows[0].merchant_name == "FACEBK *FEGZYHM2"
 
 
+def test_payment_labels_are_written_to_column_m_only() -> None:
+    class Settings:
+        fb_reconcile_sheet_id = "sheet"
+        fb_reconcile_card_last4 = "3036"
+
+    class FakeGoogle:
+        def __init__(self) -> None:
+            self.updates: list[dict] = []
+
+        def fetch_sheet_values(self, **kwargs):  # noqa: ANN003
+            assert kwargs["cell_range"] == "A1:M1000"
+            return {
+                "values": [
+                    [
+                        "payment_id", "transaction_date", "posting_date", "amount", "currency",
+                        "bank_fee", "fx_rate", "description", "merchant_name", "account_hint",
+                        "reference", "note",
+                    ],
+                    ["P3036", "2026-08-10", "", "100", "USD", "", "", "clear", "FACEBK", "", "", ""],
+                ]
+            }
+
+        def update_sheet_values(self, **kwargs):  # noqa: ANN003
+            self.updates.append(kwargs)
+            return {"ok": True}
+
+    fake_google = FakeGoogle()
+    service = FbPaymentReconcileService(
+        settings=Settings(), google=fake_google, storage=None, logger=logging.getLogger("test")
+    )
+    detail_row = [
+        "run", "file", "JC", "", "", "", "", "P3036", "", "", "", "", "", "", "", "", "KHỚP", ""
+    ]
+
+    result = service._write_payment_labels({"detail_rows": [detail_row]})
+
+    assert result["labels"] == {"P3036": "JC"}
+    assert [item["cell_range"] for item in fake_google.updates] == ["M1", "M2"]
+    assert [item["values"] for item in fake_google.updates] == [[["FB_label"]], [["JC"]]]
+
+
 def test_parser_reads_meta_billing_report_as_transactions_and_filters_card(monkeypatch) -> None:  # noqa: ANN001
     class FakePage:
         @staticmethod
