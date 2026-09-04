@@ -68,6 +68,7 @@ def create_app(
             return jsonify({"ok": False, "error": "Không tải được dữ liệu báo cáo lúc này."}), 503
         return jsonify(snapshot)
 
+    @app.get("/baocaofb")
     @app.get("/baocao")
     @app.get("/")
     def dashboard():  # type: ignore[no-untyped-def]
@@ -208,7 +209,7 @@ def create_app(
         return {
             "timezone_name": current_settings.app_timezone,
             "thb_to_vnd_rate": current_settings.report_thb_to_vnd_rate,
-            "dashboard_path": "/baocao" if request.path == "/baocao" else "/",
+            "dashboard_path": request.path if request.path in {"/baocao", "/baocaofb"} else "/",
         }
 
     return app

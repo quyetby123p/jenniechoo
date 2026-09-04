@@ -140,6 +140,7 @@ Mac dinh web chay `http://127.0.0.1:8000`.
 
 - `/` dashboard tong quan.
 - `/baocao` dashboard tong quan (duong dan de dung voi ten mien rieng).
+- `/baocaofb` dashboard tong quan cho ten mien `p4uenglish.io.vn`.
 - `/brand/<brand_slug>` chi tiet thieu hang theo brand/size.
 - `/status/waiting` danh sach don cho hang.
 - `/status/pending-reconcile` danh sach don cho doi soat.
