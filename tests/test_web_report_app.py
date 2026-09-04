@@ -91,6 +91,8 @@ def _snapshot_payload() -> dict:
             "revenue_total_vnd_text": "1,782,000",
             "ads_spend_vnd": 300_000,
             "ads_spend_vnd_text": "300,000",
+            "ads_cost_percent": 16.84,
+            "ads_cost_percent_text": "16.84%",
             "roas": 5.94,
             "roas_text": "5.94x",
             "waiting_orders": 1,
@@ -242,11 +244,13 @@ def test_dashboard_daily_revenue_uses_today_snapshot_not_selected_range(tmp_path
     today_payload["metrics"]["revenue_total_thb_text"] = "7,400"
     today_payload["metrics"]["revenue_total_vnd_text"] = "5,994,000"
     today_payload["metrics"]["ads_spend_vnd_text"] = "300,000"
+    today_payload["metrics"]["ads_cost_percent_text"] = "5.01%"
     today_payload["metrics"]["roas_text"] = "19.98x"
     range_payload = _snapshot_payload()
     range_payload["metrics"]["revenue_total_thb_text"] = "115,190"
     range_payload["metrics"]["revenue_total_vnd_text"] = "93,303,900"
     range_payload["metrics"]["ads_spend_vnd_text"] = "1,200,000"
+    range_payload["metrics"]["ads_cost_percent_text"] = "1.29%"
     range_payload["metrics"]["roas_text"] = "77.75x"
     service = _RangeAwareStubReportService(today_payload=today_payload, range_payload=range_payload)
     app = create_app(settings=settings, report_service=service)
@@ -261,6 +265,9 @@ def test_dashboard_daily_revenue_uses_today_snapshot_not_selected_range(tmp_path
     assert "115,190 THB" in html
     assert "300,000 VNĐ" in html
     assert "1,200,000 VNĐ" in html
+    assert html.count("% Ads") >= 2
+    assert "5.01%" in html
+    assert "1.29%" in html
     assert "19.98x" in html
     assert "77.75x" in html
     assert not any(start == date(2026, 2, 1) for start, end in service.calls)

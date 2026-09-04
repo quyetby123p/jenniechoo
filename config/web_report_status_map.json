@@ -66,6 +66,12 @@
     "SUCCESS"
   ],
   "reconcile_received_mode": "td_status_only",
+  "reconcile_received_live_enabled": true,
+  "reconcile_received_live_td_statuses": [
+    "SUCCESS",
+    "BEING_RETURNED",
+    "RETURNED"
+  ],
   "status_code_labels": {
     "0": "Mới",
     "17": "Chờ xác nhận",

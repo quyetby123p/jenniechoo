@@ -490,6 +490,8 @@ def test_snapshot_includes_ads_spend_for_selected_range(tmp_path: Path) -> None:
 
     assert snapshot["metrics"]["ads_spend_vnd"] == 1_630_000
     assert snapshot["metrics"]["ads_spend_vnd_text"] == "1,630,000"
+    assert snapshot["metrics"]["ads_cost_percent"] == 0.0
+    assert snapshot["metrics"]["ads_cost_percent_text"] == "0.00%"
     assert snapshot["metrics"]["roas"] == 0.0
     assert snapshot["metrics"]["roas_text"] == "0.00x"
     assert meta.calls == [(date(2026, 5, 1), date(2026, 5, 31), "Asia/Ho_Chi_Minh")]
@@ -513,6 +515,8 @@ def test_snapshot_calculates_roas_from_vnd_revenue_and_ads_spend(tmp_path: Path)
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot["metrics"]["revenue_total_vnd"] == 8_150_000
+    assert snapshot["metrics"]["ads_cost_percent"] == 20.0
+    assert snapshot["metrics"]["ads_cost_percent_text"] == "20.00%"
     assert snapshot["metrics"]["roas"] == 5.0
     assert snapshot["metrics"]["roas_text"] == "5.00x"
 
@@ -1069,6 +1073,103 @@ def test_pending_reconcile_uses_thai_duong_order_list_and_pancake_shipping_statu
     assert {row["display_ref"] for row in rows} == {"THA356_PENDING_SUCCESS", "THA356_PENDING_RETURN"}
     assert fake_td.calls[0]["extra_filters"] == {"partnerCode": "THA356"}
     assert fake_pancake.detail_calls == ["p_success", "p_return", "p_received"]
+
+
+def test_reconcile_received_uses_live_cashflow_rows_mapped_to_pancake(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    dump_json(
+        settings.pancake_td_sync_config_path,
+        {
+            "thai_duong": {
+                "order_lookup_endpoint": {
+                    "method": "POST",
+                    "path": "/api/v1/orders/list",
+                    "result_path": "data.data",
+                },
+                "order_lookup_filters": {"partnerCode": "THA356"},
+            }
+        },
+    )
+    status_map_path = settings.web_report_status_map_config_path
+    dump_json(
+        status_map_path,
+        {
+            "reconcile_received_live_enabled": True,
+            "reconcile_received_live_td_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
+            "brand_rules": [],
+        },
+    )
+    fake_td = _FakeThaiDuongClient(
+        [
+            {
+                "orderUID": "THA-RECEIVED-1",
+                "pancakeOrderId": "JC-RECEIVED-1",
+                "shippingOrderCode": "AWB-RECEIVED-1",
+                "shippingOrderStatus": "SUCCESS",
+                "codPaymentDate": "2026-06-01",
+                "cod": 3700,
+            },
+            {
+                "orderUID": "THA-RECEIVED-2",
+                "pancakeOrderId": "JC-RECEIVED-2",
+                "shippingOrderCode": "AWB-RECEIVED-2",
+                "shippingOrderStatus": "BEING_RETURNED",
+                "codPaymentDate": "2026-06-02T00:00:00+00:00",
+                "cod": 2400,
+            },
+            {
+                "orderUID": "THA-RECEIVED-3",
+                "pancakeOrderId": "JC-RECEIVED-3",
+                "shippingOrderCode": "AWB-RECEIVED-3",
+                "shippingOrderStatus": "RETURNED",
+                "codPaymentDate": "2026-06-03",
+                "cod": 1900,
+            },
+            {
+                "orderUID": "THA-NO-MAP",
+                "shippingOrderCode": "AWB-NO-MAP",
+                "shippingOrderStatus": "SUCCESS",
+                "codPaymentDate": "2026-06-03",
+                "cod": 9999,
+            },
+            {
+                "orderUID": "THA-COMPLAINT",
+                "pancakeOrderId": "JC-COMPLAINT",
+                "shippingOrderStatus": "COMPLAINT",
+                "codPaymentDate": "2026-06-03",
+                "cod": 9999,
+            },
+            {
+                "orderUID": "THA-OUTSIDE",
+                "pancakeOrderId": "JC-OUTSIDE",
+                "shippingOrderStatus": "SUCCESS",
+                "codPaymentDate": "2026-06-04",
+                "cod": 9999,
+            },
+        ]
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+        thai_duong_client=fake_td,  # type: ignore[arg-type]
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1), date(2026, 6, 3))
+    rows = snapshot["status_lists"]["reconcile-received"]
+
+    assert snapshot["metrics"]["reconcile_received_orders"] == 3
+    assert snapshot["metrics"]["reconcile_received_value_minor"] == 800_000
+    assert {row["pancake_order_ref"] for row in rows} == {
+        "JC-RECEIVED-1",
+        "JC-RECEIVED-2",
+        "JC-RECEIVED-3",
+    }
+    assert fake_td.calls[-1]["extra_filters"] == {
+        "partnerCode": "THA356",
+        "paymentCodDateFrom": "2026-06-01",
+        "paymentCodDateTo": "2026-06-03",
+    }
 
 
 def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) -> None:
