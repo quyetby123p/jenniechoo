@@ -215,6 +215,17 @@ def test_routes_render_success(tmp_path: Path) -> None:
     assert client.get("/api/v1/snapshot?date=2026-06-01").status_code == 200
 
 
+def test_report_includes_operational_links(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    app = create_app(settings=settings, report_service=_StubReportService(_snapshot_payload()))
+    app.testing = True
+    html = app.test_client().get("/baocaofb?date=2026-06-01").get_data(as_text=True)
+
+    assert "https://pos.pancake.vn/" in html
+    assert "https://www.facebook.com/adsmanager/" in html
+    assert "https://dropo.io/app" in html
+
+
 def test_unknown_brand_and_status_return_404(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     app = create_app(settings=settings, report_service=_StubReportService(_snapshot_payload()))
