@@ -40,6 +40,9 @@
     .date-toolbar .preset-chip { background: #eef2f7; border: 1px solid #d6dbe3; color: #111827; border-radius: 8px; padding: 8px 12px; font-size: 14px; white-space: nowrap; }
     .date-toolbar .range-input { min-width: 270px; max-width: 360px; background: #fff; }
     .report-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+    .report-links { display: flex; flex-wrap: wrap; gap: 8px; margin: -2px 0 12px; }
+    .report-links a { color: #344054; font-size: 13px; text-decoration: none; border: 1px solid #d8dde5; border-radius: 8px; background: #fff; padding: 7px 10px; }
+    .report-links a:hover { color: #0d6efd; border-color: #0d6efd; }
     .daterangepicker .ranges li.active { background-color: #0d6efd; }
     .daterangepicker td.active, .daterangepicker td.active:hover { background-color: #0d6efd; }
     .mobile-table-cards td { vertical-align: top; }
@@ -171,6 +174,11 @@
     <a class="btn btn-sm {% if active_path == '/status/pending-reconcile' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/pending-reconcile?{{ query_string }}">Đơn chờ đối soát</a>
     <a class="btn btn-sm btn-outline-secondary" href="/api/v1/snapshot?{{ query_string }}" target="_blank">API Snapshot</a>
   </div>
+  <nav class="report-links" aria-label="Liên kết vận hành">
+    <a href="https://pos.pancake.vn/" target="_blank" rel="noopener">Mở Pancake POS</a>
+    <a href="https://www.facebook.com/adsmanager/" target="_blank" rel="noopener">Mở Meta Ads</a>
+    <a href="https://dropo.io/app" target="_blank" rel="noopener">Mở Dropo</a>
+  </nav>
   {% block content %}{% endblock %}
 </div>
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
