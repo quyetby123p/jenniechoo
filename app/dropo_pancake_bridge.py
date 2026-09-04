@@ -87,6 +87,8 @@ class BridgeConfig:
     poll_seconds: int = 300
     warehouse_id: str = ""
     order_status: int = 0
+    order_source_name: str = "Dropo"
+    order_source_id: str = ""
     # Pancake lưu giá ở đơn vị nhỏ (minor unit): 849 THB -> 84900.
     # Bảng map SKU đọc từ chính Pancake cho retail_price_minor = 84900 với
     # sản phẩm bán 849 THB, nên hệ số mặc định là 100. Tách ra thành biến môi
@@ -110,6 +112,8 @@ class BridgeConfig:
             poll_seconds=_env_int("DROPO_PANCAKE_POLL_SECONDS", prefix, 300),
             warehouse_id=_env("DROPO_PANCAKE_WAREHOUSE_ID", prefix),
             order_status=_env_int("DROPO_PANCAKE_ORDER_STATUS", prefix, 0),
+            order_source_name=_env("DROPO_PANCAKE_ORDER_SOURCE_NAME", prefix, "Dropo"),
+            order_source_id=_env("DROPO_PANCAKE_ORDER_SOURCE_ID", prefix),
             price_scale=_env_int("DROPO_PANCAKE_PRICE_SCALE", prefix, 100),
             # Dùng chung OAuth Google đã có sẵn của app; ưu tiên biến riêng nếu khai.
             oauth_client_id=(
@@ -309,6 +313,30 @@ class DropoPancakeBridge:
                 report.rows.append(
                     RowResult(row_index, "dry_run", message=json.dumps(payload, ensure_ascii=False))
                 )
+                continue
+
+            try:
+                self._attach_order_source(payload)
+            except ValidationError as exc:
+                # Không tạo đơn không có nguồn Dropo: nếu nguồn bị xóa/đổi
+                # tên trên Pancake, dừng riêng dòng này để không rơi về
+                # Facebook hoặc nguồn mặc định.
+                report.failed += 1
+                report.rows.append(RowResult(row_index, "failed", message=str(exc)))
+                try:
+                    self._write_updates(
+                        [
+                            self._cell_update(
+                                columns[COL_SYNC_STATUS], row_index, f"LỖI: {str(exc)[:200]}"
+                            )
+                        ]
+                    )
+                except Exception as write_exc:  # noqa: BLE001
+                    self.logger.error(
+                        "Không ghi được lỗi nguồn đơn của dòng %s vào Sheet: %s",
+                        row_index,
+                        write_exc,
+                    )
                 continue
 
             try:
@@ -628,7 +656,37 @@ class DropoPancakeBridge:
         }
         if self.config.warehouse_id:
             payload["warehouse_id"] = self.config.warehouse_id
+        # Tên hiển thị giúp dry-run dễ kiểm tra. Khi chạy live, _attach_order_source
+        # sẽ thay bằng ID nguồn đơn thật trong trường order_sources.
+        payload["ads_source"] = str(self.config.order_source_name or "Dropo").strip() or "Dropo"
         return payload
+
+    def _attach_order_source(self, payload: dict[str, Any]) -> None:
+        """Gắn ID nguồn đơn Pancake ``Dropo`` vào payload tạo đơn."""
+        name = str(self.config.order_source_name or "Dropo").strip() or "Dropo"
+        source_id = str(self.config.order_source_id or "").strip()
+        list_sources = getattr(self.pancake, "list_order_sources", None)
+        if not source_id and callable(list_sources):
+            sources = list_sources()
+            wanted = name.casefold()
+            matches = [
+                item
+                for item in sources
+                if isinstance(item, dict)
+                and not item.get("is_removed")
+                and str(item.get("name") or "").strip().casefold() == wanted
+            ]
+            if matches:
+                source_id = str(matches[0].get("id") or "").strip()
+        if callable(list_sources) and not source_id:
+            raise ValidationError(
+                f"Pancake chưa có nguồn đơn {name!r}; chưa tạo đơn để tránh rơi về nguồn mặc định."
+            )
+        if source_id:
+            payload["order_sources"] = (
+                int(source_id) if re.fullmatch(r"-?\d+", source_id) else source_id
+            )
+            payload["ads_source"] = name
 
     def _enrich_thai_shipping_address(
         self,

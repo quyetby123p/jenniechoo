@@ -109,6 +109,16 @@ class PancakePosClient:
             return [item for item in shops if isinstance(item, dict)]
         return []
 
+    def list_order_sources(self) -> list[dict[str, Any]]:
+        """Đọc các nguồn đơn đã khai báo cho shop POS."""
+        if self.settings.pancake_shop_id <= 0:
+            raise ValidationError("Chưa có PANCAKE_SHOP_ID hợp lệ.")
+        payload = self._request(
+            "GET", f"/shops/{self.settings.pancake_shop_id}/order_source"
+        )
+        data = payload.get("data", [])
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
     def create_order(
         self,
         order_payload: dict[str, Any],

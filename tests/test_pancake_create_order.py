@@ -44,6 +44,13 @@ def test_goi_dung_endpoint_va_method(tmp_path: Path) -> None:
     assert seen["data"] == VALID_PAYLOAD
 
 
+def test_doc_danh_sach_nguon_don(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    client._request = lambda *a, **k: {"success": True, "data": [{"id": 42, "name": "Dropo"}]}  # type: ignore[assignment]
+
+    assert client.list_order_sources() == [{"id": 42, "name": "Dropo"}]
+
+
 def test_boc_don_khoi_envelope_data(tmp_path: Path) -> None:
     client = _client(tmp_path)
     client._request = lambda *a, **k: {"success": True, "data": {"id": "PC-9", "custom_id": "DROPO-1"}}  # type: ignore[assignment]

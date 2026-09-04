@@ -129,6 +129,15 @@ class FakePancake:
         return self.response
 
 
+class SourceFakePancake(FakePancake):
+    def __init__(self, sources: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self.sources = sources
+
+    def list_order_sources(self) -> list[dict[str, Any]]:
+        return self.sources
+
+
 class GeoFakePancake(FakePancake):
     def list_geo_provinces(self, **_: Any) -> list[dict[str, Any]]:
         return [{"id": "66_R92277", "name": "กรุงเทพมหานคร/ Bangkok", "name_en": "กรุงเทพมหานคร"}]
@@ -360,6 +369,25 @@ def test_payload_chuan_hoa_sdt_va_tong_tien():
     assert payload["currency"] == "THB"
     assert payload["is_free_shipping"] is True
     assert payload["items"][0]["quantity"] == 2
+    assert payload["ads_source"] == "Dropo"
+
+
+def test_gan_id_nguon_don_dropo_khi_tao_live():
+    bridge, _, _ = build_bridge([HEADER], pancake=SourceFakePancake([{"id": 42, "name": "Dropo"}]))
+    payload = bridge.build_order_payload(make_row(), HEADER)
+
+    bridge._attach_order_source(payload)
+
+    assert payload["order_sources"] == 42
+    assert payload["ads_source"] == "Dropo"
+
+
+def test_khong_tao_don_neu_thieu_nguon_dropo():
+    bridge, _, _ = build_bridge([HEADER], pancake=SourceFakePancake([{"id": -1, "name": "Facebook"}]))
+    payload = bridge.build_order_payload(make_row(), HEADER)
+
+    with pytest.raises(ValidationError, match="chưa có nguồn đơn 'Dropo'"):
+        bridge._attach_order_source(payload)
 
 
 def test_payload_tu_chuan_hoa_dia_chi_thai_thanh_id_pancake():
