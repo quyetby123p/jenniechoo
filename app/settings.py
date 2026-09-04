@@ -94,6 +94,7 @@ class Settings:
     pancake_td_sync_state_path: str = "storage/pancake_td_sync/state.json"
     web_report_refresh_seconds: int = 600
     web_report_status_map_path: str = "config/web_report_status_map.json"
+    web_report_source_costs_path: str = "config/web_report_source_costs.json"
     web_report_host: str = "0.0.0.0"
     web_report_port: int = 8000
     profile: str = "default"
@@ -243,6 +244,14 @@ class Settings:
     def web_report_status_map_config_path(self) -> Path:
         raw = str(self.web_report_status_map_path).strip()
         path = Path(raw) if raw else Path("config/web_report_status_map.json")
+        if path.is_absolute():
+            return path
+        return self.project_root / path
+
+    @property
+    def web_report_source_costs_config_path(self) -> Path:
+        raw = str(self.web_report_source_costs_path).strip()
+        path = Path(raw) if raw else Path("config/web_report_source_costs.json")
         if path.is_absolute():
             return path
         return self.project_root / path
@@ -887,6 +896,10 @@ def load_settings(
         "WEB_REPORT_STATUS_MAP_PATH",
         "config/web_report_status_map.json",
     ).strip()
+    web_report_source_costs_path = os.getenv(
+        "WEB_REPORT_SOURCE_COSTS_PATH",
+        "config/web_report_source_costs.json",
+    ).strip()
     web_report_host = os.getenv("WEB_REPORT_HOST", "0.0.0.0").strip() or "0.0.0.0"
     web_report_port = _parse_int_with_range(
         os.getenv("WEB_REPORT_PORT", "8000"),
@@ -1037,6 +1050,7 @@ def load_settings(
         pancake_td_sync_state_path=pancake_td_sync_state_path,
         web_report_refresh_seconds=web_report_refresh_seconds,
         web_report_status_map_path=web_report_status_map_path,
+        web_report_source_costs_path=web_report_source_costs_path,
         web_report_host=web_report_host,
         web_report_port=web_report_port,
     )

@@ -99,6 +99,11 @@ class WebReportService:
         returning_orders: list[dict[str, Any]] = []
         shipping_orders: list[dict[str, Any]] = []
         brands: dict[str, dict[str, Any]] = {}
+        source_totals: dict[str, dict[str, int]] = {
+            "fb_ig": {"order_count": 0, "revenue_total_minor": 0},
+            "dropo": {"order_count": 0, "revenue_total_minor": 0},
+            "other": {"order_count": 0, "revenue_total_minor": 0},
+        }
 
         for order in orders:
             total_orders += 1
@@ -118,6 +123,10 @@ class WebReportService:
                         pancake_status_code_by_ref[normalized_ref_key] = order_status_code
             order_total_minor = self._extract_order_total_minor(order)
             order_value_total_minor += order_total_minor
+            source_key = self._classify_order_source(order)
+            source_bucket = source_totals[source_key]
+            source_bucket["order_count"] += 1
+            source_bucket["revenue_total_minor"] += order_total_minor
             normalized_order_ref = self._normalize_text(order_ref)
             if normalized_order_ref:
                 existing_value = self._to_int(order_value_minor_by_ref.get(normalized_order_ref))
@@ -327,6 +336,17 @@ class WebReportService:
         revenue_total_vnd = self._thb_to_vnd(revenue_total_thb)
         ads_spend_vnd = self._fetch_ads_spend_vnd(start_date=start_date, end_date=end_date)
         roas = self._calculate_roas(revenue_total_vnd, ads_spend_vnd)
+        dropo_spend_vnd, dropo_spend_configured = self._fetch_configured_source_spend_vnd(
+            source_key="dropo",
+            start_date=start_date,
+            end_date=end_date,
+        )
+        source_breakdown = self._build_source_breakdown(
+            source_totals=source_totals,
+            fb_ig_spend_vnd=ads_spend_vnd,
+            dropo_spend_vnd=dropo_spend_vnd,
+            dropo_spend_configured=dropo_spend_configured,
+        )
 
         brand_overview: list[dict[str, Any]] = []
         brand_detail: dict[str, Any] = {}
@@ -454,6 +474,7 @@ class WebReportService:
                 "waiting_value_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(waiting_value_minor)),
                 "waiting_value_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(waiting_value_minor))),
             },
+            "source_breakdown": source_breakdown,
             "size_summary": self._serialize_size_totals(size_totals),
             "brands": brand_overview,
             "brand_detail": brand_detail,
@@ -486,7 +507,11 @@ class WebReportService:
                     aggs = {}
                 return [item for item in orders if isinstance(item, dict)], aggs
 
-        orders = self.pancake.fetch_all_orders_for_range(start_date, end_date, self.settings.app_timezone)
+        try:
+            orders = self.pancake.fetch_all_orders_for_range(start_date, end_date, self.settings.app_timezone)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Khong lay duoc don Pancake cho web report: %s", exc)
+            orders = []
         if not isinstance(orders, list):
             orders = []
         return [item for item in orders if isinstance(item, dict)], {}
@@ -1253,6 +1278,143 @@ class WebReportService:
                 row_minor = max(0, self._to_int(order_value_minor_by_ref.get(normalized_ref)))
             total_minor += row_minor
         return total_minor
+
+    def _classify_order_source(self, order: dict[str, Any]) -> str:
+        """Classify an order from the source markers stored by Pancake/Dropo."""
+        source_values: list[str] = []
+        for field in (
+            "source",
+            "source_name",
+            "ads_source",
+            "account_source",
+            "order_source",
+            "order_sources",
+            "page",
+            "page_name",
+            "p_utm_source",
+            "utm_source",
+            "utm_medium",
+            "note",
+            "note_internal",
+            "internal_note",
+            "custom_id",
+            "order_code",
+            "code",
+            "display_id",
+        ):
+            value = order.get(field)
+            if isinstance(value, (dict, list, tuple, set)):
+                source_values.extend(str(item) for item in value)
+            elif value is not None:
+                source_values.append(str(value))
+
+        normalized = self._normalize_text(" ".join(source_values))
+        if any(marker in normalized for marker in ("dropo", "vayxa", "5qk38.dropo.io")):
+            return "dropo"
+
+        if (
+            "facebook" in normalized
+            or "instagram" in normalized
+            or re.search(r"\bfb\b", normalized)
+            or re.search(r"\big\b", normalized)
+            or any(str(order.get(field) or "").strip() for field in ("page_id", "post_id", "ad_id", "adset_id", "campaign_id"))
+        ):
+            return "fb_ig"
+        return "other"
+
+    def _fetch_configured_source_spend_vnd(
+        self,
+        *,
+        source_key: str,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[int, bool]:
+        """Read optional non-Meta spend from a date-keyed JSON file."""
+        config = self._safe_read_json(self.settings.web_report_source_costs_config_path)
+        if not isinstance(config, dict):
+            return 0, False
+        source_config = config.get(source_key)
+        if not isinstance(source_config, dict):
+            return 0, False
+        daily_costs = source_config.get("daily", source_config)
+        if not isinstance(daily_costs, dict):
+            return 0, False
+
+        total = 0
+        configured = False
+        for report_date in self._iter_dates(start_date, end_date):
+            raw_value = daily_costs.get(report_date.isoformat())
+            if raw_value is None:
+                continue
+            configured = True
+            total += max(0, self._to_int(raw_value))
+        return total, configured
+
+    def _build_source_breakdown(
+        self,
+        *,
+        source_totals: dict[str, dict[str, int]],
+        fb_ig_spend_vnd: int,
+        dropo_spend_vnd: int,
+        dropo_spend_configured: bool,
+    ) -> list[dict[str, Any]]:
+        source_specs = (
+            ("fb_ig", "FB/IG", max(0, fb_ig_spend_vnd), True, "Chi phí lấy từ Meta Ads"),
+            (
+                "dropo",
+                "Dropo",
+                max(0, dropo_spend_vnd),
+                dropo_spend_configured,
+                "Chi phí theo bảng ngày Dropo" if dropo_spend_configured else "Chưa cấu hình chi phí Dropo",
+            ),
+        )
+        result: list[dict[str, Any]] = []
+        for source_key, label, spend_vnd, spend_configured, spend_note in source_specs:
+            totals = source_totals.get(source_key) or {}
+            order_count = max(0, self._to_int(totals.get("order_count")))
+            revenue_minor = max(0, self._to_int(totals.get("revenue_total_minor")))
+            revenue_thb = self._minor_to_thb_major(revenue_minor)
+            revenue_vnd = self._thb_to_vnd(revenue_thb)
+            cost_percent = (float(spend_vnd) / float(revenue_vnd) * 100.0) if revenue_vnd > 0 else 0.0
+            result.append(
+                {
+                    "key": source_key,
+                    "label": label,
+                    "order_count": order_count,
+                    "revenue_total_minor": revenue_minor,
+                    "revenue_thb_text": self._fmt_thb_amount(revenue_thb),
+                    "revenue_vnd_text": self._fmt_vnd_amount(revenue_vnd),
+                    "cost_vnd": spend_vnd,
+                    "cost_vnd_text": self._fmt_vnd_amount(spend_vnd),
+                    "cost_percent": round(cost_percent, 2),
+                    "cost_percent_text": f"{cost_percent:,.2f}%",
+                    "cost_configured": spend_configured,
+                    "cost_note": spend_note,
+                }
+            )
+
+        other_totals = source_totals.get("other") or {}
+        other_order_count = max(0, self._to_int(other_totals.get("order_count")))
+        if other_order_count > 0:
+            revenue_minor = max(0, self._to_int(other_totals.get("revenue_total_minor")))
+            revenue_thb = self._minor_to_thb_major(revenue_minor)
+            result.append(
+                {
+                    "key": "other",
+                    "label": "Khác / Chưa xác định",
+                    "order_count": other_order_count,
+                    "revenue_total_minor": revenue_minor,
+                    "revenue_thb_text": self._fmt_thb_amount(revenue_thb),
+                    "revenue_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(revenue_thb)),
+                    "cost_vnd": 0,
+                    "cost_vnd_text": "0",
+                    "cost_percent": 0.0,
+                    "cost_percent_text": "0.00%",
+                    "cost_configured": False,
+                    "cost_note": "Chưa có nguồn chi phí",
+                }
+            )
+        return result
 
     def _extract_brand(self, order: dict[str, Any], *, brand_rules: Any) -> tuple[str, str]:
         candidate_fields = (

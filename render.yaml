@@ -5,6 +5,8 @@ services:
     region: oregon
     plan: free
     autoDeploy: true
+    domains:
+      - vayxath.com
     healthCheckPath: /healthz
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app.web_report_main:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
@@ -15,6 +17,8 @@ services:
         value: "600"
       - key: WEB_REPORT_HOST
         value: 0.0.0.0
+      - key: WEB_REPORT_SOURCE_COSTS_PATH
+        value: config/web_report_source_costs.json
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_ALLOWED_USER_ID
