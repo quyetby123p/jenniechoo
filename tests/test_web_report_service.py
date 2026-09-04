@@ -60,6 +60,14 @@ class _FakeThaiDuongClient:
         return self._rows
 
 
+class _BrokenPancakeClient:
+    def fetch_orders_snapshot_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
+        raise RuntimeError("snapshot unavailable")
+
+    def fetch_all_orders_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
+        raise RuntimeError("orders unavailable")
+
+
 def _dummy_settings(tmp_path: Path, **overrides) -> Settings:
     base = Settings(
         project_root=tmp_path,
@@ -505,6 +513,53 @@ def test_snapshot_ads_spend_failure_falls_back_to_zero(tmp_path: Path) -> None:
 
     assert snapshot["metrics"]["ads_spend_vnd"] == 0
     assert snapshot["metrics"]["ads_spend_vnd_text"] == "0"
+
+
+def test_snapshot_breaks_down_revenue_and_cost_by_source(tmp_path: Path) -> None:
+    cost_path = tmp_path / "source-costs.json"
+    dump_json(
+        cost_path,
+        {"dropo": {"daily": {"2026-06-01": 81_500}}},
+    )
+    settings = _dummy_settings(tmp_path, web_report_source_costs_path=str(cost_path))
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {"display_id": "FB-1", "ads_source": "Facebook", "total_price": 200_000, "items": []},
+                {"display_id": "IG-1", "p_utm_source": "ig", "total_price": 100_000, "items": []},
+                {"display_id": "DROPO-1", "note": "Nguồn: Dropo landing", "total_price": 100_000, "items": []},
+            ]
+        ),
+        meta_client=_FakeMetaClient(spend_vnd=163_000),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+    sources = {source["key"]: source for source in snapshot["source_breakdown"]}
+
+    assert sources["fb_ig"]["order_count"] == 2
+    assert sources["fb_ig"]["revenue_thb_text"] == "3,000"
+    assert sources["fb_ig"]["cost_vnd"] == 163_000
+    assert sources["fb_ig"]["cost_percent_text"] == "6.67%"
+    assert sources["dropo"]["order_count"] == 1
+    assert sources["dropo"]["revenue_thb_text"] == "1,000"
+    assert sources["dropo"]["cost_vnd"] == 81_500
+    assert sources["dropo"]["cost_percent_text"] == "10.00%"
+    assert "other" not in sources
+
+
+def test_snapshot_stays_available_when_pancake_is_unavailable(tmp_path: Path) -> None:
+    service = WebReportService(
+        settings=_dummy_settings(tmp_path),
+        logger=logging.getLogger("test"),
+        pancake_client=_BrokenPancakeClient(),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["ok"] is True
+    assert snapshot["metrics"]["total_orders"] == 0
 
 
 def test_shipping_status_metric_and_list(tmp_path: Path) -> None:

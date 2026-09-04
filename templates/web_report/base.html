@@ -25,6 +25,15 @@
     .kpi-grid-status { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .kpi-grid-missing-main { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .kpi-span-2 { grid-column: span 2; }
+    .source-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .source-card { border: 1px solid #d8dde5; border-radius: 10px; background: #fff; padding: 14px; min-width: 0; }
+    .source-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; min-width: 0; }
+    .source-card-heading h3 { overflow-wrap: anywhere; }
+    .source-metrics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .source-metric { min-width: 0; }
+    .source-metric .label { color: #667085; font-size: 12px; }
+    .source-value { font-size: clamp(18px, 2vw, 24px); font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; word-break: break-word; }
+    .source-metric small { display: block; overflow-wrap: anywhere; line-height: 1.25; }
     .size-pill { display: inline-block; margin: 3px 6px 3px 0; padding: 3px 8px; border-radius: 999px; background: #eef2f7; font-size: 13px; }
     .date-toolbar { border: 1px solid #d8dde5; border-radius: 12px; background: #fff; padding: 12px; margin-bottom: 12px; }
     .date-toolbar .toolbar-label { color: #1f2937; font-weight: 600; margin-right: 8px; white-space: nowrap; }
@@ -67,6 +76,12 @@
         letter-spacing: -0.03em;
       }
       .metric-card .text-muted { font-size: 12px !important; line-height: 1.2; }
+      .source-grid { grid-template-columns: minmax(0, 1fr); }
+      .source-card { padding: 10px; }
+      .source-metrics-grid { gap: 8px; }
+      .source-metric .label { font-size: 11px; line-height: 1.2; }
+      .source-value { font-size: clamp(16px, 5vw, 21px); letter-spacing: -0.03em; }
+      .source-metric small { font-size: 11px; }
       .mobile-table-cards thead { display: none; }
       .mobile-table-cards tbody,
       .mobile-table-cards tr,
@@ -148,7 +163,7 @@
     <button class="btn btn-primary" type="submit">Xem</button>
   </form>
   <div class="mb-3 report-tabs">
-    <a class="btn btn-sm {% if active_path == '/' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/?{{ query_string }}">Dashboard</a>
+    <a class="btn btn-sm {% if active_path == '/' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="{{ dashboard_path }}?{{ query_string }}">Dashboard</a>
     <a class="btn btn-sm {% if active_path == '/status/shipping' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/shipping?{{ query_string }}">Đơn đang gửi</a>
     <a class="btn btn-sm {% if active_path == '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/waiting?{{ query_string }}">Đơn chờ hàng</a>
     <a class="btn btn-sm {% if active_path == '/status/reconcile-received' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/reconcile-received?{{ query_string }}">Đối soát đã nhận</a>
