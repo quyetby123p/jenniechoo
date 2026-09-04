@@ -27,6 +27,9 @@
     "dang giao",
     "shipping"
   ],
+  "dropo_campaign_name_markers": [
+    "web"
+  ],
   "pending_reconcile_match_results": [
     "not_found",
     "ambiguous",

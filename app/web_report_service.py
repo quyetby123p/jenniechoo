@@ -33,6 +33,7 @@ class WebReportService:
         self.meta = meta_client
         self.thai_duong = thai_duong_client
         self._cache_lock = Lock()
+        self._snapshot_build_lock = Lock()
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._cashflow_refs_cache: tuple[float, set[str]] | None = None
 
@@ -47,10 +48,19 @@ class WebReportService:
                 if now_ts - cached_ts < float(self.settings.web_report_refresh_seconds):
                     return payload
 
-        payload = self._build_snapshot(period_start, period_end)
-        with self._cache_lock:
-            self._cache[key] = (time.time(), payload)
-        return payload
+        # Prevent concurrent tabs from multiplying live API calls for one period.
+        with self._snapshot_build_lock:
+            now_ts = time.time()
+            with self._cache_lock:
+                cached = self._cache.get(key)
+                if cached is not None:
+                    cached_ts, payload = cached
+                    if now_ts - cached_ts < float(self.settings.web_report_refresh_seconds):
+                        return payload
+            payload = self._build_snapshot(period_start, period_end)
+            with self._cache_lock:
+                self._cache[key] = (time.time(), payload)
+            return payload
 
     @staticmethod
     def _normalize_period(start_date: date, end_date: date | None) -> tuple[date, date]:
@@ -334,16 +344,17 @@ class WebReportService:
         revenue_total_minor = self._extract_revenue_minor_from_aggs(aggs, fallback=order_value_total_minor)
         revenue_total_thb = self._minor_to_thb_major(revenue_total_minor)
         revenue_total_vnd = self._thb_to_vnd(revenue_total_thb)
-        ads_spend_vnd = self._fetch_ads_spend_vnd(start_date=start_date, end_date=end_date)
-        roas = self._calculate_roas(revenue_total_vnd, ads_spend_vnd)
-        dropo_spend_vnd, dropo_spend_configured = self._fetch_configured_source_spend_vnd(
-            source_key="dropo",
-            start_date=start_date,
-            end_date=end_date,
+        ads_spend_vnd, fb_ig_spend_vnd, dropo_spend_vnd, dropo_spend_configured = (
+            self._fetch_ads_spend_breakdown_vnd(
+                start_date=start_date,
+                end_date=end_date,
+                status_cfg=status_cfg,
+            )
         )
+        roas = self._calculate_roas(revenue_total_vnd, ads_spend_vnd)
         source_breakdown = self._build_source_breakdown(
             source_totals=source_totals,
-            fb_ig_spend_vnd=ads_spend_vnd,
+            fb_ig_spend_vnd=fb_ig_spend_vnd,
             dropo_spend_vnd=dropo_spend_vnd,
             dropo_spend_configured=dropo_spend_configured,
         )
@@ -496,7 +507,8 @@ class WebReportService:
                     end_date,
                     self.settings.app_timezone,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Khong lay duoc snapshot don Pancake cho web report: %s", exc)
                 payload = None
             if isinstance(payload, dict):
                 orders = payload.get("orders", [])
@@ -532,6 +544,70 @@ class WebReportService:
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Khong lay duoc chi phi Ads cho web report: %s", exc)
             return 0
+
+    def _fetch_ads_spend_breakdown_vnd(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        status_cfg: dict[str, Any],
+    ) -> tuple[int, int, int, bool]:
+        """Return total, FB/IG, Dropo spend and whether the split is authoritative."""
+        if self.meta is None:
+            return 0, 0, 0, False
+
+        dropo_markers = self._to_text_set(
+            status_cfg.get("dropo_campaign_name_markers", ["web"])
+        ) or {"web"}
+        if hasattr(self.meta, "get_ad_insights_for_range"):
+            try:
+                rows = self.meta.get_ad_insights_for_range(  # type: ignore[attr-defined]
+                    start_date,
+                    end_date,
+                    self.settings.app_timezone,
+                    max_rows=5000,
+                )
+                if isinstance(rows, list):
+                    fb_ig_spend_vnd = 0
+                    dropo_spend_vnd = 0
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        campaign = row.get("campaign")
+                        campaign_name = (
+                            str(campaign.get("name", "")).strip()
+                            if isinstance(campaign, dict)
+                            else str(row.get("campaign_name", "")).strip()
+                        )
+                        spend_vnd = max(0, self._to_int(row.get("spend")))
+                        if any(
+                            marker in self._normalize_text(campaign_name)
+                            for marker in dropo_markers
+                        ):
+                            dropo_spend_vnd += spend_vnd
+                        else:
+                            fb_ig_spend_vnd += spend_vnd
+                    return (
+                        fb_ig_spend_vnd + dropo_spend_vnd,
+                        fb_ig_spend_vnd,
+                        dropo_spend_vnd,
+                        True,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Khong tach duoc chi phi Ads theo campaign: %s", exc)
+
+        account_spend_vnd = self._fetch_ads_spend_vnd(start_date=start_date, end_date=end_date)
+        dropo_spend_vnd, dropo_spend_configured = self._fetch_configured_source_spend_vnd(
+            source_key="dropo",
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return (
+            account_spend_vnd + dropo_spend_vnd,
+            account_spend_vnd,
+            dropo_spend_vnd,
+            dropo_spend_configured,
+        )
 
     def _load_thai_duong_order_pending_reconcile_rows(
         self,
@@ -1359,13 +1435,21 @@ class WebReportService:
         dropo_spend_configured: bool,
     ) -> list[dict[str, Any]]:
         source_specs = (
-            ("fb_ig", "FB/IG", max(0, fb_ig_spend_vnd), True, "Chi phí lấy từ Meta Ads"),
+            (
+                "fb_ig",
+                "FB/IG",
+                max(0, fb_ig_spend_vnd),
+                True,
+                "Chi phí Meta Ads của campaign không chứa 'web'",
+            ),
             (
                 "dropo",
                 "Dropo",
                 max(0, dropo_spend_vnd),
                 dropo_spend_configured,
-                "Chi phí theo bảng ngày Dropo" if dropo_spend_configured else "Chưa cấu hình chi phí Dropo",
+                "Chi phí Meta Ads của campaign chứa 'web'"
+                if dropo_spend_configured
+                else "Chưa lấy được chi phí campaign Dropo",
             ),
         )
         result: list[dict[str, Any]] = []

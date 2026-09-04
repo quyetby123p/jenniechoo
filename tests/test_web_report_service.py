@@ -44,6 +44,23 @@ class _FakeMetaClient:
         return {"spend_vnd": self.spend_vnd}
 
 
+class _FakeMetaInsightsClient:
+    def __init__(self, rows: list[dict]):
+        self.rows = rows
+        self.calls: list[tuple[date, date, str, int]] = []
+
+    def get_ad_insights_for_range(
+        self,
+        start_date: date,
+        end_date: date,
+        timezone_name: str,
+        *,
+        max_rows: int = 5000,
+    ):  # noqa: ANN001
+        self.calls.append((start_date, end_date, timezone_name, max_rows))
+        return self.rows
+
+
 class _FakeThaiDuongClient:
     def __init__(self, rows: list[dict]):
         self._rows = rows
@@ -547,6 +564,58 @@ def test_snapshot_breaks_down_revenue_and_cost_by_source(tmp_path: Path) -> None
     assert sources["dropo"]["cost_vnd"] == 81_500
     assert sources["dropo"]["cost_percent_text"] == "10.00%"
     assert "other" not in sources
+
+
+def test_snapshot_splits_meta_cost_by_campaign_name(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    meta = _FakeMetaInsightsClient(
+        [
+            {"campaign_name": "ADS JC Catalog", "spend": "100000"},
+            {"campaign_name": "ADS web Dropo", "spend": "81500"},
+            {"campaign_name": "ADS FB Retarget", "spend": "50000"},
+        ]
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {"display_id": "JC-1", "ads_source": "Facebook", "total_price": 200_000, "items": []},
+                {"display_id": "VX-1", "ads_source": "Dropo", "total_price": 100_000, "items": []},
+            ]
+        ),
+        meta_client=meta,
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+    sources = {source["key"]: source for source in snapshot["source_breakdown"]}
+
+    assert snapshot["metrics"]["ads_spend_vnd"] == 231_500
+    assert sources["fb_ig"]["cost_vnd"] == 150_000
+    assert sources["dropo"]["cost_vnd"] == 81_500
+    assert sources["dropo"]["cost_configured"] is True
+    assert "chứa 'web'" in sources["dropo"]["cost_note"]
+    assert meta.calls == [(date(2026, 6, 1), date(2026, 6, 1), "Asia/Ho_Chi_Minh", 5000)]
+
+
+def test_snapshot_falls_back_to_legacy_pancake_orders_method(tmp_path: Path) -> None:
+    class SnapshotFailurePancake:
+        def fetch_orders_snapshot_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
+            raise RuntimeError("snapshot unavailable")
+
+        def fetch_all_orders_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
+            return [{"display_id": "JC-FALLBACK", "total_price": 100_000, "items": []}]
+
+    service = WebReportService(
+        settings=_dummy_settings(tmp_path),
+        logger=logging.getLogger("test"),
+        pancake_client=SnapshotFailurePancake(),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["total_orders"] == 1
+    assert snapshot["metrics"]["revenue_total_minor"] == 100_000
 
 
 def test_snapshot_stays_available_when_pancake_is_unavailable(tmp_path: Path) -> None:
