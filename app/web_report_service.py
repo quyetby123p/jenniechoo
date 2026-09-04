@@ -330,7 +330,17 @@ class WebReportService:
             pending_reconcile = reconcile_summary.get("pending_rows", [])
         else:
             pending_reconcile = thai_duong_order_pending_reconcile
-        reconcile_received = reconcile_summary.get("received_rows", [])
+        thai_duong_order_reconcile_received = self._load_thai_duong_order_reconcile_received_rows(
+            start_date=start_date,
+            end_date=end_date,
+            status_cfg=status_cfg,
+            order_value_minor_by_ref=order_value_minor_by_ref,
+            tz=tz,
+        )
+        if thai_duong_order_reconcile_received is None:
+            reconcile_received = reconcile_summary.get("received_rows", [])
+        else:
+            reconcile_received = thai_duong_order_reconcile_received
         pending_reconcile_orders = self._count_unique_reconcile_order_refs(pending_reconcile)
         reconcile_received_orders = self._count_unique_reconcile_order_refs(reconcile_received)
         pending_reconcile_value_minor = self._sum_reconcile_rows_value_minor(
@@ -352,6 +362,7 @@ class WebReportService:
             )
         )
         roas = self._calculate_roas(revenue_total_vnd, ads_spend_vnd)
+        ads_cost_percent = self._calculate_cost_percent(revenue_total_vnd, ads_spend_vnd)
         source_breakdown = self._build_source_breakdown(
             source_totals=source_totals,
             fb_ig_spend_vnd=fb_ig_spend_vnd,
@@ -445,6 +456,8 @@ class WebReportService:
                 "revenue_total_vnd_text": self._fmt_vnd_amount(revenue_total_vnd),
                 "ads_spend_vnd": ads_spend_vnd,
                 "ads_spend_vnd_text": self._fmt_vnd_amount(ads_spend_vnd),
+                "ads_cost_percent": ads_cost_percent,
+                "ads_cost_percent_text": self._fmt_percent(ads_cost_percent),
                 "roas": roas,
                 "roas_text": self._fmt_roas(roas),
                 "exchange_rate_thb_to_vnd": float(self.settings.report_thb_to_vnd_rate),
@@ -728,6 +741,117 @@ class WebReportService:
             )
         )
 
+    def _load_thai_duong_order_reconcile_received_rows(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        status_cfg: dict[str, Any],
+        order_value_minor_by_ref: dict[str, int],
+        tz: timezone | ZoneInfo,
+    ) -> list[dict[str, Any]] | None:
+        """Load paid Dòng tiền rows that are mapped to Pancake orders."""
+        if not self._config_bool(status_cfg.get("reconcile_received_live_enabled"), default=False):
+            return None
+        if self.thai_duong is None or not hasattr(self.thai_duong, "fetch_orders_for_sync"):
+            return None
+
+        sync_cfg = self._load_pancake_td_sync_config()
+        td_cfg = sync_cfg.get("thai_duong", {}) if isinstance(sync_cfg.get("thai_duong"), dict) else {}
+        endpoint_cfg = td_cfg.get("order_lookup_endpoint", {}) if isinstance(td_cfg, dict) else {}
+        if not isinstance(endpoint_cfg, dict) or not endpoint_cfg:
+            return None
+
+        filters = dict(self._thai_duong_lookup_filters(td_cfg))
+        filters["paymentCodDateFrom"] = start_date.isoformat()
+        filters["paymentCodDateTo"] = end_date.isoformat()
+        try:
+            rows = self.thai_duong.fetch_orders_for_sync(  # type: ignore[attr-defined]
+                endpoint_cfg,
+                search_text="",
+                extra_filters=filters,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Khong lay duoc Dong tien Thai Duong live cho web report: %s", exc)
+            return None
+        if not isinstance(rows, list):
+            return []
+
+        eligible_td_statuses = self._to_text_set(
+            status_cfg.get(
+                "reconcile_received_live_td_statuses",
+                ["SUCCESS", "BEING_RETURNED", "RETURNED"],
+            )
+        )
+        if not eligible_td_statuses:
+            eligible_td_statuses = self._to_text_set(["SUCCESS", "BEING_RETURNED", "RETURNED"])
+
+        received_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            payment_dt = self._extract_thai_duong_payment_datetime(row, tz=tz)
+            if payment_dt is None or not (start_date <= payment_dt.date() <= end_date):
+                continue
+
+            td_status_raw = self._extract_first_text(row, self._thai_duong_shipping_status_fields())
+            td_status = self._normalize_text(td_status_raw)
+            if td_status not in eligible_td_statuses:
+                continue
+
+            pancake_order_id = self._extract_first_text(
+                row,
+                ("pancakeOrderId", "pancake_order_id", "pancakeOrderID", "pancakeId", "pancake_id"),
+            )
+            if not pancake_order_id:
+                continue
+
+            td_cod_minor = self._extract_thai_duong_order_cod_minor(
+                row,
+                order_value_minor_by_ref=order_value_minor_by_ref,
+                pancake_order_id=pancake_order_id,
+            )
+            td_awb = self._extract_first_text(
+                row,
+                ("shippingOrderCode", "awb", "trackingCode", "tracking_code", "tracking_number"),
+            )
+            order_uid = self._extract_first_text(row, ("orderUID", "orderUid", "order_uid", "code", "id"))
+            customer_name = self._extract_first_text(
+                row,
+                ("buyerName", "customerName", "customer_name", "name", "receiverName", "receiver_name"),
+            )
+            received_rows.append(
+                {
+                    "pancake_order_ref": pancake_order_id,
+                    "reconcile_ref": pancake_order_id,
+                    "display_ref": pancake_order_id or order_uid or td_awb,
+                    "match_result": "thai_duong_cashflow_received",
+                    "reason": "Đã có trong Dòng tiền Thái Dương và đã map Pancake.",
+                    "td_awb": td_awb,
+                    "td_status": td_status_raw,
+                    "customer_name": customer_name,
+                    "settlement_date": payment_dt.date().isoformat(),
+                    "created_at": self._format_dt(payment_dt, tz=tz),
+                    "created_ts": self._to_ts(payment_dt),
+                    "td_cod_minor": td_cod_minor,
+                    "td_cod_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(td_cod_minor)),
+                    "td_cod_vnd_text": self._fmt_vnd_amount(
+                        self._thb_to_vnd(self._minor_to_thb_major(td_cod_minor))
+                    ),
+                }
+            )
+
+        return self._dedupe_reconcile_rows(
+            sorted(
+                received_rows,
+                key=lambda item: (
+                    str(item.get("settlement_date", "")),
+                    str(item.get("display_ref", "")),
+                ),
+                reverse=True,
+            )
+        )
+
     def _load_pancake_td_sync_config(self) -> dict[str, Any]:
         payload = self._safe_read_json(self.settings.pancake_td_sync_config_path)
         return payload if isinstance(payload, dict) else {}
@@ -757,6 +881,20 @@ class WebReportService:
             "order_date",
             "insertedAt",
             "sendOrderDate",
+        ):
+            dt = self._parse_datetime(row.get(field))
+            if dt is not None:
+                return dt.astimezone(tz)
+        return None
+
+    def _extract_thai_duong_payment_datetime(self, row: dict[str, Any], *, tz: timezone | ZoneInfo) -> datetime | None:
+        for field in (
+            "codPaymentDate",
+            "paymentCodDate",
+            "cod_payment_date",
+            "Ngay doi soat",
+            "settlementDate",
+            "settlement_date",
         ):
             dt = self._parse_datetime(row.get(field))
             if dt is not None:
@@ -953,7 +1091,21 @@ class WebReportService:
         order_value_minor_by_ref: dict[str, int],
         pancake_order_id: str,
     ) -> int:
-        for field in ("cod", "codAmount", "cod_amount", "totalAmount", "amount", "orderTotal"):
+        for field in (
+            "cod",
+            "COD",
+            "codAmount",
+            "cod_amount",
+            "Tien COD",
+            "codFromCustomer",
+            "codTransferred",
+            "cod_transfered",
+            "collectedCod",
+            "collected_cod",
+            "totalAmount",
+            "amount",
+            "orderTotal",
+        ):
             value = row.get(field)
             if value is None:
                 continue
@@ -1889,6 +2041,8 @@ class WebReportService:
             "reconcile_received_match_results": ["matched_unique", "already_correct"],
             "reconcile_received_td_statuses": ["success"],
             "reconcile_received_mode": "matched_and_td_status",
+            "reconcile_received_live_enabled": True,
+            "reconcile_received_live_td_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
             "brand_rules": [
                 {"pattern": r"^JC", "brand_name": "Jennie Choo", "brand_slug": "jennie-choo"},
                 {"pattern": r"^(LYS|L-)", "brand_name": "Lysilk", "brand_slug": "lysilk"},
@@ -2094,6 +2248,16 @@ class WebReportService:
     @staticmethod
     def _fmt_roas(roas: float) -> str:
         return f"{float(roas):,.2f}x"
+
+    @staticmethod
+    def _calculate_cost_percent(revenue_vnd: int, spend_vnd: int) -> float:
+        if revenue_vnd <= 0 or spend_vnd <= 0:
+            return 0.0
+        return round(float(spend_vnd) / float(revenue_vnd) * 100.0, 2)
+
+    @staticmethod
+    def _fmt_percent(value: float) -> str:
+        return f"{float(value):,.2f}%"
 
     @staticmethod
     def _format_dt(value: datetime | None, *, tz: timezone | ZoneInfo) -> str:
