@@ -225,6 +225,46 @@ def test_update_order_status_safe_full_order_changes_status_only(tmp_path: Path)
     assert calls[2][0:2] == ("GET", "/shops/123/orders/180157102421209")
 
 
+def test_update_order_source_preserves_order_and_verifies_source(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))
+    calls: list[tuple[str, str, dict[str, object]]] = []
+    source = {
+        "id": 180157102421209,
+        "status": 1,
+        "items": [{"variation_info": {"sku": "SP01"}, "quantity": 2}],
+        "total_price": 500000,
+        "total_quantity": 2,
+        "ads_source": None,
+        "order_sources": None,
+    }
+
+    def fake_request(method: str, path: str, *, params=None, data=None):  # noqa: ANN001
+        del params
+        calls.append((method, path, data or {}))
+        if method == "GET":
+            latest = copy.deepcopy(source)
+            if len(calls) >= 3:
+                latest["ads_source"] = "Dropo"
+                latest["order_sources"] = 42
+            return {"success": True, "order": latest}
+        return {"success": True}
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    result = client.update_order_source("180157102421209", 42, "Dropo")
+
+    assert result["ads_source"] == "Dropo"
+    assert result["order_sources"] == 42
+    assert calls[0][0:2] == ("GET", "/shops/123/orders/180157102421209")
+    assert calls[1][0:2] == ("PUT", "/shops/123/orders/180157102421209")
+    assert calls[1][2]["items"] == source["items"]
+    assert calls[1][2]["total_price"] == source["total_price"]
+    assert calls[1][2]["ads_source"] == "Dropo"
+    assert calls[1][2]["order_sources"] == 42
+    assert calls[2][0:2] == ("GET", "/shops/123/orders/180157102421209")
+
+
 def test_update_order_status_rejects_success_response_when_status_did_not_change(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))

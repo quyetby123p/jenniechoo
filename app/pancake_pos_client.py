@@ -468,6 +468,73 @@ class PancakePosClient:
             )
         return latest_order
 
+    def update_order_source(
+        self,
+        order_id: str,
+        source_id: int,
+        source_name: str,
+        *,
+        verify_after_update: bool = True,
+    ) -> dict[str, Any]:
+        """Gán nguồn đơn, bảo toàn toàn bộ nội dung đơn hiện tại.
+
+        Pancake yêu cầu PUT toàn bộ order khi sửa trường nguồn. Vì vậy luôn
+        đọc payload hiện tại, chỉ thay ``order_sources`` và ``ads_source``,
+        rồi kiểm tra lại item/tổng tiền/trạng thái sau khi ghi.
+        """
+        normalized_order_id = str(order_id or "").strip()
+        normalized_name = str(source_name or "").strip()
+        if not normalized_order_id:
+            raise ValidationError("Thiếu order_id để cập nhật nguồn đơn Pancake.")
+        if int(source_id) <= 0:
+            raise ValidationError("source_id không hợp lệ để cập nhật nguồn đơn Pancake.")
+        if not normalized_name:
+            raise ValidationError("Thiếu source_name để cập nhật nguồn đơn Pancake.")
+
+        path = self._format_order_path(
+            "/shops/{shop_id}/orders/{order_id}", normalized_order_id
+        )
+        source_order = self.get_order_detail(normalized_order_id)
+        payload = copy.deepcopy(source_order)
+        payload["order_sources"] = int(source_id)
+        payload["ads_source"] = normalized_name
+
+        guard_before = self._capture_paths(
+            source_order,
+            ["__items_signature__", "total_price", "total_quantity", "status", "is_empty_cart"],
+        )
+        self._request("PUT", path, data=payload)
+
+        if not verify_after_update:
+            return payload
+
+        latest_order = self.get_order_detail(normalized_order_id)
+        guard_after = self._capture_paths(
+            latest_order,
+            ["__items_signature__", "total_price", "total_quantity", "status", "is_empty_cart"],
+        )
+        if guard_before != guard_after:
+            raise PancakeApiError(
+                "Cập nhật nguồn đơn đã làm thay đổi dữ liệu đơn ngoài phạm vi cho phép."
+            )
+        persisted_name = str(latest_order.get("ads_source") or "").strip()
+        # POS hiện lưu nguồn chuẩn ở order_sources và có thể trả ads_source
+        # rỗng đối với nguồn tự tạo; chỉ bắt lỗi khi Pancake trả tên khác.
+        if persisted_name and persisted_name != normalized_name:
+            raise PancakeApiError(
+                f"Pancake lưu sai ads_source cho order_id={normalized_order_id}."
+            )
+        persisted_source = latest_order.get("order_sources")
+        if isinstance(persisted_source, list):
+            persisted_ids = {str(item) for item in persisted_source}
+        else:
+            persisted_ids = {str(persisted_source)}
+        if str(int(source_id)) not in persisted_ids:
+            raise PancakeApiError(
+                f"Pancake chưa lưu đúng order_sources cho order_id={normalized_order_id}."
+            )
+        return latest_order
+
     def update_order_note_print(
         self,
         order_id: str,
