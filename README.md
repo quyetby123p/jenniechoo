@@ -141,6 +141,7 @@ Mac dinh web chay `http://127.0.0.1:8000`.
 - `/` dashboard tong quan.
 - `/baocao` dashboard tong quan (duong dan tuong thich cu).
 - `/baocaofb` dashboard tong quan duoc nhung vao page Dropo `vayxath.com/baocaofb`.
+- File `docs/dropo/baocaofb.html` la HTML page can phat hanh tren Dropo voi custom path `baocaofb`; page nay giu form loc ngay, dashboard va link Pancake/Meta/Dropo trong cung mot URL.
 - `/brand/<brand_slug>` chi tiet thieu hang theo brand/size.
 - `/status/waiting` danh sach don cho hang.
 - `/status/pending-reconcile` danh sach don cho doi soat.
