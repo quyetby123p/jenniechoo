@@ -18,6 +18,7 @@ from app.assistant_scheduler_service import AssistantSchedulerService
 from app.assistant_settings import load_assistant_settings
 from app.assistant_storage_service import AssistantStorageService
 from app.assistant_task_service import AssistantTaskService
+from app.fb_payment_reconcile_service import FbPaymentReconcileService
 from app.instance_lock import single_instance_lock
 from app.logger import SecretMaskFilter
 
@@ -123,6 +124,12 @@ async def run_bot() -> None:
     approval = AssistantApprovalService()
     scheduler = AssistantSchedulerService(settings=settings, storage=storage)
     tasks = AssistantTaskService(settings=settings, logger=logger)
+    fb_reconcile = FbPaymentReconcileService(
+        settings=settings,
+        google=google,
+        storage=storage,
+        logger=logger,
+    )
 
     bot = TelegramAssistantBot(
         settings=settings,
@@ -135,6 +142,7 @@ async def run_bot() -> None:
         approval=approval,
         scheduler=scheduler,
         tasks=tasks,
+        fb_reconcile_service=fb_reconcile,
     )
     await bot.run()
 

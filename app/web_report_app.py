@@ -61,9 +61,14 @@ def create_app(
     @app.get("/api/v1/snapshot")
     def snapshot_api():  # type: ignore[no-untyped-def]
         period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
-        snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
+        try:
+            snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
+        except Exception as exc:  # noqa: BLE001
+            current_logger.exception("Web report snapshot API failed: %s", exc)
+            return jsonify({"ok": False, "error": "Không tải được dữ liệu báo cáo lúc này."}), 503
         return jsonify(snapshot)
 
+    @app.get("/baocao")
     @app.get("/")
     def dashboard():  # type: ignore[no-untyped-def]
         period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
@@ -203,6 +208,7 @@ def create_app(
         return {
             "timezone_name": current_settings.app_timezone,
             "thb_to_vnd_rate": current_settings.report_thb_to_vnd_rate,
+            "dashboard_path": "/baocao" if request.path == "/baocao" else "/",
         }
 
     return app

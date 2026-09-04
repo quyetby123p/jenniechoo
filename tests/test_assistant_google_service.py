@@ -106,6 +106,75 @@ def test_fetch_sheet_snapshot_success(tmp_path: Path, monkeypatch) -> None:  # n
     assert payload["row_count"] == 2
 
 
+def test_update_sheet_values_uses_qualified_range_in_request_body(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    service = AssistantGoogleService(settings=_settings(tmp_path), logger=_fake_logger())
+    captured: dict[str, Any] = {}
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+
+        def __init__(self, payload: dict[str, Any]) -> None:
+            self.payload = payload
+
+        def json(self) -> dict[str, Any]:
+            return self.payload
+
+    def _fake_request(method: str, url: str, **kwargs):  # noqa: ANN001
+        if "oauth2.googleapis.com/token" in url:
+            return _Resp({"access_token": "token", "expires_in": 3600})
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = kwargs.get("json")
+        return _Resp({"updatedRows": 1})
+
+    monkeypatch.setattr("app.assistant_google_service.requests.request", _fake_request)
+    result = service.update_sheet_values(
+        spreadsheet_id="sheet_123",
+        sheet_name="Tiền trừ thẻ",
+        cell_range="L95",
+        values=[["JC"]],
+    )
+
+    assert result["updatedRows"] == 1
+    assert captured["method"] == "PUT"
+    assert captured["json"]["range"] == "'Tiền trừ thẻ'!L95"
+
+
+def test_batch_update_sheet_values_sends_one_values_batch_request(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    service = AssistantGoogleService(settings=_settings(tmp_path), logger=_fake_logger())
+    captured: dict[str, Any] = {}
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+
+        def __init__(self, payload: dict[str, Any]) -> None:
+            self.payload = payload
+
+        def json(self) -> dict[str, Any]:
+            return self.payload
+
+    def _fake_request(method: str, url: str, **kwargs):  # noqa: ANN001
+        if "oauth2.googleapis.com/token" in url:
+            return _Resp({"access_token": "token", "expires_in": 3600})
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = kwargs.get("json")
+        return _Resp({"totalUpdatedCells": 2})
+
+    monkeypatch.setattr("app.assistant_google_service.requests.request", _fake_request)
+    result = service.batch_update_sheet_values(
+        spreadsheet_id="sheet_123",
+        data=[{"range": "'Tiền trừ thẻ'!M2", "values": [["JC"]]}],
+    )
+
+    assert result["totalUpdatedCells"] == 2
+    assert captured["method"] == "POST"
+    assert captured["url"].endswith("/spreadsheets/sheet_123/values:batchUpdate")
+    assert captured["json"]["data"][0]["range"] == "'Tiền trừ thẻ'!M2"
+
+
 def _fake_logger():  # noqa: ANN202
     import logging
 

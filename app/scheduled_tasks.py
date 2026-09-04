@@ -21,6 +21,7 @@ from app.assistant_scheduler_service import AssistantSchedulerService
 from app.assistant_settings import AssistantSettings, load_assistant_settings
 from app.assistant_storage_service import AssistantStorageService
 from app.assistant_task_service import AssistantTaskService
+from app.fb_payment_reconcile_service import FbPaymentReconcileService
 from app.approval_service import ApprovalService
 from app.daily_report_service import DailyReportService
 from app.daily_task_summary_service import DailyTaskSummaryService
@@ -166,6 +167,12 @@ def build_assistant_runtime(project_root: Path | None = None) -> AssistantSchedu
     internal_ops = AssistantInternalOpsService(project_root=project_root, logger=logger)
     scheduler = AssistantSchedulerService(settings=settings, storage=storage)
     tasks = AssistantTaskService(settings=settings, logger=logger)
+    fb_reconcile = FbPaymentReconcileService(
+        settings=settings,
+        google=google,
+        storage=storage,
+        logger=logger,
+    )
     telegram = Bot(token=settings.telegram_bot_token)
     bot = TelegramAssistantBot(
         settings=settings,
@@ -178,6 +185,7 @@ def build_assistant_runtime(project_root: Path | None = None) -> AssistantSchedu
         approval=AssistantApprovalService(),
         scheduler=scheduler,
         tasks=tasks,
+        fb_reconcile_service=fb_reconcile,
     )
     bot._bot = telegram
     return AssistantScheduledRuntime(settings=settings, bot=bot, storage=storage, telegram=telegram)

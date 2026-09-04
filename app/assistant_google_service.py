@@ -171,6 +171,116 @@ class AssistantGoogleService:
             "row_count": len(values),
         }
 
+    def fetch_spreadsheet_metadata(self, *, spreadsheet_id: str) -> dict[str, Any]:
+        clean_id = str(spreadsheet_id or "").strip()
+        if not clean_id:
+            raise ValueError("Thiếu spreadsheet_id.")
+        access_token = self._get_access_token()
+        return self._request_json(
+            "GET",
+            f"{self._SHEETS_API_BASE}/{clean_id}",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            params={
+                "fields": "spreadsheetId,spreadsheetUrl,properties(title,locale,timeZone),sheets(properties(sheetId,title,index,sheetType,gridProperties))",
+            },
+        )
+
+    def fetch_sheet_values(
+        self,
+        *,
+        spreadsheet_id: str,
+        sheet_name: str,
+        cell_range: str,
+        value_render_option: str = "FORMATTED_VALUE",
+    ) -> dict[str, Any]:
+        clean_id = str(spreadsheet_id or "").strip()
+        title = str(sheet_name or "").strip()
+        if not clean_id or not title or not str(cell_range or "").strip():
+            raise ValueError("Thiếu spreadsheet_id, sheet_name hoặc cell_range.")
+        access_token = self._get_access_token()
+        read_range = f"'{self._escape_sheet_title(title)}'!{str(cell_range).strip()}"
+        encoded_range = quote(read_range, safe="")
+        return self._request_json(
+            "GET",
+            f"{self._SHEETS_API_BASE}/{clean_id}/values/{encoded_range}",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            params={"majorDimension": "ROWS", "valueRenderOption": value_render_option},
+        )
+
+    def update_sheet_values(
+        self,
+        *,
+        spreadsheet_id: str,
+        sheet_name: str,
+        cell_range: str,
+        values: list[list[Any]],
+    ) -> dict[str, Any]:
+        clean_id = str(spreadsheet_id or "").strip()
+        title = str(sheet_name or "").strip()
+        access_token = self._get_access_token()
+        qualified_range = f"'{self._escape_sheet_title(title)}'!{str(cell_range).strip()}"
+        encoded_range = quote(qualified_range, safe="")
+        return self._request_json(
+            "PUT",
+            f"{self._SHEETS_API_BASE}/{clean_id}/values/{encoded_range}",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json", "Content-Type": "application/json"},
+            params={"valueInputOption": "USER_ENTERED", "includeValuesInResponse": "false"},
+            data={"range": qualified_range, "majorDimension": "ROWS", "values": values},
+        )
+
+    def append_sheet_values(
+        self,
+        *,
+        spreadsheet_id: str,
+        sheet_name: str,
+        values: list[list[Any]],
+    ) -> dict[str, Any]:
+        clean_id = str(spreadsheet_id or "").strip()
+        title = str(sheet_name or "").strip()
+        access_token = self._get_access_token()
+        encoded_range = quote(f"'{self._escape_sheet_title(title)}'!A:Z", safe="")
+        return self._request_json(
+            "POST",
+            f"{self._SHEETS_API_BASE}/{clean_id}/values/{encoded_range}:append",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json", "Content-Type": "application/json"},
+            params={
+                "valueInputOption": "USER_ENTERED",
+                "insertDataOption": "INSERT_ROWS",
+                "includeValuesInResponse": "false",
+            },
+            data={"majorDimension": "ROWS", "values": values},
+        )
+
+    def batch_update_sheet_values(
+        self,
+        *,
+        spreadsheet_id: str,
+        data: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        clean_id = str(spreadsheet_id or "").strip()
+        if not clean_id or not data:
+            return {"totalUpdatedCells": 0, "totalUpdatedRows": 0, "totalUpdatedSheets": 0}
+        access_token = self._get_access_token()
+        return self._request_json(
+            "POST",
+            f"{self._SHEETS_API_BASE}/{clean_id}/values:batchUpdate",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json", "Content-Type": "application/json"},
+            data={"valueInputOption": "USER_ENTERED", "includeValuesInResponse": False, "data": data},
+        )
+
+    def add_sheet_tabs(self, *, spreadsheet_id: str, sheet_names: list[str]) -> dict[str, Any]:
+        clean_names = [str(name).strip() for name in sheet_names if str(name).strip()]
+        if not clean_names:
+            return {"replies": []}
+        access_token = self._get_access_token()
+        requests_payload = [{"addSheet": {"properties": {"title": name}}} for name in clean_names]
+        return self._request_json(
+            "POST",
+            f"{self._SHEETS_API_BASE}/{str(spreadsheet_id).strip()}:batchUpdate",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json", "Content-Type": "application/json"},
+            data={"requests": requests_payload},
+        )
+
     def _get_access_token(self) -> str:
         now_epoch = datetime.now(timezone.utc).timestamp()
         if self._cached_access_token and now_epoch < (self._token_expire_epoch - 60):

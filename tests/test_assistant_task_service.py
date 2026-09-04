@@ -119,6 +119,24 @@ def test_mark_done_and_weekly_snapshot(tmp_path: Path) -> None:
     assert snapshot["blocked_count"] >= 1
 
 
+def test_delete_all_tasks_removes_tasks_and_update_history(tmp_path: Path) -> None:
+    service = AssistantTaskService(settings=_settings(tmp_path), logger=_fake_logger())
+    task = service.create_task(
+        title="Task cần xóa",
+        created_by=1,
+        source_type="self",
+        assigned_by=1,
+        group_chat_id=-1001,
+    )
+    service.mark_done(task_uid=task["task_uid"], updated_by=1, chat_id=1, note="xong")
+
+    deleted = service.delete_all_tasks()
+
+    assert deleted == {"tasks_deleted": 1, "updates_deleted": 2}
+    assert service.list_tasks(limit=10) == []
+    assert service.get_task(task["task_uid"]) == {}
+
+
 def _fake_logger():  # noqa: ANN202
     import logging
 

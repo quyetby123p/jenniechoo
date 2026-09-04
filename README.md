@@ -139,6 +139,7 @@ Mac dinh web chay `http://127.0.0.1:8000`.
 ### Route chinh
 
 - `/` dashboard tong quan.
+- `/baocao` dashboard tong quan (duong dan de dung voi ten mien rieng).
 - `/brand/<brand_slug>` chi tiet thieu hang theo brand/size.
 - `/status/waiting` danh sach don cho hang.
 - `/status/pending-reconcile` danh sach don cho doi soat.
@@ -151,6 +152,21 @@ Mac dinh web chay `http://127.0.0.1:8000`.
 - `WEB_REPORT_PORT` (mac dinh `8000`)
 - `WEB_REPORT_REFRESH_SECONDS` (mac dinh `600`)
 - `WEB_REPORT_STATUS_MAP_PATH` (mac dinh `config/web_report_status_map.json`)
+- `WEB_REPORT_SOURCE_COSTS_PATH` (mac dinh `config/web_report_source_costs.json`)
+
+Chi phi FB/IG lay tu Meta Ads. Chi phi Dropo doc theo ngay tu file JSON tuy chon:
+
+```json
+{
+  "dropo": {
+    "daily": {
+      "2026-09-04": 150000
+    }
+  }
+}
+```
+
+Gia tri la VND. Neu chua co dong chi phi Dropo trong file, dashboard hien `Chua cau hinh` thay vi tu dien mot so lieu khong xac dinh.
 
 File map status/brand: `config/web_report_status_map.json`.
 

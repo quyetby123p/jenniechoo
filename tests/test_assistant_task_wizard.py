@@ -56,7 +56,7 @@ def test_task_wizard_happy_path(tmp_path: Path) -> None:
     tasks = AssistantTaskService(settings=settings, logger=_fake_logger())
     bot = _build_bot(settings=settings, storage=storage, tasks=tasks)
 
-    reply1 = bot._try_start_task_wizard(raw="thêm công việc: Feedback khách hàng", user_id=1, chat_id=1)
+    reply1 = bot._try_start_task_wizard(raw="lưu việc: Feedback khách hàng", user_id=1, chat_id=1)
     assert "Đã nhận tên task" in reply1
 
     reply2 = bot._continue_task_wizard_if_active(raw="Cần xử lý phản hồi khách chưa hài lòng", user_id=1, chat_id=1)
@@ -79,7 +79,7 @@ def test_task_wizard_cancel(tmp_path: Path) -> None:
     tasks = AssistantTaskService(settings=settings, logger=_fake_logger())
     bot = _build_bot(settings=settings, storage=storage, tasks=tasks)
 
-    bot._try_start_task_wizard(raw="thêm công việc: Test hủy", user_id=1, chat_id=1)
+    bot._try_start_task_wizard(raw="lưu việc: Test hủy", user_id=1, chat_id=1)
     reply = bot._continue_task_wizard_if_active(raw="/cancel", user_id=1, chat_id=1)
     assert "Đã hủy" in reply
     assert storage.load_task_draft(user_id=1) is None

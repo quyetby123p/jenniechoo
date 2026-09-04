@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
+import re
 
 from dotenv import load_dotenv
 
@@ -43,6 +44,13 @@ class AssistantSettings:
     sheets_spreadsheet_id: str
     sheets_gid: int
     internal_qa_enabled: bool = True
+    fb_reconcile_enabled: bool = False
+    fb_reconcile_sheet_id: str = "11CFuyMjJixR-rMQk0haoFqec8R6j45z5LG74pVX47dE"
+    fb_reconcile_jc_ad_account_id: str = ""
+    fb_reconcile_vayxa_ad_account_id: str = ""
+    fb_reconcile_card_last4: str = "3036"
+    fb_reconcile_date_window_days: int = 7
+    fb_reconcile_rounding_tolerance: int = 1
     tasks_enabled: bool = False
     task_group_chat_id: int = 0
     task_require_tag: bool = True
@@ -282,6 +290,26 @@ def load_assistant_settings(project_root: Path | None = None) -> AssistantSettin
         min_value=0,
         max_value=2_147_483_647,
     )
+    fb_reconcile_enabled = _parse_bool(os.getenv("FB_RECONCILE_ENABLED", "0"), default=False)
+    fb_reconcile_sheet_id = (
+        os.getenv("FB_RECONCILE_SHEET_ID", "11CFuyMjJixR-rMQk0haoFqec8R6j45z5LG74pVX47dE").strip()
+        or "11CFuyMjJixR-rMQk0haoFqec8R6j45z5LG74pVX47dE"
+    )
+    fb_reconcile_jc_ad_account_id = os.getenv("FB_RECONCILE_JC_AD_ACCOUNT_ID", "").strip()
+    fb_reconcile_vayxa_ad_account_id = os.getenv("FB_RECONCILE_VAYXA_AD_ACCOUNT_ID", "").strip()
+    fb_reconcile_card_last4 = re.sub(r"\D", "", os.getenv("FB_RECONCILE_CARD_LAST4", "3036"))[-4:]
+    fb_reconcile_date_window_days = _parse_int(
+        os.getenv("FB_RECONCILE_DATE_WINDOW_DAYS", "7"),
+        default=7,
+        min_value=0,
+        max_value=31,
+    )
+    fb_reconcile_rounding_tolerance = _parse_int(
+        os.getenv("FB_RECONCILE_ROUNDING_TOLERANCE", "1"),
+        default=1,
+        min_value=0,
+        max_value=100000,
+    )
     tasks_enabled = _parse_bool(os.getenv("BOT3_TASKS_ENABLED", "0"), default=False)
     task_group_chat_id = _parse_optional_int(os.getenv("BOT3_TASK_GROUP_CHAT_ID", ""), default=0)
     task_require_tag = _parse_bool(os.getenv("BOT3_TASK_REQUIRE_TAG", "1"), default=True)
@@ -402,8 +430,15 @@ def load_assistant_settings(project_root: Path | None = None) -> AssistantSettin
         google_calendar_ids=google_calendar_ids,
         gmail_query_default=gmail_query_default,
         sheets_spreadsheet_id=sheets_spreadsheet_id,
-        sheets_gid=sheets_gid,
-        internal_qa_enabled=internal_qa_enabled,
+    sheets_gid=sheets_gid,
+    internal_qa_enabled=internal_qa_enabled,
+    fb_reconcile_enabled=fb_reconcile_enabled,
+        fb_reconcile_sheet_id=fb_reconcile_sheet_id,
+        fb_reconcile_jc_ad_account_id=fb_reconcile_jc_ad_account_id,
+        fb_reconcile_vayxa_ad_account_id=fb_reconcile_vayxa_ad_account_id,
+        fb_reconcile_card_last4=fb_reconcile_card_last4,
+        fb_reconcile_date_window_days=fb_reconcile_date_window_days,
+    fb_reconcile_rounding_tolerance=fb_reconcile_rounding_tolerance,
         tasks_enabled=tasks_enabled,
         task_group_chat_id=task_group_chat_id,
         task_require_tag=task_require_tag,

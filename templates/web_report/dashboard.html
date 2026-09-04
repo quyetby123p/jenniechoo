@@ -113,6 +113,40 @@
   </div>
 </div>
 
+<div class="brand-card source-breakdown p-3 mb-3">
+  <div class="d-flex justify-content-between align-items-baseline gap-2 flex-wrap mb-3">
+    <h2 class="h5 mb-0">Hiệu quả theo nguồn</h2>
+    <small class="text-muted">Theo kỳ lọc: doanh thu / chi phí / % chi phí</small>
+  </div>
+  <div class="source-grid">
+    {% for source in snapshot.source_breakdown %}
+      <section class="source-card">
+        <div class="source-card-heading">
+          <h3 class="h6 mb-0">{{ source.label }}</h3>
+          <span class="size-pill">{{ "{:,}".format(source.order_count) }} đơn</span>
+        </div>
+        <div class="source-metrics-grid">
+          <div class="source-metric">
+            <div class="label">Doanh thu</div>
+            <div class="source-value">{{ source.revenue_thb_text }} THB</div>
+            <small class="text-muted">~ {{ source.revenue_vnd_text }} VNĐ</small>
+          </div>
+          <div class="source-metric">
+            <div class="label">Chi phí</div>
+            <div class="source-value text-danger">{{ source.cost_vnd_text }} VNĐ</div>
+            <small class="text-muted">{{ source.cost_note }}</small>
+          </div>
+          <div class="source-metric">
+            <div class="label">% chi phí</div>
+            <div class="source-value {% if source.cost_configured %}text-success{% else %}text-muted{% endif %}">{{ source.cost_percent_text }}</div>
+            <small class="text-muted">Chi phí / doanh thu</small>
+          </div>
+        </div>
+      </section>
+    {% endfor %}
+  </div>
+</div>
+
 <div class="brand-card p-3 mb-3">
   <h2 class="h5 mb-3">Sản phẩm thiếu</h2>
   <div class="kpi-grid kpi-grid-missing-main">
