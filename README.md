@@ -139,7 +139,9 @@ Mac dinh web chay `http://127.0.0.1:8000`.
 ### Route chinh
 
 - `/` dashboard tong quan.
-- `/baocao` dashboard tong quan (duong dan de dung voi ten mien rieng).
+- `/baocao` dashboard tong quan (duong dan tuong thich cu).
+- `/baocaofb` dashboard tong quan duoc nhung vao page Dropo `vayxath.com/baocaofb`.
+- File `docs/dropo/baocaofb.html` la HTML page can phat hanh tren Dropo voi custom path `baocaofb`; page nay giu form loc ngay, dashboard va link Pancake/Meta/Dropo trong cung mot URL.
 - `/brand/<brand_slug>` chi tiet thieu hang theo brand/size.
 - `/status/waiting` danh sach don cho hang.
 - `/status/pending-reconcile` danh sach don cho doi soat.
@@ -173,7 +175,7 @@ File map status/brand: `config/web_report_status_map.json`.
 ### Deploy free: Render web + GitHub Actions
 
 Phuong an free:
-- Render free chi chay `fb-ops-web-report` (web report).
+- Render free chi chay backend `fb-ops-web-report`; storefront Dropo giu ten mien `vayxath.com` va page `baocaofb` nhung backend nay.
 - Cloudflare Worker chay webhook Telegram va cron dung gio.
 - GitHub Actions chi la executor Python duoc Cloudflare goi bang `workflow_dispatch`.
 - Telegram polling realtime (`len camp` ngay khi nhan tin) khong can may local neu da bat Cloudflare Worker webhook, nhung se cham hon worker/VM tra phi vi phai doi GitHub Actions khoi dong job.
