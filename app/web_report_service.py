@@ -81,10 +81,12 @@ class WebReportService:
         returning_labels = self._to_text_set(status_cfg.get("returning_status_labels", ["đang hoàn", "hoàn"]))
         shipping_codes = self._to_int_set(status_cfg.get("shipping_status_codes", [2]))
         shipping_labels = self._to_text_set(status_cfg.get("shipping_status_labels", ["đã gửi hàng", "dang giao"]))
+        revenue_codes = self._to_int_set(status_cfg.get("revenue_status_codes", []))
+        revenue_labels = self._to_text_set(status_cfg.get("revenue_status_labels", []))
         status_code_labels = self._build_status_code_label_map(status_cfg)
         brand_rules = status_cfg.get("brand_rules", [])
 
-        orders, aggs = self._fetch_orders_and_aggs(start_date=start_date, end_date=end_date)
+        orders, _aggs = self._fetch_orders_and_aggs(start_date=start_date, end_date=end_date)
         if not isinstance(orders, list):
             orders = []
         orders = [item for item in orders if isinstance(item, dict)]
@@ -114,7 +116,6 @@ class WebReportService:
             "dropo": {"order_count": 0, "revenue_total_minor": 0},
             "other": {"order_count": 0, "revenue_total_minor": 0},
         }
-
         for order in orders:
             total_orders += 1
 
@@ -126,17 +127,32 @@ class WebReportService:
                 status_code=order_status_code,
                 status_code_labels=status_code_labels,
             )
+            order_confirmation_dt = self._extract_order_confirmation_datetime(
+                order,
+                tz=tz,
+                revenue_codes=revenue_codes,
+                revenue_labels=revenue_labels,
+            )
+            is_revenue_eligible = self._is_revenue_eligible_status(
+                code=order_status_code,
+                label=order_status_label,
+                revenue_codes=revenue_codes,
+                revenue_labels=revenue_labels,
+            )
+            if is_revenue_eligible and order_confirmation_dt is not None:
+                is_revenue_eligible = start_date <= order_confirmation_dt.date() <= end_date
             if order_status_code is not None:
                 for ref in self._extract_order_identity_refs(order, fallback_ref=order_ref):
                     normalized_ref_key = self._normalize_text(ref)
                     if normalized_ref_key:
                         pancake_status_code_by_ref[normalized_ref_key] = order_status_code
             order_total_minor = self._extract_order_total_minor(order)
-            order_value_total_minor += order_total_minor
             source_key = self._classify_order_source(order)
             source_bucket = source_totals[source_key]
-            source_bucket["order_count"] += 1
-            source_bucket["revenue_total_minor"] += order_total_minor
+            if is_revenue_eligible:
+                order_value_total_minor += order_total_minor
+                source_bucket["order_count"] += 1
+                source_bucket["revenue_total_minor"] += order_total_minor
             normalized_order_ref = self._normalize_text(order_ref)
             if normalized_order_ref:
                 existing_value = self._to_int(order_value_minor_by_ref.get(normalized_order_ref))
@@ -220,7 +236,8 @@ class WebReportService:
                 },
             )
             brand_bucket["total_orders"] = self._to_int(brand_bucket.get("total_orders")) + 1
-            brand_bucket["total_value_minor"] = self._to_int(brand_bucket.get("total_value_minor")) + order_total_minor
+            if is_revenue_eligible:
+                brand_bucket["total_value_minor"] = self._to_int(brand_bucket.get("total_value_minor")) + order_total_minor
             if is_closed:
                 brand_bucket["closed_orders"] = self._to_int(brand_bucket.get("closed_orders")) + 1
             if not is_waiting:
@@ -351,7 +368,9 @@ class WebReportService:
             reconcile_received,
             order_value_minor_by_ref=order_value_minor_by_ref,
         )
-        revenue_total_minor = self._extract_revenue_minor_from_aggs(aggs, fallback=order_value_total_minor)
+        # Pancake aggs includes orders that are still "Mới" or "Chờ xác nhận".
+        # Revenue must follow the confirmed-order rule used by Pancake's sales report.
+        revenue_total_minor = max(0, order_value_total_minor)
         revenue_total_thb = self._minor_to_thb_major(revenue_total_minor)
         revenue_total_vnd = self._thb_to_vnd(revenue_total_thb)
         ads_spend_vnd, fb_ig_spend_vnd, dropo_spend_vnd, dropo_spend_configured = (
@@ -1797,6 +1816,19 @@ class WebReportService:
             return True
         return False
 
+    def _is_revenue_eligible_status(
+        self,
+        *,
+        code: int | None,
+        label: str,
+        revenue_codes: set[int],
+        revenue_labels: set[str],
+    ) -> bool:
+        if code is not None and code in revenue_codes:
+            return True
+        normalized_label = self._normalize_text(label)
+        return bool(normalized_label and normalized_label in revenue_labels)
+
     def _is_returning_status(
         self,
         *,
@@ -2000,6 +2032,61 @@ class WebReportService:
             return None
         return dt.astimezone(tz)
 
+    def _extract_order_confirmation_datetime(
+        self,
+        order: dict[str, Any],
+        *,
+        tz: timezone | ZoneInfo,
+        revenue_codes: set[int],
+        revenue_labels: set[str],
+    ) -> datetime | None:
+        history = order.get("status_history")
+        if isinstance(history, list):
+            for event in history:
+                if not isinstance(event, dict):
+                    continue
+                event_code = self._extract_status_code(event)
+                event_label = str(
+                    event.get("status_name")
+                    or event.get("status_text")
+                    or event.get("status_label")
+                    or ""
+                ).strip()
+                if not self._is_revenue_eligible_status(
+                    code=event_code,
+                    label=event_label,
+                    revenue_codes=revenue_codes,
+                    revenue_labels=revenue_labels,
+                ):
+                    continue
+                for key in ("updated_at", "created_at", "createdAt", "timestamp"):
+                    dt = self._parse_datetime(event.get(key))
+                    if dt is not None:
+                        return dt.astimezone(tz)
+                    dt = self._parse_unix_datetime(event.get(key))
+                    if dt is not None:
+                        return dt.astimezone(tz)
+
+        for key in (
+            "confirmed_at",
+            "confirmedAt",
+            "confirmation_at",
+            "confirmationAt",
+            "confirm_at",
+            "confirmAt",
+            "confirmed_time",
+            "confirm_time",
+            "last_update_status_at",
+            "lastUpdateStatusAt",
+        ):
+            dt = self._parse_datetime(order.get(key))
+            if dt is not None:
+                return dt.astimezone(tz)
+            dt = self._parse_unix_datetime(order.get(key))
+            if dt is not None:
+                return dt.astimezone(tz)
+        return None
+
     def _load_status_map_config(self) -> dict[str, Any]:
         path = self.settings.web_report_status_map_config_path
         if not path.exists():
@@ -2025,6 +2112,22 @@ class WebReportService:
             "returning_status_labels": ["đang hoàn", "đã hoàn", "being_returned", "returned"],
             "shipping_status_codes": [2],
             "shipping_status_labels": ["đã gửi hàng", "dang giao", "shipping"],
+            "revenue_status_codes": [11, 12, 13, 20, 1, 8, 9, 2, 3, 16, 4, 15, 5],
+            "revenue_status_labels": [
+                "đã xác nhận",
+                "chờ hàng",
+                "chờ in",
+                "đã in",
+                "đã đặt hàng",
+                "đang đóng hàng",
+                "chờ chuyển hàng",
+                "đã gửi hàng",
+                "đã nhận",
+                "đã thu tiền",
+                "đang hoàn",
+                "hoàn một phần",
+                "đã hoàn",
+            ],
             "pending_reconcile_mode": "match_result",
             "pending_reconcile_td_success_statuses": ["success", "being_returned", "returned"],
             "pending_reconcile_td_order_shipping_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
@@ -2366,18 +2469,3 @@ class WebReportService:
             6: "Đã hủy",
             7: "Đã xóa",
         }
-
-    def _extract_revenue_minor_from_aggs(self, aggs: Any, *, fallback: int) -> int:
-        if not isinstance(aggs, dict):
-            return max(0, fallback)
-        cod_minor = self._extract_agg_metric_minor(aggs.get("cod"))
-        prepaid_minor = self._extract_agg_metric_minor(aggs.get("prepaid"))
-        total = cod_minor + prepaid_minor
-        if total > 0:
-            return total
-        return max(0, fallback)
-
-    def _extract_agg_metric_minor(self, raw_metric: Any) -> int:
-        if isinstance(raw_metric, dict):
-            raw_metric = raw_metric.get("value")
-        return max(0, self._to_int(raw_metric))

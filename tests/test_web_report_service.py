@@ -442,7 +442,7 @@ def test_size_uses_variation_fields_instead_of_size_object(tmp_path: Path) -> No
     assert row["sizes"] == {"S": 2}
 
 
-def test_revenue_total_prefers_aggs_snapshot_values(tmp_path: Path) -> None:
+def test_revenue_total_uses_confirmed_orders_instead_of_unfiltered_aggs(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     service = WebReportService(
         settings=settings,
@@ -471,9 +471,51 @@ def test_revenue_total_prefers_aggs_snapshot_values(tmp_path: Path) -> None:
 
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
-    assert snapshot["metrics"]["revenue_total_minor"] == 800_000
+    assert snapshot["metrics"]["revenue_total_minor"] == 1_000_000
     assert "THB" in snapshot["metrics"]["revenue_total_text"]
     assert "VNĐ" in snapshot["metrics"]["revenue_total_text"]
+
+
+def test_revenue_uses_first_confirmed_status_date_and_excludes_new_orders(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-NEW",
+                    "status": 0,
+                    "total_price": 250_000,
+                    "status_history": [{"status": 0, "updated_at": "2026-09-09T02:12:45"}],
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-CONFIRMED",
+                    "status": 1,
+                    "total_price": 470_000,
+                    "status_history": [
+                        {"status": 0, "updated_at": "2026-09-08T14:11:10"},
+                        {"status": 1, "updated_at": "2026-09-09T02:07:44"},
+                    ],
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-OLD",
+                    "status": 1,
+                    "total_price": 300_000,
+                    "status_history": [{"status": 1, "updated_at": "2026-09-08T02:00:00"}],
+                    "items": [],
+                },
+            ],
+            aggs={"cod": {"value": 720_000}},
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 9, 9))
+
+    assert snapshot["metrics"]["total_orders"] == 3
+    assert snapshot["metrics"]["revenue_total_minor"] == 470_000
 
 
 def test_snapshot_includes_ads_spend_for_selected_range(tmp_path: Path) -> None:
@@ -503,11 +545,7 @@ def test_snapshot_calculates_roas_from_vnd_revenue_and_ads_spend(tmp_path: Path)
         settings=settings,
         logger=logging.getLogger("test"),
         pancake_client=_FakePancakeClient(
-            [],
-            aggs={
-                "cod": {"value": 500_000},
-                "prepaid": {"value": 500_000},
-            },
+            [{"display_id": "JC-ROAS", "status": 1, "total_price": 1_000_000, "items": []}],
         ),
         meta_client=_FakeMetaClient(spend_vnd=1_630_000),
     )
@@ -548,9 +586,9 @@ def test_snapshot_breaks_down_revenue_and_cost_by_source(tmp_path: Path) -> None
         logger=logging.getLogger("test"),
         pancake_client=_FakePancakeClient(
             [
-                {"display_id": "FB-1", "ads_source": "Facebook", "total_price": 200_000, "items": []},
-                {"display_id": "IG-1", "p_utm_source": "ig", "total_price": 100_000, "items": []},
-                {"display_id": "DROPO-1", "note": "Nguồn: Dropo landing", "total_price": 100_000, "items": []},
+                {"display_id": "FB-1", "status": 1, "ads_source": "Facebook", "total_price": 200_000, "items": []},
+                {"display_id": "IG-1", "status": 1, "p_utm_source": "ig", "total_price": 100_000, "items": []},
+                {"display_id": "DROPO-1", "status": 1, "note": "Nguồn: Dropo landing", "total_price": 100_000, "items": []},
             ]
         ),
         meta_client=_FakeMetaClient(spend_vnd=163_000),
@@ -608,7 +646,7 @@ def test_snapshot_falls_back_to_legacy_pancake_orders_method(tmp_path: Path) -> 
             raise RuntimeError("snapshot unavailable")
 
         def fetch_all_orders_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
-            return [{"display_id": "JC-FALLBACK", "total_price": 100_000, "items": []}]
+            return [{"display_id": "JC-FALLBACK", "status": 1, "total_price": 100_000, "items": []}]
 
     service = WebReportService(
         settings=_dummy_settings(tmp_path),
