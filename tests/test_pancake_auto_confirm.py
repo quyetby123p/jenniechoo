@@ -8,6 +8,7 @@ from app.pancake_auto_confirm import (
     PancakeAutoConfirmService,
     STATUS_UPDATE_CONFIG,
     WAITING_CONFIRMATION_STATUS,
+    WAITING_STOCK_STATUS,
 )
 
 
@@ -69,10 +70,17 @@ def test_fetch_error_does_not_attempt_any_update() -> None:
     assert "temporary Pancake failure" in report["errors"][0]
 
 
-def test_product_not_ready_is_skipped_without_failing_workflow() -> None:
+def test_product_not_ready_moves_order_to_waiting_stock_without_failing_workflow() -> None:
     class NotReadyPancake(FakePancake):
+        def __init__(self, orders: list[dict[str, Any]]) -> None:
+            super().__init__(orders)
+            self.attempted_statuses: list[int] = []
+
         def update_order_status(self, order_id: str, status: int, *, update_cfg: dict[str, Any]) -> dict[str, Any]:
-            raise RuntimeError('Pancake API lỗi (422): {"message":"[status]: Chưa có thông tin sản phẩm"}')
+            self.attempted_statuses.append(status)
+            if status == CONFIRMED_STATUS:
+                raise RuntimeError('Pancake API lỗi (422): {"message":"[status]: Chưa có thông tin sản phẩm"}')
+            return super().update_order_status(order_id, status, update_cfg=update_cfg)
 
     pancake = NotReadyPancake(
         [{"id": "waiting", "custom_id": "JCT102", "status": WAITING_CONFIRMATION_STATUS}]
@@ -81,6 +89,8 @@ def test_product_not_ready_is_skipped_without_failing_workflow() -> None:
 
     assert report["ok"] is True
     assert report["updated"] == 0
-    assert report["skipped"] == 1
+    assert report["moved_to_waiting_stock"] == 1
+    assert report["skipped"] == 0
     assert report["failed"] == 0
-    assert len(report["skipped_reasons"]) == 1
+    assert pancake.attempted_statuses == [CONFIRMED_STATUS, WAITING_STOCK_STATUS]
+    assert [item["status"] for item in pancake.status_updates] == [WAITING_STOCK_STATUS]
