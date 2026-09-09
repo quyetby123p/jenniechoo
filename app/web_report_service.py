@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import logging
 from pathlib import Path
 import re
@@ -18,6 +18,11 @@ from app.utils import load_json, now_utc_iso
 
 class WebReportService:
     """Aggregate order/reporting data for the web dashboard."""
+
+    # Pancake's orders endpoint filters by creation time. A sale can be
+    # confirmed after creation, so revenue needs a short history window to
+    # find confirmations that happened inside the selected report period.
+    REVENUE_LOOKBACK_DAYS = 30
 
     def __init__(
         self,
@@ -117,10 +122,16 @@ class WebReportService:
             "other": {"order_count": 0, "revenue_total_minor": 0},
         }
         for order in orders:
-            total_orders += 1
-
             order_ref = self._extract_order_ref(order)
             order_created_dt = self._extract_order_datetime(order, tz=tz)
+            is_order_in_period = self._is_order_created_in_period(
+                order_created_dt,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if is_order_in_period:
+                total_orders += 1
+
             order_status_code = self._extract_status_code(order)
             order_status_label = self._extract_status_label(
                 order,
@@ -141,7 +152,7 @@ class WebReportService:
             )
             if is_revenue_eligible and order_confirmation_dt is not None:
                 is_revenue_eligible = start_date <= order_confirmation_dt.date() <= end_date
-            if order_status_code is not None:
+            if is_order_in_period and order_status_code is not None:
                 for ref in self._extract_order_identity_refs(order, fallback_ref=order_ref):
                     normalized_ref_key = self._normalize_text(ref)
                     if normalized_ref_key:
@@ -154,7 +165,7 @@ class WebReportService:
                 source_bucket["order_count"] += 1
                 source_bucket["revenue_total_minor"] += order_total_minor
             normalized_order_ref = self._normalize_text(order_ref)
-            if normalized_order_ref:
+            if is_order_in_period and normalized_order_ref:
                 existing_value = self._to_int(order_value_minor_by_ref.get(normalized_order_ref))
                 if order_total_minor > existing_value:
                     order_value_minor_by_ref[normalized_order_ref] = order_total_minor
@@ -185,9 +196,9 @@ class WebReportService:
                 is_waiting=is_waiting,
                 is_returning=is_returning,
             )
-            if is_closed:
+            if is_order_in_period and is_closed:
                 closed_orders += 1
-            if is_returning:
+            if is_order_in_period and is_returning:
                 returning_orders_count += 1
                 returning_value_minor += order_total_minor
                 returning_orders.append(
@@ -203,7 +214,7 @@ class WebReportService:
                         "order_total_text": self._fmt_currency(order_total_minor),
                     }
                 )
-            if is_shipping:
+            if is_order_in_period and is_shipping:
                 shipping_orders_count += 1
                 shipping_value_minor += order_total_minor
                 shipping_orders.append(
@@ -219,6 +230,9 @@ class WebReportService:
                         "order_total_text": self._fmt_currency(order_total_minor),
                     }
                 )
+            if not is_order_in_period and not is_revenue_eligible:
+                continue
+
             brand_bucket = brands.setdefault(
                 brand_slug,
                 {
@@ -235,12 +249,13 @@ class WebReportService:
                     "sku_rows": {},
                 },
             )
-            brand_bucket["total_orders"] = self._to_int(brand_bucket.get("total_orders")) + 1
+            if is_order_in_period:
+                brand_bucket["total_orders"] = self._to_int(brand_bucket.get("total_orders")) + 1
             if is_revenue_eligible:
                 brand_bucket["total_value_minor"] = self._to_int(brand_bucket.get("total_value_minor")) + order_total_minor
-            if is_closed:
+            if is_order_in_period and is_closed:
                 brand_bucket["closed_orders"] = self._to_int(brand_bucket.get("closed_orders")) + 1
-            if not is_waiting:
+            if not is_order_in_period or not is_waiting:
                 continue
 
             waiting_orders_count += 1
@@ -532,10 +547,11 @@ class WebReportService:
         return payload
 
     def _fetch_orders_and_aggs(self, *, start_date: date, end_date: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        query_start_date = start_date - timedelta(days=self.REVENUE_LOOKBACK_DAYS)
         if hasattr(self.pancake, "fetch_orders_snapshot_for_range"):
             try:
                 payload = self.pancake.fetch_orders_snapshot_for_range(  # type: ignore[attr-defined]
-                    start_date,
+                    query_start_date,
                     end_date,
                     self.settings.app_timezone,
                 )
@@ -552,13 +568,31 @@ class WebReportService:
                 return [item for item in orders if isinstance(item, dict)], aggs
 
         try:
-            orders = self.pancake.fetch_all_orders_for_range(start_date, end_date, self.settings.app_timezone)
+            orders = self.pancake.fetch_all_orders_for_range(
+                query_start_date,
+                end_date,
+                self.settings.app_timezone,
+            )
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Khong lay duoc don Pancake cho web report: %s", exc)
             orders = []
         if not isinstance(orders, list):
             orders = []
         return [item for item in orders if isinstance(item, dict)], {}
+
+    @staticmethod
+    def _is_order_created_in_period(
+        created_dt: datetime | None,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> bool:
+        """Keep operational counts scoped to creation date, not revenue lookback."""
+        if created_dt is None:
+            # Test doubles and legacy payloads may omit creation time. The API
+            # query already scoped those rows, so keep the historical behavior.
+            return True
+        return start_date <= created_dt.date() <= end_date
 
     def _fetch_ads_spend_vnd(self, *, start_date: date, end_date: date) -> int:
         if self.meta is None:

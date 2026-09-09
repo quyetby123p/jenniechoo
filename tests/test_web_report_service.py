@@ -518,6 +518,43 @@ def test_revenue_uses_first_confirmed_status_date_and_excludes_new_orders(tmp_pa
     assert snapshot["metrics"]["revenue_total_minor"] == 470_000
 
 
+def test_revenue_lookback_includes_order_confirmed_today_after_creation(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-OLD-CONFIRMED",
+                    "status": 13,
+                    "total_price": 470_000,
+                    "inserted_at": "2026-09-08T14:11:10",
+                    "status_history": [
+                        {"status": 1, "updated_at": "2026-09-09T02:07:44"},
+                        {"status": 13, "updated_at": "2026-09-09T04:24:05"},
+                    ],
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-NEW",
+                    "status": 0,
+                    "total_price": 250_000,
+                    "inserted_at": "2026-09-09T02:12:45",
+                    "status_history": [{"status": 0, "updated_at": "2026-09-09T02:12:45"}],
+                    "items": [],
+                },
+            ],
+            aggs={"cod": {"value": 720_000}},
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 9, 9))
+
+    assert snapshot["metrics"]["total_orders"] == 1
+    assert snapshot["metrics"]["revenue_total_minor"] == 470_000
+
+
 def test_snapshot_includes_ads_spend_for_selected_range(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     meta = _FakeMetaClient(spend_vnd=1_630_000)
