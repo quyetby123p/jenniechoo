@@ -64,7 +64,7 @@ pip install -r requirements.txt
 - `PANCAKE_API_KEY` (neu anh dang dung API key trong CRM > Cau hinh ung dung > Webhook va API Key)
 - `PANCAKE_SHOP_ID` (id cua shop Pancake POS)
 - `PANCAKE_PAGE_SIZE` (mac dinh `200`)
-- `REPORT_THB_TO_VND_RATE` (ty gia quy doi THB -> VND trong bao cao, mac dinh `810`)
+- `REPORT_THB_TO_VND_RATE` (ty gia quy doi THB -> VND trong bao cao, mac dinh `770`)
 - `REPORT_THB_MINOR_UNIT_FACTOR` (he so don vi tien THB tu API -> THB hien thi, mac dinh `100`)
 - `RECONCILE_COD_ENABLED` (bat/tat doi soat COD, mac dinh `0`)
 - `RECONCILE_COD_AUTO_ENABLED` (bat/tat lich doi soat COD tu dong, mac dinh `0`)

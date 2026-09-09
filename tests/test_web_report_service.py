@@ -44,6 +44,23 @@ class _FakeMetaClient:
         return {"spend_vnd": self.spend_vnd}
 
 
+class _FakeMetaInsightsClient:
+    def __init__(self, rows: list[dict]):
+        self.rows = rows
+        self.calls: list[tuple[date, date, str, int]] = []
+
+    def get_ad_insights_for_range(
+        self,
+        start_date: date,
+        end_date: date,
+        timezone_name: str,
+        *,
+        max_rows: int = 5000,
+    ):  # noqa: ANN001
+        self.calls.append((start_date, end_date, timezone_name, max_rows))
+        return self.rows
+
+
 class _FakeThaiDuongClient:
     def __init__(self, rows: list[dict]):
         self._rows = rows
@@ -425,7 +442,7 @@ def test_size_uses_variation_fields_instead_of_size_object(tmp_path: Path) -> No
     assert row["sizes"] == {"S": 2}
 
 
-def test_revenue_total_prefers_aggs_snapshot_values(tmp_path: Path) -> None:
+def test_revenue_total_uses_confirmed_orders_instead_of_unfiltered_aggs(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     service = WebReportService(
         settings=settings,
@@ -454,9 +471,88 @@ def test_revenue_total_prefers_aggs_snapshot_values(tmp_path: Path) -> None:
 
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
-    assert snapshot["metrics"]["revenue_total_minor"] == 800_000
+    assert snapshot["metrics"]["revenue_total_minor"] == 1_000_000
     assert "THB" in snapshot["metrics"]["revenue_total_text"]
     assert "VNĐ" in snapshot["metrics"]["revenue_total_text"]
+
+
+def test_revenue_uses_first_confirmed_status_date_and_excludes_new_orders(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-NEW",
+                    "status": 0,
+                    "total_price": 250_000,
+                    "status_history": [{"status": 0, "updated_at": "2026-09-09T02:12:45"}],
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-CONFIRMED",
+                    "status": 1,
+                    "total_price": 470_000,
+                    "status_history": [
+                        {"status": 0, "updated_at": "2026-09-08T14:11:10"},
+                        {"status": 1, "updated_at": "2026-09-09T02:07:44"},
+                    ],
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-OLD",
+                    "status": 1,
+                    "total_price": 300_000,
+                    "status_history": [{"status": 1, "updated_at": "2026-09-08T02:00:00"}],
+                    "items": [],
+                },
+            ],
+            aggs={"cod": {"value": 720_000}},
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 9, 9))
+
+    assert snapshot["metrics"]["total_orders"] == 3
+    assert snapshot["metrics"]["revenue_total_minor"] == 470_000
+
+
+def test_revenue_lookback_includes_order_confirmed_today_after_creation(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {
+                    "display_id": "JC-OLD-CONFIRMED",
+                    "status": 13,
+                    "total_price": 470_000,
+                    "inserted_at": "2026-09-08T14:11:10",
+                    "status_history": [
+                        {"status": 1, "updated_at": "2026-09-09T02:07:44"},
+                        {"status": 13, "updated_at": "2026-09-09T04:24:05"},
+                    ],
+                    "items": [],
+                },
+                {
+                    "display_id": "JC-NEW",
+                    "status": 0,
+                    "total_price": 250_000,
+                    "inserted_at": "2026-09-09T02:12:45",
+                    "status_history": [{"status": 0, "updated_at": "2026-09-09T02:12:45"}],
+                    "items": [],
+                },
+            ],
+            aggs={"cod": {"value": 720_000}},
+        ),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 9, 9))
+
+    assert snapshot["metrics"]["total_orders"] == 1
+    assert snapshot["metrics"]["revenue_total_minor"] == 470_000
 
 
 def test_snapshot_includes_ads_spend_for_selected_range(tmp_path: Path) -> None:
@@ -473,6 +569,8 @@ def test_snapshot_includes_ads_spend_for_selected_range(tmp_path: Path) -> None:
 
     assert snapshot["metrics"]["ads_spend_vnd"] == 1_630_000
     assert snapshot["metrics"]["ads_spend_vnd_text"] == "1,630,000"
+    assert snapshot["metrics"]["ads_cost_percent"] == 0.0
+    assert snapshot["metrics"]["ads_cost_percent_text"] == "0.00%"
     assert snapshot["metrics"]["roas"] == 0.0
     assert snapshot["metrics"]["roas_text"] == "0.00x"
     assert meta.calls == [(date(2026, 5, 1), date(2026, 5, 31), "Asia/Ho_Chi_Minh")]
@@ -484,11 +582,7 @@ def test_snapshot_calculates_roas_from_vnd_revenue_and_ads_spend(tmp_path: Path)
         settings=settings,
         logger=logging.getLogger("test"),
         pancake_client=_FakePancakeClient(
-            [],
-            aggs={
-                "cod": {"value": 500_000},
-                "prepaid": {"value": 500_000},
-            },
+            [{"display_id": "JC-ROAS", "status": 1, "total_price": 1_000_000, "items": []}],
         ),
         meta_client=_FakeMetaClient(spend_vnd=1_630_000),
     )
@@ -496,6 +590,8 @@ def test_snapshot_calculates_roas_from_vnd_revenue_and_ads_spend(tmp_path: Path)
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot["metrics"]["revenue_total_vnd"] == 8_150_000
+    assert snapshot["metrics"]["ads_cost_percent"] == 20.0
+    assert snapshot["metrics"]["ads_cost_percent_text"] == "20.00%"
     assert snapshot["metrics"]["roas"] == 5.0
     assert snapshot["metrics"]["roas_text"] == "5.00x"
 
@@ -527,9 +623,9 @@ def test_snapshot_breaks_down_revenue_and_cost_by_source(tmp_path: Path) -> None
         logger=logging.getLogger("test"),
         pancake_client=_FakePancakeClient(
             [
-                {"display_id": "FB-1", "ads_source": "Facebook", "total_price": 200_000, "items": []},
-                {"display_id": "IG-1", "p_utm_source": "ig", "total_price": 100_000, "items": []},
-                {"display_id": "DROPO-1", "note": "Nguồn: Dropo landing", "total_price": 100_000, "items": []},
+                {"display_id": "FB-1", "status": 1, "ads_source": "Facebook", "total_price": 200_000, "items": []},
+                {"display_id": "IG-1", "status": 1, "p_utm_source": "ig", "total_price": 100_000, "items": []},
+                {"display_id": "DROPO-1", "status": 1, "note": "Nguồn: Dropo landing", "total_price": 100_000, "items": []},
             ]
         ),
         meta_client=_FakeMetaClient(spend_vnd=163_000),
@@ -547,6 +643,58 @@ def test_snapshot_breaks_down_revenue_and_cost_by_source(tmp_path: Path) -> None
     assert sources["dropo"]["cost_vnd"] == 81_500
     assert sources["dropo"]["cost_percent_text"] == "10.00%"
     assert "other" not in sources
+
+
+def test_snapshot_splits_meta_cost_by_campaign_name(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    meta = _FakeMetaInsightsClient(
+        [
+            {"campaign_name": "ADS JC Catalog", "spend": "100000"},
+            {"campaign_name": "ADS web Dropo", "spend": "81500"},
+            {"campaign_name": "ADS FB Retarget", "spend": "50000"},
+        ]
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient(
+            [
+                {"display_id": "JC-1", "ads_source": "Facebook", "total_price": 200_000, "items": []},
+                {"display_id": "VX-1", "ads_source": "Dropo", "total_price": 100_000, "items": []},
+            ]
+        ),
+        meta_client=meta,
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+    sources = {source["key"]: source for source in snapshot["source_breakdown"]}
+
+    assert snapshot["metrics"]["ads_spend_vnd"] == 231_500
+    assert sources["fb_ig"]["cost_vnd"] == 150_000
+    assert sources["dropo"]["cost_vnd"] == 81_500
+    assert sources["dropo"]["cost_configured"] is True
+    assert "chứa 'web'" in sources["dropo"]["cost_note"]
+    assert meta.calls == [(date(2026, 6, 1), date(2026, 6, 1), "Asia/Ho_Chi_Minh", 5000)]
+
+
+def test_snapshot_falls_back_to_legacy_pancake_orders_method(tmp_path: Path) -> None:
+    class SnapshotFailurePancake:
+        def fetch_orders_snapshot_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
+            raise RuntimeError("snapshot unavailable")
+
+        def fetch_all_orders_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
+            return [{"display_id": "JC-FALLBACK", "status": 1, "total_price": 100_000, "items": []}]
+
+    service = WebReportService(
+        settings=_dummy_settings(tmp_path),
+        logger=logging.getLogger("test"),
+        pancake_client=SnapshotFailurePancake(),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["total_orders"] == 1
+    assert snapshot["metrics"]["revenue_total_minor"] == 100_000
 
 
 def test_snapshot_stays_available_when_pancake_is_unavailable(tmp_path: Path) -> None:
@@ -1000,6 +1148,103 @@ def test_pending_reconcile_uses_thai_duong_order_list_and_pancake_shipping_statu
     assert {row["display_ref"] for row in rows} == {"THA356_PENDING_SUCCESS", "THA356_PENDING_RETURN"}
     assert fake_td.calls[0]["extra_filters"] == {"partnerCode": "THA356"}
     assert fake_pancake.detail_calls == ["p_success", "p_return", "p_received"]
+
+
+def test_reconcile_received_uses_live_cashflow_rows_mapped_to_pancake(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    dump_json(
+        settings.pancake_td_sync_config_path,
+        {
+            "thai_duong": {
+                "order_lookup_endpoint": {
+                    "method": "POST",
+                    "path": "/api/v1/orders/list",
+                    "result_path": "data.data",
+                },
+                "order_lookup_filters": {"partnerCode": "THA356"},
+            }
+        },
+    )
+    status_map_path = settings.web_report_status_map_config_path
+    dump_json(
+        status_map_path,
+        {
+            "reconcile_received_live_enabled": True,
+            "reconcile_received_live_td_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
+            "brand_rules": [],
+        },
+    )
+    fake_td = _FakeThaiDuongClient(
+        [
+            {
+                "orderUID": "THA-RECEIVED-1",
+                "pancakeOrderId": "JC-RECEIVED-1",
+                "shippingOrderCode": "AWB-RECEIVED-1",
+                "shippingOrderStatus": "SUCCESS",
+                "codPaymentDate": "2026-06-01",
+                "cod": 3700,
+            },
+            {
+                "orderUID": "THA-RECEIVED-2",
+                "pancakeOrderId": "JC-RECEIVED-2",
+                "shippingOrderCode": "AWB-RECEIVED-2",
+                "shippingOrderStatus": "BEING_RETURNED",
+                "codPaymentDate": "2026-06-02T00:00:00+00:00",
+                "cod": 2400,
+            },
+            {
+                "orderUID": "THA-RECEIVED-3",
+                "pancakeOrderId": "JC-RECEIVED-3",
+                "shippingOrderCode": "AWB-RECEIVED-3",
+                "shippingOrderStatus": "RETURNED",
+                "codPaymentDate": "2026-06-03",
+                "cod": 1900,
+            },
+            {
+                "orderUID": "THA-NO-MAP",
+                "shippingOrderCode": "AWB-NO-MAP",
+                "shippingOrderStatus": "SUCCESS",
+                "codPaymentDate": "2026-06-03",
+                "cod": 9999,
+            },
+            {
+                "orderUID": "THA-COMPLAINT",
+                "pancakeOrderId": "JC-COMPLAINT",
+                "shippingOrderStatus": "COMPLAINT",
+                "codPaymentDate": "2026-06-03",
+                "cod": 9999,
+            },
+            {
+                "orderUID": "THA-OUTSIDE",
+                "pancakeOrderId": "JC-OUTSIDE",
+                "shippingOrderStatus": "SUCCESS",
+                "codPaymentDate": "2026-06-04",
+                "cod": 9999,
+            },
+        ]
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+        thai_duong_client=fake_td,  # type: ignore[arg-type]
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1), date(2026, 6, 3))
+    rows = snapshot["status_lists"]["reconcile-received"]
+
+    assert snapshot["metrics"]["reconcile_received_orders"] == 3
+    assert snapshot["metrics"]["reconcile_received_value_minor"] == 800_000
+    assert {row["pancake_order_ref"] for row in rows} == {
+        "JC-RECEIVED-1",
+        "JC-RECEIVED-2",
+        "JC-RECEIVED-3",
+    }
+    assert fake_td.calls[-1]["extra_filters"] == {
+        "partnerCode": "THA356",
+        "paymentCodDateFrom": "2026-06-01",
+        "paymentCodDateTo": "2026-06-03",
+    }
 
 
 def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) -> None:

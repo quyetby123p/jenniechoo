@@ -43,6 +43,14 @@ COL_SYNC_STATUS = "Sync status"
 SKIP_PREFIX = "BỎ QUA"
 HANOI_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
+# Giá SALE của storefront Jennie Choo: tính theo từng sản phẩm, giảm 15% và
+# cắt phần lẻ THB để khớp cách hiển thị trên checkout (2,298 → giảm 344 → 1,954).
+SALE_PERCENT = 15
+SALE_PRODUCT_CODES = frozenset({
+    "JC-A-146", "JC-V-143", "JC-A-158", "JC-Q-158",
+    "JC-V-145", "JC-V-123", "JC-V-236",
+})
+
 # Bắt mã dạng VXV002-DEN-M / VXV008-XANH MINT-XL, chấp nhận hậu tố lô "-B1".
 SKU_PATTERN = re.compile(
     r"VXV\d{3}-[^()·|,]+?-(?:XXL|XL|L|M)(?=-B\d+|[\s)·|,]|$)",
@@ -485,7 +493,10 @@ class DropoPancakeBridge:
             item: dict[str, Any] = {
                 "variation_id": chosen["variation_id"],
                 "quantity": quantity,
-                "variation_info": {"sku": chosen.get("variation_sku") or code},
+                "variation_info": {
+                    "sku": chosen.get("variation_sku") or code,
+                    "product_code": code,
+                },
             }
             if retail > 0:
                 item["variation_info"]["retail_price"] = retail
@@ -523,10 +534,42 @@ class DropoPancakeBridge:
                 "quantity": qty,
                 "variation_info": {"sku": sku},
             }
+            product_code = self._normalize_jennie_code(entry.get("product_code"))
+            if product_code in SALE_PRODUCT_CODES:
+                item["variation_info"]["product_code"] = product_code
             if retail > 0:
                 item["variation_info"]["retail_price"] = retail
             items.append(item)
         return items
+
+    @classmethod
+    def _item_product_code(cls, item: dict[str, Any]) -> str:
+        info = item.get("variation_info") or {}
+        direct = cls._normalize_jennie_code(info.get("product_code"))
+        if re.fullmatch(r"JC-[A-Z]+-\d+", direct):
+            return direct
+        raw_sku = str(info.get("sku") or "").upper().strip()
+        match = re.match(r"(JC-[A-Z]+-\d+)(?:-|$)", raw_sku)
+        return match.group(1) if match else ""
+
+    @classmethod
+    def _sale_discount_minor(cls, items: list[dict[str, Any]]) -> int:
+        """Tính giảm SALE theo từng dòng hàng, đơn vị Pancake là minor."""
+        total = 0
+        for item in items:
+            info = item.get("variation_info") or {}
+            retail_minor = cls._to_int(info.get("retail_price"))
+            quantity = cls._to_int(item.get("quantity"))
+            if retail_minor <= 0 or quantity <= 0:
+                continue
+            if cls._item_product_code(item) not in SALE_PRODUCT_CODES:
+                continue
+            # Retail price của Pancake là THB × 100. Cắt phần lẻ ở THB trước
+            # khi nhân 15%, đúng với storefront đã hiển thị số nguyên.
+            retail_thb = retail_minor // 100
+            discount_thb = retail_thb * SALE_PERCENT // 100
+            total += discount_thb * 100 * quantity
+        return total
 
     def _order_discount_minor(self, items: list[dict[str, Any]], total_minor: int) -> int:
         """Khuyến mãi Bundle tính ở cấp đơn: tổng giá niêm yết trừ đi số khách trả.
@@ -542,11 +585,11 @@ class DropoPancakeBridge:
         )
         if subtotal <= 0 or total_minor <= 0:
             return 0
-        discount = subtotal - total_minor
-        if discount <= 0:
-            # Khách trả bằng hoặc cao hơn giá niêm yết -> không giảm gì.
-            # Tuyệt đối không trả số âm, Pancake sẽ hiểu thành cộng thêm tiền.
-            return 0
+        inferred = subtotal - total_minor
+        sale_discount = self._sale_discount_minor(items)
+        if inferred <= 0:
+            return sale_discount
+        discount = max(sale_discount, inferred)
         if discount >= subtotal:
             # Giảm bằng cả đơn = biếu không. Gần như chắc chắn dữ liệu sai.
             self.logger.error(
@@ -635,6 +678,18 @@ class DropoPancakeBridge:
             else self._build_custom_id(get("Thời gian", "created_at", "time"), phone)
         )
 
+        total_discount = self._order_discount_minor(items, total_minor)
+        subtotal = sum(
+            self._to_int(i.get("variation_info", {}).get("retail_price"))
+            * self._to_int(i.get("quantity"))
+            for i in items
+        )
+        # Nếu landing cũ chưa biết SALE hoặc khách sửa tổng tiền, vẫn ép giá
+        # phải thu về đúng mức giảm tối thiểu của các mã SALE.
+        effective_total = total_minor
+        if subtotal > 0 and total_discount > 0:
+            effective_total = subtotal - total_discount
+
         payload: dict[str, Any] = {
             # Khoá định danh suy ra từ chính dữ liệu lead (thời gian + đuôi SĐT),
             # ổn định qua mọi lần chạy. Nếu có đơn trùng lọt vào Pancake thì vẫn
@@ -650,8 +705,8 @@ class DropoPancakeBridge:
             "shipping_fee": 0,
             # Pancake dùng đơn vị nhỏ (849 THB -> 84900). Gửi số thô 849 thì đơn
             # sẽ mang giá trị 8,49 THB.
-            "total_price": total_minor,
-            "total_discount": self._order_discount_minor(items, total_minor),
+            "total_price": effective_total,
+            "total_discount": total_discount,
             "currency": str(get("Currency", "Tiền tệ", "currency_code") or "THB").strip(),
         }
         if self.config.warehouse_id:

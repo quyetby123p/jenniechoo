@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import logging
 from pathlib import Path
 import re
@@ -19,6 +19,11 @@ from app.utils import load_json, now_utc_iso
 class WebReportService:
     """Aggregate order/reporting data for the web dashboard."""
 
+    # Pancake's orders endpoint filters by creation time. A sale can be
+    # confirmed after creation, so revenue needs a short history window to
+    # find confirmations that happened inside the selected report period.
+    REVENUE_LOOKBACK_DAYS = 30
+
     def __init__(
         self,
         settings: Settings,
@@ -33,6 +38,7 @@ class WebReportService:
         self.meta = meta_client
         self.thai_duong = thai_duong_client
         self._cache_lock = Lock()
+        self._snapshot_build_lock = Lock()
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._cashflow_refs_cache: tuple[float, set[str]] | None = None
 
@@ -47,10 +53,19 @@ class WebReportService:
                 if now_ts - cached_ts < float(self.settings.web_report_refresh_seconds):
                     return payload
 
-        payload = self._build_snapshot(period_start, period_end)
-        with self._cache_lock:
-            self._cache[key] = (time.time(), payload)
-        return payload
+        # Prevent concurrent tabs from multiplying live API calls for one period.
+        with self._snapshot_build_lock:
+            now_ts = time.time()
+            with self._cache_lock:
+                cached = self._cache.get(key)
+                if cached is not None:
+                    cached_ts, payload = cached
+                    if now_ts - cached_ts < float(self.settings.web_report_refresh_seconds):
+                        return payload
+            payload = self._build_snapshot(period_start, period_end)
+            with self._cache_lock:
+                self._cache[key] = (time.time(), payload)
+            return payload
 
     @staticmethod
     def _normalize_period(start_date: date, end_date: date | None) -> tuple[date, date]:
@@ -71,10 +86,12 @@ class WebReportService:
         returning_labels = self._to_text_set(status_cfg.get("returning_status_labels", ["đang hoàn", "hoàn"]))
         shipping_codes = self._to_int_set(status_cfg.get("shipping_status_codes", [2]))
         shipping_labels = self._to_text_set(status_cfg.get("shipping_status_labels", ["đã gửi hàng", "dang giao"]))
+        revenue_codes = self._to_int_set(status_cfg.get("revenue_status_codes", []))
+        revenue_labels = self._to_text_set(status_cfg.get("revenue_status_labels", []))
         status_code_labels = self._build_status_code_label_map(status_cfg)
         brand_rules = status_cfg.get("brand_rules", [])
 
-        orders, aggs = self._fetch_orders_and_aggs(start_date=start_date, end_date=end_date)
+        orders, _aggs = self._fetch_orders_and_aggs(start_date=start_date, end_date=end_date)
         if not isinstance(orders, list):
             orders = []
         orders = [item for item in orders if isinstance(item, dict)]
@@ -104,31 +121,51 @@ class WebReportService:
             "dropo": {"order_count": 0, "revenue_total_minor": 0},
             "other": {"order_count": 0, "revenue_total_minor": 0},
         }
-
         for order in orders:
-            total_orders += 1
-
             order_ref = self._extract_order_ref(order)
             order_created_dt = self._extract_order_datetime(order, tz=tz)
+            is_order_in_period = self._is_order_created_in_period(
+                order_created_dt,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if is_order_in_period:
+                total_orders += 1
+
             order_status_code = self._extract_status_code(order)
             order_status_label = self._extract_status_label(
                 order,
                 status_code=order_status_code,
                 status_code_labels=status_code_labels,
             )
-            if order_status_code is not None:
+            order_confirmation_dt = self._extract_order_confirmation_datetime(
+                order,
+                tz=tz,
+                revenue_codes=revenue_codes,
+                revenue_labels=revenue_labels,
+            )
+            is_revenue_eligible = self._is_revenue_eligible_status(
+                code=order_status_code,
+                label=order_status_label,
+                revenue_codes=revenue_codes,
+                revenue_labels=revenue_labels,
+            )
+            if is_revenue_eligible and order_confirmation_dt is not None:
+                is_revenue_eligible = start_date <= order_confirmation_dt.date() <= end_date
+            if is_order_in_period and order_status_code is not None:
                 for ref in self._extract_order_identity_refs(order, fallback_ref=order_ref):
                     normalized_ref_key = self._normalize_text(ref)
                     if normalized_ref_key:
                         pancake_status_code_by_ref[normalized_ref_key] = order_status_code
             order_total_minor = self._extract_order_total_minor(order)
-            order_value_total_minor += order_total_minor
             source_key = self._classify_order_source(order)
             source_bucket = source_totals[source_key]
-            source_bucket["order_count"] += 1
-            source_bucket["revenue_total_minor"] += order_total_minor
+            if is_revenue_eligible:
+                order_value_total_minor += order_total_minor
+                source_bucket["order_count"] += 1
+                source_bucket["revenue_total_minor"] += order_total_minor
             normalized_order_ref = self._normalize_text(order_ref)
-            if normalized_order_ref:
+            if is_order_in_period and normalized_order_ref:
                 existing_value = self._to_int(order_value_minor_by_ref.get(normalized_order_ref))
                 if order_total_minor > existing_value:
                     order_value_minor_by_ref[normalized_order_ref] = order_total_minor
@@ -159,9 +196,9 @@ class WebReportService:
                 is_waiting=is_waiting,
                 is_returning=is_returning,
             )
-            if is_closed:
+            if is_order_in_period and is_closed:
                 closed_orders += 1
-            if is_returning:
+            if is_order_in_period and is_returning:
                 returning_orders_count += 1
                 returning_value_minor += order_total_minor
                 returning_orders.append(
@@ -177,7 +214,7 @@ class WebReportService:
                         "order_total_text": self._fmt_currency(order_total_minor),
                     }
                 )
-            if is_shipping:
+            if is_order_in_period and is_shipping:
                 shipping_orders_count += 1
                 shipping_value_minor += order_total_minor
                 shipping_orders.append(
@@ -193,6 +230,9 @@ class WebReportService:
                         "order_total_text": self._fmt_currency(order_total_minor),
                     }
                 )
+            if not is_order_in_period and not is_revenue_eligible:
+                continue
+
             brand_bucket = brands.setdefault(
                 brand_slug,
                 {
@@ -209,11 +249,13 @@ class WebReportService:
                     "sku_rows": {},
                 },
             )
-            brand_bucket["total_orders"] = self._to_int(brand_bucket.get("total_orders")) + 1
-            brand_bucket["total_value_minor"] = self._to_int(brand_bucket.get("total_value_minor")) + order_total_minor
-            if is_closed:
+            if is_order_in_period:
+                brand_bucket["total_orders"] = self._to_int(brand_bucket.get("total_orders")) + 1
+            if is_revenue_eligible:
+                brand_bucket["total_value_minor"] = self._to_int(brand_bucket.get("total_value_minor")) + order_total_minor
+            if is_order_in_period and is_closed:
                 brand_bucket["closed_orders"] = self._to_int(brand_bucket.get("closed_orders")) + 1
-            if not is_waiting:
+            if not is_order_in_period or not is_waiting:
                 continue
 
             waiting_orders_count += 1
@@ -320,7 +362,17 @@ class WebReportService:
             pending_reconcile = reconcile_summary.get("pending_rows", [])
         else:
             pending_reconcile = thai_duong_order_pending_reconcile
-        reconcile_received = reconcile_summary.get("received_rows", [])
+        thai_duong_order_reconcile_received = self._load_thai_duong_order_reconcile_received_rows(
+            start_date=start_date,
+            end_date=end_date,
+            status_cfg=status_cfg,
+            order_value_minor_by_ref=order_value_minor_by_ref,
+            tz=tz,
+        )
+        if thai_duong_order_reconcile_received is None:
+            reconcile_received = reconcile_summary.get("received_rows", [])
+        else:
+            reconcile_received = thai_duong_order_reconcile_received
         pending_reconcile_orders = self._count_unique_reconcile_order_refs(pending_reconcile)
         reconcile_received_orders = self._count_unique_reconcile_order_refs(reconcile_received)
         pending_reconcile_value_minor = self._sum_reconcile_rows_value_minor(
@@ -331,19 +383,23 @@ class WebReportService:
             reconcile_received,
             order_value_minor_by_ref=order_value_minor_by_ref,
         )
-        revenue_total_minor = self._extract_revenue_minor_from_aggs(aggs, fallback=order_value_total_minor)
+        # Pancake aggs includes orders that are still "Mới" or "Chờ xác nhận".
+        # Revenue must follow the confirmed-order rule used by Pancake's sales report.
+        revenue_total_minor = max(0, order_value_total_minor)
         revenue_total_thb = self._minor_to_thb_major(revenue_total_minor)
         revenue_total_vnd = self._thb_to_vnd(revenue_total_thb)
-        ads_spend_vnd = self._fetch_ads_spend_vnd(start_date=start_date, end_date=end_date)
-        roas = self._calculate_roas(revenue_total_vnd, ads_spend_vnd)
-        dropo_spend_vnd, dropo_spend_configured = self._fetch_configured_source_spend_vnd(
-            source_key="dropo",
-            start_date=start_date,
-            end_date=end_date,
+        ads_spend_vnd, fb_ig_spend_vnd, dropo_spend_vnd, dropo_spend_configured = (
+            self._fetch_ads_spend_breakdown_vnd(
+                start_date=start_date,
+                end_date=end_date,
+                status_cfg=status_cfg,
+            )
         )
+        roas = self._calculate_roas(revenue_total_vnd, ads_spend_vnd)
+        ads_cost_percent = self._calculate_cost_percent(revenue_total_vnd, ads_spend_vnd)
         source_breakdown = self._build_source_breakdown(
             source_totals=source_totals,
-            fb_ig_spend_vnd=ads_spend_vnd,
+            fb_ig_spend_vnd=fb_ig_spend_vnd,
             dropo_spend_vnd=dropo_spend_vnd,
             dropo_spend_configured=dropo_spend_configured,
         )
@@ -434,6 +490,8 @@ class WebReportService:
                 "revenue_total_vnd_text": self._fmt_vnd_amount(revenue_total_vnd),
                 "ads_spend_vnd": ads_spend_vnd,
                 "ads_spend_vnd_text": self._fmt_vnd_amount(ads_spend_vnd),
+                "ads_cost_percent": ads_cost_percent,
+                "ads_cost_percent_text": self._fmt_percent(ads_cost_percent),
                 "roas": roas,
                 "roas_text": self._fmt_roas(roas),
                 "exchange_rate_thb_to_vnd": float(self.settings.report_thb_to_vnd_rate),
@@ -489,14 +547,16 @@ class WebReportService:
         return payload
 
     def _fetch_orders_and_aggs(self, *, start_date: date, end_date: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        query_start_date = start_date - timedelta(days=self.REVENUE_LOOKBACK_DAYS)
         if hasattr(self.pancake, "fetch_orders_snapshot_for_range"):
             try:
                 payload = self.pancake.fetch_orders_snapshot_for_range(  # type: ignore[attr-defined]
-                    start_date,
+                    query_start_date,
                     end_date,
                     self.settings.app_timezone,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Khong lay duoc snapshot don Pancake cho web report: %s", exc)
                 payload = None
             if isinstance(payload, dict):
                 orders = payload.get("orders", [])
@@ -508,13 +568,31 @@ class WebReportService:
                 return [item for item in orders if isinstance(item, dict)], aggs
 
         try:
-            orders = self.pancake.fetch_all_orders_for_range(start_date, end_date, self.settings.app_timezone)
+            orders = self.pancake.fetch_all_orders_for_range(
+                query_start_date,
+                end_date,
+                self.settings.app_timezone,
+            )
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Khong lay duoc don Pancake cho web report: %s", exc)
             orders = []
         if not isinstance(orders, list):
             orders = []
         return [item for item in orders if isinstance(item, dict)], {}
+
+    @staticmethod
+    def _is_order_created_in_period(
+        created_dt: datetime | None,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> bool:
+        """Keep operational counts scoped to creation date, not revenue lookback."""
+        if created_dt is None:
+            # Test doubles and legacy payloads may omit creation time. The API
+            # query already scoped those rows, so keep the historical behavior.
+            return True
+        return start_date <= created_dt.date() <= end_date
 
     def _fetch_ads_spend_vnd(self, *, start_date: date, end_date: date) -> int:
         if self.meta is None:
@@ -532,6 +610,70 @@ class WebReportService:
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Khong lay duoc chi phi Ads cho web report: %s", exc)
             return 0
+
+    def _fetch_ads_spend_breakdown_vnd(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        status_cfg: dict[str, Any],
+    ) -> tuple[int, int, int, bool]:
+        """Return total, FB/IG, Dropo spend and whether the split is authoritative."""
+        if self.meta is None:
+            return 0, 0, 0, False
+
+        dropo_markers = self._to_text_set(
+            status_cfg.get("dropo_campaign_name_markers", ["web"])
+        ) or {"web"}
+        if hasattr(self.meta, "get_ad_insights_for_range"):
+            try:
+                rows = self.meta.get_ad_insights_for_range(  # type: ignore[attr-defined]
+                    start_date,
+                    end_date,
+                    self.settings.app_timezone,
+                    max_rows=5000,
+                )
+                if isinstance(rows, list):
+                    fb_ig_spend_vnd = 0
+                    dropo_spend_vnd = 0
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        campaign = row.get("campaign")
+                        campaign_name = (
+                            str(campaign.get("name", "")).strip()
+                            if isinstance(campaign, dict)
+                            else str(row.get("campaign_name", "")).strip()
+                        )
+                        spend_vnd = max(0, self._to_int(row.get("spend")))
+                        if any(
+                            marker in self._normalize_text(campaign_name)
+                            for marker in dropo_markers
+                        ):
+                            dropo_spend_vnd += spend_vnd
+                        else:
+                            fb_ig_spend_vnd += spend_vnd
+                    return (
+                        fb_ig_spend_vnd + dropo_spend_vnd,
+                        fb_ig_spend_vnd,
+                        dropo_spend_vnd,
+                        True,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Khong tach duoc chi phi Ads theo campaign: %s", exc)
+
+        account_spend_vnd = self._fetch_ads_spend_vnd(start_date=start_date, end_date=end_date)
+        dropo_spend_vnd, dropo_spend_configured = self._fetch_configured_source_spend_vnd(
+            source_key="dropo",
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return (
+            account_spend_vnd + dropo_spend_vnd,
+            account_spend_vnd,
+            dropo_spend_vnd,
+            dropo_spend_configured,
+        )
 
     def _load_thai_duong_order_pending_reconcile_rows(
         self,
@@ -652,6 +794,117 @@ class WebReportService:
             )
         )
 
+    def _load_thai_duong_order_reconcile_received_rows(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        status_cfg: dict[str, Any],
+        order_value_minor_by_ref: dict[str, int],
+        tz: timezone | ZoneInfo,
+    ) -> list[dict[str, Any]] | None:
+        """Load paid Dòng tiền rows that are mapped to Pancake orders."""
+        if not self._config_bool(status_cfg.get("reconcile_received_live_enabled"), default=False):
+            return None
+        if self.thai_duong is None or not hasattr(self.thai_duong, "fetch_orders_for_sync"):
+            return None
+
+        sync_cfg = self._load_pancake_td_sync_config()
+        td_cfg = sync_cfg.get("thai_duong", {}) if isinstance(sync_cfg.get("thai_duong"), dict) else {}
+        endpoint_cfg = td_cfg.get("order_lookup_endpoint", {}) if isinstance(td_cfg, dict) else {}
+        if not isinstance(endpoint_cfg, dict) or not endpoint_cfg:
+            return None
+
+        filters = dict(self._thai_duong_lookup_filters(td_cfg))
+        filters["paymentCodDateFrom"] = start_date.isoformat()
+        filters["paymentCodDateTo"] = end_date.isoformat()
+        try:
+            rows = self.thai_duong.fetch_orders_for_sync(  # type: ignore[attr-defined]
+                endpoint_cfg,
+                search_text="",
+                extra_filters=filters,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Khong lay duoc Dong tien Thai Duong live cho web report: %s", exc)
+            return None
+        if not isinstance(rows, list):
+            return []
+
+        eligible_td_statuses = self._to_text_set(
+            status_cfg.get(
+                "reconcile_received_live_td_statuses",
+                ["SUCCESS", "BEING_RETURNED", "RETURNED"],
+            )
+        )
+        if not eligible_td_statuses:
+            eligible_td_statuses = self._to_text_set(["SUCCESS", "BEING_RETURNED", "RETURNED"])
+
+        received_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            payment_dt = self._extract_thai_duong_payment_datetime(row, tz=tz)
+            if payment_dt is None or not (start_date <= payment_dt.date() <= end_date):
+                continue
+
+            td_status_raw = self._extract_first_text(row, self._thai_duong_shipping_status_fields())
+            td_status = self._normalize_text(td_status_raw)
+            if td_status not in eligible_td_statuses:
+                continue
+
+            pancake_order_id = self._extract_first_text(
+                row,
+                ("pancakeOrderId", "pancake_order_id", "pancakeOrderID", "pancakeId", "pancake_id"),
+            )
+            if not pancake_order_id:
+                continue
+
+            td_cod_minor = self._extract_thai_duong_order_cod_minor(
+                row,
+                order_value_minor_by_ref=order_value_minor_by_ref,
+                pancake_order_id=pancake_order_id,
+            )
+            td_awb = self._extract_first_text(
+                row,
+                ("shippingOrderCode", "awb", "trackingCode", "tracking_code", "tracking_number"),
+            )
+            order_uid = self._extract_first_text(row, ("orderUID", "orderUid", "order_uid", "code", "id"))
+            customer_name = self._extract_first_text(
+                row,
+                ("buyerName", "customerName", "customer_name", "name", "receiverName", "receiver_name"),
+            )
+            received_rows.append(
+                {
+                    "pancake_order_ref": pancake_order_id,
+                    "reconcile_ref": pancake_order_id,
+                    "display_ref": pancake_order_id or order_uid or td_awb,
+                    "match_result": "thai_duong_cashflow_received",
+                    "reason": "Đã có trong Dòng tiền Thái Dương và đã map Pancake.",
+                    "td_awb": td_awb,
+                    "td_status": td_status_raw,
+                    "customer_name": customer_name,
+                    "settlement_date": payment_dt.date().isoformat(),
+                    "created_at": self._format_dt(payment_dt, tz=tz),
+                    "created_ts": self._to_ts(payment_dt),
+                    "td_cod_minor": td_cod_minor,
+                    "td_cod_thb_text": self._fmt_thb_amount(self._minor_to_thb_major(td_cod_minor)),
+                    "td_cod_vnd_text": self._fmt_vnd_amount(
+                        self._thb_to_vnd(self._minor_to_thb_major(td_cod_minor))
+                    ),
+                }
+            )
+
+        return self._dedupe_reconcile_rows(
+            sorted(
+                received_rows,
+                key=lambda item: (
+                    str(item.get("settlement_date", "")),
+                    str(item.get("display_ref", "")),
+                ),
+                reverse=True,
+            )
+        )
+
     def _load_pancake_td_sync_config(self) -> dict[str, Any]:
         payload = self._safe_read_json(self.settings.pancake_td_sync_config_path)
         return payload if isinstance(payload, dict) else {}
@@ -681,6 +934,20 @@ class WebReportService:
             "order_date",
             "insertedAt",
             "sendOrderDate",
+        ):
+            dt = self._parse_datetime(row.get(field))
+            if dt is not None:
+                return dt.astimezone(tz)
+        return None
+
+    def _extract_thai_duong_payment_datetime(self, row: dict[str, Any], *, tz: timezone | ZoneInfo) -> datetime | None:
+        for field in (
+            "codPaymentDate",
+            "paymentCodDate",
+            "cod_payment_date",
+            "Ngay doi soat",
+            "settlementDate",
+            "settlement_date",
         ):
             dt = self._parse_datetime(row.get(field))
             if dt is not None:
@@ -877,7 +1144,21 @@ class WebReportService:
         order_value_minor_by_ref: dict[str, int],
         pancake_order_id: str,
     ) -> int:
-        for field in ("cod", "codAmount", "cod_amount", "totalAmount", "amount", "orderTotal"):
+        for field in (
+            "cod",
+            "COD",
+            "codAmount",
+            "cod_amount",
+            "Tien COD",
+            "codFromCustomer",
+            "codTransferred",
+            "cod_transfered",
+            "collectedCod",
+            "collected_cod",
+            "totalAmount",
+            "amount",
+            "orderTotal",
+        ):
             value = row.get(field)
             if value is None:
                 continue
@@ -1359,13 +1640,21 @@ class WebReportService:
         dropo_spend_configured: bool,
     ) -> list[dict[str, Any]]:
         source_specs = (
-            ("fb_ig", "FB/IG", max(0, fb_ig_spend_vnd), True, "Chi phí lấy từ Meta Ads"),
+            (
+                "fb_ig",
+                "FB/IG",
+                max(0, fb_ig_spend_vnd),
+                True,
+                "Chi phí Meta Ads của campaign không chứa 'web'",
+            ),
             (
                 "dropo",
                 "Dropo",
                 max(0, dropo_spend_vnd),
                 dropo_spend_configured,
-                "Chi phí theo bảng ngày Dropo" if dropo_spend_configured else "Chưa cấu hình chi phí Dropo",
+                "Chi phí Meta Ads của campaign chứa 'web'"
+                if dropo_spend_configured
+                else "Chưa lấy được chi phí campaign Dropo",
             ),
         )
         result: list[dict[str, Any]] = []
@@ -1560,6 +1849,19 @@ class WebReportService:
         if "cho hang" in normalized_label:
             return True
         return False
+
+    def _is_revenue_eligible_status(
+        self,
+        *,
+        code: int | None,
+        label: str,
+        revenue_codes: set[int],
+        revenue_labels: set[str],
+    ) -> bool:
+        if code is not None and code in revenue_codes:
+            return True
+        normalized_label = self._normalize_text(label)
+        return bool(normalized_label and normalized_label in revenue_labels)
 
     def _is_returning_status(
         self,
@@ -1764,6 +2066,61 @@ class WebReportService:
             return None
         return dt.astimezone(tz)
 
+    def _extract_order_confirmation_datetime(
+        self,
+        order: dict[str, Any],
+        *,
+        tz: timezone | ZoneInfo,
+        revenue_codes: set[int],
+        revenue_labels: set[str],
+    ) -> datetime | None:
+        history = order.get("status_history")
+        if isinstance(history, list):
+            for event in history:
+                if not isinstance(event, dict):
+                    continue
+                event_code = self._extract_status_code(event)
+                event_label = str(
+                    event.get("status_name")
+                    or event.get("status_text")
+                    or event.get("status_label")
+                    or ""
+                ).strip()
+                if not self._is_revenue_eligible_status(
+                    code=event_code,
+                    label=event_label,
+                    revenue_codes=revenue_codes,
+                    revenue_labels=revenue_labels,
+                ):
+                    continue
+                for key in ("updated_at", "created_at", "createdAt", "timestamp"):
+                    dt = self._parse_datetime(event.get(key))
+                    if dt is not None:
+                        return dt.astimezone(tz)
+                    dt = self._parse_unix_datetime(event.get(key))
+                    if dt is not None:
+                        return dt.astimezone(tz)
+
+        for key in (
+            "confirmed_at",
+            "confirmedAt",
+            "confirmation_at",
+            "confirmationAt",
+            "confirm_at",
+            "confirmAt",
+            "confirmed_time",
+            "confirm_time",
+            "last_update_status_at",
+            "lastUpdateStatusAt",
+        ):
+            dt = self._parse_datetime(order.get(key))
+            if dt is not None:
+                return dt.astimezone(tz)
+            dt = self._parse_unix_datetime(order.get(key))
+            if dt is not None:
+                return dt.astimezone(tz)
+        return None
+
     def _load_status_map_config(self) -> dict[str, Any]:
         path = self.settings.web_report_status_map_config_path
         if not path.exists():
@@ -1789,6 +2146,22 @@ class WebReportService:
             "returning_status_labels": ["đang hoàn", "đã hoàn", "being_returned", "returned"],
             "shipping_status_codes": [2],
             "shipping_status_labels": ["đã gửi hàng", "dang giao", "shipping"],
+            "revenue_status_codes": [11, 12, 13, 20, 1, 8, 9, 2, 3, 16, 4, 15, 5],
+            "revenue_status_labels": [
+                "đã xác nhận",
+                "chờ hàng",
+                "chờ in",
+                "đã in",
+                "đã đặt hàng",
+                "đang đóng hàng",
+                "chờ chuyển hàng",
+                "đã gửi hàng",
+                "đã nhận",
+                "đã thu tiền",
+                "đang hoàn",
+                "hoàn một phần",
+                "đã hoàn",
+            ],
             "pending_reconcile_mode": "match_result",
             "pending_reconcile_td_success_statuses": ["success", "being_returned", "returned"],
             "pending_reconcile_td_order_shipping_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
@@ -1805,6 +2178,8 @@ class WebReportService:
             "reconcile_received_match_results": ["matched_unique", "already_correct"],
             "reconcile_received_td_statuses": ["success"],
             "reconcile_received_mode": "matched_and_td_status",
+            "reconcile_received_live_enabled": True,
+            "reconcile_received_live_td_statuses": ["SUCCESS", "BEING_RETURNED", "RETURNED"],
             "brand_rules": [
                 {"pattern": r"^JC", "brand_name": "Jennie Choo", "brand_slug": "jennie-choo"},
                 {"pattern": r"^(LYS|L-)", "brand_name": "Lysilk", "brand_slug": "lysilk"},
@@ -2012,6 +2387,16 @@ class WebReportService:
         return f"{float(roas):,.2f}x"
 
     @staticmethod
+    def _calculate_cost_percent(revenue_vnd: int, spend_vnd: int) -> float:
+        if revenue_vnd <= 0 or spend_vnd <= 0:
+            return 0.0
+        return round(float(spend_vnd) / float(revenue_vnd) * 100.0, 2)
+
+    @staticmethod
+    def _fmt_percent(value: float) -> str:
+        return f"{float(value):,.2f}%"
+
+    @staticmethod
     def _format_dt(value: datetime | None, *, tz: timezone | ZoneInfo) -> str:
         if value is None:
             return ""
@@ -2118,18 +2503,3 @@ class WebReportService:
             6: "Đã hủy",
             7: "Đã xóa",
         }
-
-    def _extract_revenue_minor_from_aggs(self, aggs: Any, *, fallback: int) -> int:
-        if not isinstance(aggs, dict):
-            return max(0, fallback)
-        cod_minor = self._extract_agg_metric_minor(aggs.get("cod"))
-        prepaid_minor = self._extract_agg_metric_minor(aggs.get("prepaid"))
-        total = cod_minor + prepaid_minor
-        if total > 0:
-            return total
-        return max(0, fallback)
-
-    def _extract_agg_metric_minor(self, raw_metric: Any) -> int:
-        if isinstance(raw_metric, dict):
-            raw_metric = raw_metric.get("value")
-        return max(0, self._to_int(raw_metric))
