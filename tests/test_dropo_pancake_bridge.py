@@ -807,9 +807,22 @@ PRICED_MAP = {
     },
 }
 
+SALE_PRICED_MAP = {
+    "VXV002-DEN-M": {
+        "variation_id": "var-sale",
+        "product_code": "JC-A-146",
+        "retail_price_minor": 160000,
+    },
+}
+
 
 def priced_payload(**overrides: Any) -> dict:
     bridge, _, _ = build_bridge([HEADER], sku_map=PRICED_MAP)
+    return bridge.build_order_payload(make_row(**overrides), HEADER)
+
+
+def sale_priced_payload(**overrides: Any) -> dict:
+    bridge, _, _ = build_bridge([HEADER], sku_map=SALE_PRICED_MAP)
     return bridge.build_order_payload(make_row(**overrides), HEADER)
 
 
@@ -875,6 +888,26 @@ def test_bundle_tron_mau_van_cong_dung_gia_goc():
     assert len(payload["items"]) == 2
     assert gia_niem_yet(payload) == 259800
     assert payload["total_discount"] == 26000
+
+
+def test_sale_ep_giam_15_phan_tram_theo_tung_san_pham():
+    # 1,600 THB → giảm 240 THB → khách trả 1,360 THB, kể cả khi
+    # landing cũ gửi tổng giá niêm yết chưa giảm.
+    payload = sale_priced_payload(**{"Selected SKUs": "VXV002-DEN-M", "Order value": "1600"})
+    assert payload["total_discount"] == 24000
+    assert payload["total_price"] == 136000
+    assert payload["total_price"] + payload["total_discount"] == 160000
+
+
+def test_sale_nhieu_so_luong_tinh_giam_cho_tung_don_vi():
+    payload = sale_priced_payload(
+        **{
+            "Selected SKUs": "Item 1: (VXV002-DEN-M) · Item 2: (VXV002-DEN-M)",
+            "Order value": "3200",
+        }
+    )
+    assert payload["total_discount"] == 48000
+    assert payload["total_price"] == 272000
 
 
 @pytest.mark.parametrize(
