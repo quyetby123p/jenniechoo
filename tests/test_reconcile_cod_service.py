@@ -139,6 +139,7 @@ def _write_reconcile_configs(settings: Settings, *, mapped_status: int | None = 
             "enabled": True,
             "mapping": {
                 "giao hang thanh cong": {"status": mapped_status},
+                "data faile": {"status": 4, "from_statuses": [2]},
             },
             "update_endpoint": {
                 "method": "POST",
@@ -360,6 +361,101 @@ def test_reconcile_cod_apply_updates_is_idempotent(tmp_path: Path) -> None:
     assert first["failed"] == 0
     assert second["updated"] == 0
     assert len(pancake.update_calls) == 1
+
+
+def test_reconcile_cod_data_faile_dropo_moves_shipped_order_to_returning(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path, reconcile_cod_update_enabled=True)
+    _write_reconcile_configs(settings, mapped_status=3)
+    thai_duong = _FakeThaiDuongClient(
+        history_rows=[{"settlement_date": "2026-05-09"}],
+        detail_rows=[
+            {
+                "settlement_date": "2026-05-09",
+                "awb": "DROPO-RETURN-1",
+                "status_text": "Data faile",
+                "phone": "0809199218",
+                "customer_name": "May Foster Thirakon",
+                "cod": "2800",
+            }
+        ],
+    )
+    pancake = _FakePancakeClient(
+        orders=[
+            {
+                "id": "dropo-order-1",
+                "display_id": "DROPO-1",
+                "third_party_id": "DROPO-RETURN-1",
+                "bill_phone_number": "0809199218",
+                "bill_full_name": "May Foster Thirakon",
+                "total_price": 280000,
+                "status": 2,
+            }
+        ]
+    )
+    service = ReconcileCodService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=pancake,  # type: ignore[arg-type]
+        thai_duong_client=thai_duong,  # type: ignore[arg-type]
+    )
+
+    report = service.generate_report(date(2026, 5, 9))
+    record = report["records"][0]
+    assert record["match_result"] == "matched_unique"
+    assert record["target_status"] == 4
+    assert report["summary"]["update_candidates"] == 1
+
+    apply_summary = service.apply_updates(str(report["run_id"]))
+
+    assert apply_summary["updated"] == 1
+    assert pancake.update_calls[0][0:2] == ("dropo-order-1", 4)
+
+
+def test_reconcile_cod_data_faile_does_not_change_non_shipped_order(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path, reconcile_cod_update_enabled=True)
+    _write_reconcile_configs(settings, mapped_status=3)
+    thai_duong = _FakeThaiDuongClient(
+        history_rows=[{"settlement_date": "2026-05-09"}],
+        detail_rows=[
+            {
+                "settlement_date": "2026-05-09",
+                "awb": "DROPO-RETURN-2",
+                "status_text": "Data faile",
+                "phone": "0809199219",
+                "customer_name": "Other Customer",
+                "cod": "2800",
+            }
+        ],
+    )
+    pancake = _FakePancakeClient(
+        orders=[
+            {
+                "id": "dropo-order-2",
+                "display_id": "DROPO-2",
+                "third_party_id": "DROPO-RETURN-2",
+                "bill_phone_number": "0809199219",
+                "bill_full_name": "Other Customer",
+                "total_price": 280000,
+                "status": 3,
+            }
+        ]
+    )
+    service = ReconcileCodService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=pancake,  # type: ignore[arg-type]
+        thai_duong_client=thai_duong,  # type: ignore[arg-type]
+    )
+
+    report = service.generate_report(date(2026, 5, 9))
+    assert report["records"][0]["match_result"] == "status_not_eligible"
+    assert report["summary"]["status_not_eligible"] == 1
+
+    apply_summary = service.apply_updates(str(report["run_id"]))
+
+    assert apply_summary["updated"] == 0
+    assert apply_summary["skipped"] == 1
+    assert pancake.update_calls == []
 
 
 @pytest.mark.parametrize("source_status", [11, 13])

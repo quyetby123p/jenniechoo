@@ -162,6 +162,7 @@ class ReconcileCodService:
                 f"Khớp mơ hồ: {self._to_int(summary.get('ambiguous')):,}",
                 f"Không tìm thấy: {self._to_int(summary.get('not_found')):,}",
                 f"Chưa map trạng thái: {self._to_int(summary.get('unmapped_status')):,}",
+                f"Đã map nhưng không đủ điều kiện đổi trạng thái: {self._to_int(summary.get('status_not_eligible')):,}",
                 f"Đủ điều kiện cập nhật: {self._to_int(summary.get('update_candidates')):,}",
             ]
         )
@@ -932,6 +933,9 @@ class ReconcileCodService:
                 "td_exchange_rate": td_exchange_rate,
                 "td_thb_minor_factor": td_amount_factor,
                 "target_status": target_status_int,
+                "allowed_current_statuses": sorted(
+                    self._resolve_allowed_current_statuses(status_map_cfg, td_status_key)
+                ),
                 "match_result": "",
                 "match_tier": match_tier,
                 "reason": "",
@@ -1006,8 +1010,22 @@ class ReconcileCodService:
                 records.append(record)
                 continue
 
+            allowed_current_statuses = self._to_status_set(record.get("allowed_current_statuses"))
+            current_status = self._to_optional_int(meta.get("status"))
+            if allowed_current_statuses and current_status not in allowed_current_statuses:
+                record["match_result"] = "status_not_eligible"
+                record["reason"] = (
+                    "Đã map đúng đơn Pancake nhưng không đổi trạng thái vì status hiện tại "
+                    f"{current_status} không thuộc nhóm được phép "
+                    f"{sorted(allowed_current_statuses)}."
+                )
+                records.append(record)
+                continue
+
             record["match_result"] = "matched_unique"
-            if match_tier == "pancake_order_id":
+            if td_status_key in {"data faile", "data fail", "data failed"} and target_status_int == 4:
+                record["reason"] = "Data faile (đơn huỷ Dropo) khớp Pancake đang Đã gửi hàng; chuyển sang Đang hoàn."
+            elif match_tier == "pancake_order_id":
                 record["reason"] = "Khớp chính xác theo Pancake order ID lưu trên Thái Dương và sẵn sàng cập nhật."
             elif match_tier == "order_reference":
                 record["reason"] = "Khớp chính xác mã đơn Thái Dương trong ghi chú in Pancake và sẵn sàng cập nhật."
@@ -1029,6 +1047,7 @@ class ReconcileCodService:
             "ambiguous": 0,
             "not_found": 0,
             "unmapped_status": 0,
+            "status_not_eligible": 0,
             "update_candidates": 0,
             "total": len(records),
         }
@@ -1150,6 +1169,7 @@ class ReconcileCodService:
             "td_conclusion_vnd",
             "td_conclusion_vnd_is_estimated",
             "td_exchange_rate",
+            "allowed_current_statuses",
             "match_result",
             "match_tier",
             "reason",
@@ -1467,6 +1487,16 @@ class ReconcileCodService:
         if isinstance(candidate, dict):
             return ReconcileCodService._to_optional_int(candidate.get("status"))
         return ReconcileCodService._to_optional_int(candidate)
+
+    @staticmethod
+    def _resolve_allowed_current_statuses(status_map_cfg: dict[str, Any], normalized_status: str) -> set[int]:
+        mapping = status_map_cfg.get("mapping", {}) if isinstance(status_map_cfg.get("mapping"), dict) else {}
+        candidate = mapping.get(normalized_status)
+        if not isinstance(candidate, dict):
+            return set()
+        return ReconcileCodService._to_status_set(
+            candidate.get("from_statuses", candidate.get("only_if_current_status"))
+        )
 
     def _try_apply_with_transition_fallback(
         self,
