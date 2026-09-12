@@ -48,7 +48,7 @@ HANOI_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 SALE_PERCENT = 15
 SALE_PRODUCT_CODES = frozenset({
     "JC-A-146", "JC-V-143", "JC-A-158", "JC-Q-158",
-    "JC-V-145", "JC-V-123", "JC-V-236",
+    "JC-V-145", "JC-V-123", "JC-V-236", "JC-V-154",
 })
 
 # Bắt mã dạng VXV002-DEN-M / VXV008-XANH MINT-XL, chấp nhận hậu tố lô "-B1".
@@ -507,9 +507,8 @@ class DropoPancakeBridge:
         """Tách chuỗi Selected SKUs thành danh sách item Pancake, gộp số lượng.
 
         Mỗi item mang retail_price = giá niêm yết gốc trong Pancake. Phần khuyến
-        mãi Bundle KHÔNG gắn vào từng dòng hàng mà dồn vào total_discount ở cấp
-        đơn (xem _order_discount_minor) — gắn cả hai chỗ thì Pancake có thể trừ
-        hai lần và thu thiếu tiền.
+        mãi được tính ở cấp đơn rồi phân bổ sang ``discount_each_product`` vì
+        Pancake POS bỏ qua ``total_discount`` nếu chỉ gửi ở cấp đơn.
         """
         found = SKU_PATTERN.findall(str(selected_skus or ""))
         if not found and fallback_sku:
@@ -545,7 +544,7 @@ class DropoPancakeBridge:
     @classmethod
     def _item_product_code(cls, item: dict[str, Any]) -> str:
         info = item.get("variation_info") or {}
-        direct = cls._normalize_jennie_code(info.get("product_code"))
+        direct = cls._normalize_jennie_code(info.get("product_code") or info.get("product_id"))
         if re.fullmatch(r"JC-[A-Z]+-\d+", direct):
             return direct
         raw_sku = str(info.get("sku") or "").upper().strip()
@@ -572,7 +571,7 @@ class DropoPancakeBridge:
         return total
 
     def _order_discount_minor(self, items: list[dict[str, Any]], total_minor: int) -> int:
-        """Khuyến mãi Bundle tính ở cấp đơn: tổng giá niêm yết trừ đi số khách trả.
+        """Tính tổng giảm giá: tổng giá niêm yết trừ đi số khách trả.
 
         Không đọc chữ "Bundle 2 ลด 10%" để suy ra 10% — lấy thẳng hiệu số giữa
         giá gốc và cột Order value mà landing đã tính sẵn. Cách này ăn theo đúng
@@ -597,6 +596,75 @@ class DropoPancakeBridge:
             )
             return 0
         return discount
+
+    def _apply_item_discounts(self, items: list[dict[str, Any]], total_discount: int) -> None:
+        """Gắn giảm giá vào từng item để Pancake thực sự tính vào đơn.
+
+        ``total_discount`` vẫn được giữ ở cấp đơn để audit, nhưng Pancake POS
+        tính tiền theo ``discount_each_product``. SALE được ưu tiên theo đúng
+        15% từng sản phẩm; phần giảm còn lại (ví dụ Bundle) được phân bổ theo
+        giá trị từng dòng.
+        """
+        target = max(0, self._to_int(total_discount))
+        if target <= 0:
+            return
+
+        line_data: list[dict[str, int | dict[str, Any]]] = []
+        sale_total = 0
+        for item in items:
+            info = item.get("variation_info") or {}
+            retail_minor = self._to_int(info.get("retail_price"))
+            quantity = self._to_int(item.get("quantity"))
+            if retail_minor <= 0 or quantity <= 0:
+                continue
+            sale_unit = 0
+            if self._item_product_code(item) in SALE_PRODUCT_CODES:
+                sale_unit = (retail_minor // 100) * SALE_PERCENT // 100 * 100
+            sale_line = min(retail_minor * quantity, sale_unit * quantity)
+            sale_total += sale_line
+            line_data.append({
+                "item": item,
+                "retail": retail_minor,
+                "quantity": quantity,
+                "base_unit": sale_unit,
+                "line_discount": sale_line,
+                "capacity": retail_minor * quantity - sale_line,
+            })
+
+        if not line_data:
+            return
+        remaining = max(0, target - sale_total)
+        capacity_total = sum(int(line["capacity"]) for line in line_data)
+        if capacity_total > 0 and remaining > 0:
+            remaining = min(remaining, capacity_total)
+            allocated = 0
+            for index, line in enumerate(line_data):
+                capacity = int(line["capacity"])
+                if index == len(line_data) - 1:
+                    extra_line = remaining - allocated
+                else:
+                    extra_line = remaining * capacity // capacity_total
+                quantity = int(line["quantity"])
+                extra_unit = extra_line // quantity
+                line["line_discount"] = int(line["line_discount"]) + extra_unit * quantity
+                allocated += extra_unit * quantity
+            # Bù phần dư nhỏ vào các dòng đơn chiếc để tổng giảm luôn khớp.
+            remainder = remaining - allocated
+            for line in line_data:
+                if remainder <= 0:
+                    break
+                if int(line["quantity"]) == 1:
+                    line["line_discount"] = int(line["line_discount"]) + remainder
+                    remainder = 0
+
+        for line in line_data:
+            item = line["item"]
+            quantity = int(line["quantity"])
+            line_discount = int(line["line_discount"])
+            unit_discount = line_discount // quantity
+            if unit_discount > 0:
+                item["discount_each_product"] = unit_discount
+                item["is_discount_percent"] = False
 
     def build_order_payload(
         self,
@@ -679,6 +747,7 @@ class DropoPancakeBridge:
         )
 
         total_discount = self._order_discount_minor(items, total_minor)
+        self._apply_item_discounts(items, total_discount)
         subtotal = sum(
             self._to_int(i.get("variation_info", {}).get("retail_price"))
             * self._to_int(i.get("quantity"))

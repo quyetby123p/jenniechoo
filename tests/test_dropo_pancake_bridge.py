@@ -840,11 +840,11 @@ def test_bundle2_giam_dung_10_phan_tram():
     assert payload["total_price"] + payload["total_discount"] == 259800
 
 
-def test_khuyen_mai_khong_gan_vao_tung_dong_hang():
-    """Gắn cả total_discount lẫn discount_each_product thì Pancake có thể trừ
-    hai lần -> thu thiếu tiền. Chỉ được giảm ở MỘT cấp."""
+def test_khuyen_mai_duoc_gan_vao_tung_dong_hang_de_pancake_tinh_dung():
+    """Pancake cần discount_each_product để áp dụng giảm giá thực tế."""
     payload = priced_payload(**{"Order value": "2338"})
-    assert "discount_each_product" not in payload["items"][0]
+    assert payload["items"][0]["discount_each_product"] == 13000
+    assert payload["items"][0]["is_discount_percent"] is False
     assert payload["items"][0]["variation_info"]["retail_price"] == 129900
 
 
@@ -897,6 +897,8 @@ def test_sale_ep_giam_15_phan_tram_theo_tung_san_pham():
     assert payload["total_discount"] == 24000
     assert payload["total_price"] == 136000
     assert payload["total_price"] + payload["total_discount"] == 160000
+    assert payload["items"][0]["discount_each_product"] == 24000
+    assert payload["items"][0]["is_discount_percent"] is False
 
 
 def test_sale_nhieu_so_luong_tinh_giam_cho_tung_don_vi():
@@ -908,6 +910,7 @@ def test_sale_nhieu_so_luong_tinh_giam_cho_tung_don_vi():
     )
     assert payload["total_discount"] == 48000
     assert payload["total_price"] == 272000
+    assert payload["items"][0]["discount_each_product"] == 24000
 
 
 @pytest.mark.parametrize(
