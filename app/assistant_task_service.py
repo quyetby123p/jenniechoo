@@ -353,7 +353,9 @@ class AssistantTaskService:
         now_local_date = datetime.now(tz).date()
         target_date = reference_date or now_local_date
         week_start = target_date - timedelta(days=target_date.weekday())
-        week_end = week_start + timedelta(days=5)
+        # Tuần báo cáo là Thứ Hai–Chủ nhật; +5 vô tình loại mất toàn bộ ngày
+        # Chủ nhật và làm snapshot sai đúng vào ngày cuối tuần.
+        week_end = week_start + timedelta(days=6)
 
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
