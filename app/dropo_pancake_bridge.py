@@ -545,7 +545,7 @@ class DropoPancakeBridge:
     def _item_product_code(cls, item: dict[str, Any]) -> str:
         info = item.get("variation_info") or {}
         direct = cls._normalize_jennie_code(info.get("product_code") or info.get("product_id"))
-        if re.fullmatch(r"JC-[A-Z]+-\d+", direct):
+        if re.fullmatch(r"JC-[A-Z]+-\d+[A-Z]*", direct):
             return direct
         raw_sku = str(info.get("sku") or "").upper().strip()
         match = re.match(r"(JC-[A-Z]+-\d+)(?:-|$)", raw_sku)
@@ -1345,11 +1345,18 @@ class DropoPancakeBridge:
     @staticmethod
     def _normalize_jennie_code(value: Any) -> str:
         raw = "".join(str(value or "").upper().split()).replace("_", "-")
-        if re.fullmatch(r"JC-[A-Z]+-\d+", raw):
-            return raw
-        match = re.fullmatch(r"JC(CV|[VAQ])[- ]?(\d+)", raw)
+        # Dropo storefront giữ hậu tố T cho mẫu tay dài (JCV123T), trong khi
+        # Pancake đặt tên product là JCV123-Tay dài. Chuẩn hóa cả hai về cùng
+        # một mã logic để không bị lệ thuộc cách từng hệ thống đặt tên.
+        ascii_raw = unicodedata.normalize("NFKD", raw)
+        ascii_raw = "".join(ch for ch in ascii_raw if not unicodedata.combining(ch))
+        match = re.fullmatch(
+            r"JC-?(CV|[VAQ])-?(\d+)(?:-?(T|TAYDAI))?",
+            ascii_raw,
+        )
         if match:
-            return f"JC-{match.group(1)}-{match.group(2)}"
+            suffix = "T" if match.group(3) else ""
+            return f"JC-{match.group(1)}-{match.group(2)}{suffix}"
         return raw
 
     @staticmethod
@@ -1394,6 +1401,12 @@ class DropoPancakeBridge:
                 continue
             scored.append((score, candidate))
         if not scored:
+            # Một số sản phẩm Pancake (ví dụ Classic Dress tay dài) chỉ khai
+            # size, không khai màu vì sản phẩm thực tế chỉ có một màu. Khi
+            # size đã lọc ra đúng một biến thể thì vẫn map được theo catalog,
+            # thay vì từ chối đơn chỉ vì landing gửi thêm màu hiển thị.
+            if len(sized) == 1:
+                return sized[0]
             return None
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return scored[0][1]

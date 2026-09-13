@@ -129,6 +129,15 @@ class FakePancake:
         return self.response
 
 
+class CatalogFakePancake(FakePancake):
+    def __init__(self, products: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self.products = products
+
+    def list_products(self, **_: Any) -> list[dict[str, Any]]:
+        return self.products
+
+
 class SourceFakePancake(FakePancake):
     def __init__(self, sources: list[dict[str, Any]]) -> None:
         super().__init__()
@@ -328,6 +337,36 @@ def test_jennie_bundle_uses_jcpost_rows_for_per_item_color_and_size():
     items = bridge.resolve_jennie_items(row, header, bundle_rows=details)
 
     assert [item["variation_id"] for item in items] == ["jcv123-den-s", "jca158-nau-s", "jcq158-nau-s"]
+
+
+def test_chuan_hoa_ma_tay_dai_giua_dopo_va_catalog_pancake():
+    assert DropoPancakeBridge._normalize_jennie_code("JCV123T") == "JC-V-123T"
+    assert DropoPancakeBridge._normalize_jennie_code("JCV123-Tay dài") == "JC-V-123T"
+
+
+def test_map_san_pham_tay_dai_khi_pancake_khong_khai_mau():
+    pancake = CatalogFakePancake([
+        {
+            "custom_id": "JCV123-Tay dài",
+            "variations": [
+                {
+                    "id": "jcv123t-s",
+                    "custom_id": "JC-V-123-TAYDAI-S",
+                    "retail_price": 300000,
+                    "fields": [{"name": "Size", "value": "S", "keyValue": "S"}],
+                }
+            ],
+        }
+    ])
+    bridge, _, _ = build_bridge([HEADER], pancake=pancake)
+    bridge._load_pancake_sku_map()
+    header = ["SKU Code", "Màu", "Size", "Số lượng"]
+    row = ["JCV123T", "Đen", "S", "1"]
+
+    items = bridge.resolve_jennie_items(row, header)
+
+    assert items[0]["variation_id"] == "jcv123t-s"
+    assert items[0]["variation_info"]["product_code"] == "JC-V-123T"
 
 
 def test_geo_match_tach_ten_thai_va_ten_anh():
