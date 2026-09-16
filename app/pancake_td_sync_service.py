@@ -169,6 +169,7 @@ class PancakeToThaiDuongSyncService:
             "print_note_failed": 0,
             "sale_status_synced": 0,
             "sale_status_failed": 0,
+            "sale_status_skipped": 0,
             "manual_order_code": normalized_manual_order_code,
             "run_path": "",
             "notify": False,
@@ -264,10 +265,13 @@ class PancakeToThaiDuongSyncService:
                     self._sync_existing_order_metadata_manual(
                         order_id=order_id,
                         order_code=order_code,
+                        pancake_order=order,
                         cfg=cfg,
                         summary=summary,
                     )
                 continue
+            order = self._hydrate_pancake_order_for_sync(order=order, cfg=cfg)
+            order_code = self._extract_order_code(order, cfg) or order_code
             order_fingerprint = self._order_fingerprint(order, cfg)
             suppress_repeated_error_notify = False
             known_failed = failed_store.get(order_id)
@@ -290,6 +294,7 @@ class PancakeToThaiDuongSyncService:
                         self._sync_existing_order_metadata_manual(
                             order_id=order_id,
                             order_code=order_code,
+                            pancake_order=order,
                             cfg=cfg,
                             summary=summary,
                         )
@@ -417,6 +422,7 @@ class PancakeToThaiDuongSyncService:
             self._sync_sale_status_to_thai_duong(
                 order_id=order_id,
                 order_code=order_code,
+                pancake_order=order,
                 create_result=create_result,
                 cfg=cfg,
                 summary=summary,
@@ -503,6 +509,7 @@ class PancakeToThaiDuongSyncService:
                 "print_note_failed": 0,
                 "sale_status_synced": 0,
                 "sale_status_failed": 0,
+                "sale_status_skipped": 0,
                 "manual_order_code": "",
                 "run_path": "",
                 "notify": True,
@@ -530,6 +537,7 @@ class PancakeToThaiDuongSyncService:
                 f"Ghi chú in lỗi: {self._to_int(report.get('print_note_failed')):,}",
                 f"Sale xác nhận đã cập nhật: {self._to_int(report.get('sale_status_synced')):,}",
                 f"Sale xác nhận lỗi: {self._to_int(report.get('sale_status_failed')):,}",
+                f"Sale xác nhận bỏ qua (Dropo): {self._to_int(report.get('sale_status_skipped')):,}",
                 f"Trùng local: {self._to_int(report.get('skipped_local_duplicate')):,}",
                 f"Trùng remote: {self._to_int(report.get('skipped_remote_duplicate')):,}",
                 f"Không map được: {self._to_int(report.get('skipped_unmapped')):,}",
@@ -556,9 +564,12 @@ class PancakeToThaiDuongSyncService:
         *,
         order_id: str,
         order_code: str,
+        pancake_order: dict[str, Any] | None = None,
         cfg: dict[str, Any],
         summary: dict[str, Any],
     ) -> None:
+        if isinstance(pancake_order, dict):
+            pancake_order = self._hydrate_pancake_order_for_sync(order=pancake_order, cfg=cfg)
         rows = self._lookup_thai_duong_orders_with_retry(
             order_id=order_id,
             order_code=order_code,
@@ -589,6 +600,7 @@ class PancakeToThaiDuongSyncService:
         self._sync_sale_status_to_thai_duong(
             order_id=order_id,
             order_code=order_code,
+            pancake_order=pancake_order,
             create_result=create_result_like,
             cfg=cfg,
             summary=summary,
@@ -603,6 +615,43 @@ class PancakeToThaiDuongSyncService:
         errors_after = len(summary.get("errors", [])) if isinstance(summary.get("errors"), list) else 0
         if errors_after > errors_before:
             summary["failed"] += 1
+
+    def _hydrate_pancake_order_for_sync(
+        self,
+        *,
+        order: dict[str, Any],
+        cfg: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Use Pancake's detail endpoint before mapping variants.
+
+        The timestamp listing can contain a stale or reduced variation payload.
+        The detail response is the source of truth for size/color fields and
+        prevents a valid web order from being sent with a neighbouring size.
+        """
+        pancake_cfg = cfg.get("pancake", {}) if isinstance(cfg.get("pancake"), dict) else {}
+        detail_cfg = pancake_cfg.get("detail_fetch", {})
+        if isinstance(detail_cfg, dict) and not bool(detail_cfg.get("enabled", True)):
+            return order
+        getter = getattr(self.pancake, "get_order_detail", None)
+        if not callable(getter):
+            return order
+        order_id = self._extract_order_id(order, cfg)
+        if not order_id:
+            return order
+        try:
+            detail = getter(order_id)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning(
+                "Khong lay duoc chi tiet Pancake cho don %s, dung du lieu danh sach: %s",
+                order_id,
+                exc,
+            )
+            return order
+        if not isinstance(detail, dict) or not self._extract_values(detail, ["items[]"]):
+            return order
+        merged = copy.deepcopy(order)
+        merged.update(detail)
+        return merged
 
     def _finalize_run(self, summary: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         if not summary.get("finished_at"):
@@ -696,12 +745,16 @@ class PancakeToThaiDuongSyncService:
         *,
         order_id: str,
         order_code: str,
+        pancake_order: dict[str, Any] | None = None,
         create_result: dict[str, Any],
         cfg: dict[str, Any],
         summary: dict[str, Any],
     ) -> None:
         sale_cfg = self._resolve_sale_status_sync_cfg(cfg)
         if not sale_cfg.get("enabled"):
+            return
+        if isinstance(pancake_order, dict) and self._is_dropo_order(pancake_order):
+            summary["sale_status_skipped"] = self._to_int(summary.get("sale_status_skipped")) + 1
             return
 
         td_order_id = self._extract_thai_duong_order_id(
@@ -1541,8 +1594,19 @@ class PancakeToThaiDuongSyncService:
         order_label = order_code or order_id
         note = f"Pancake order {order_label}"
         customer_code = self._resolve_td_customer_code()
-        need_sale_confirm_value = bool(field_cfg.get("need_sale_confirm_value", False))
-        order_status_value = str(field_cfg.get("order_status_value", "SALE_CONFIRM")).strip() or "SALE_CONFIRM"
+        is_dropo = self._is_dropo_order(order)
+        need_sale_confirm_value = bool(
+            field_cfg.get(
+                "dropo_need_sale_confirm_value" if is_dropo else "need_sale_confirm_value",
+                True if is_dropo else False,
+            )
+        )
+        order_status_value = str(
+            field_cfg.get(
+                "dropo_order_status_value" if is_dropo else "order_status_value",
+                "DRAFT" if is_dropo else "SALE_CONFIRM",
+            )
+        ).strip() or ("DRAFT" if is_dropo else "SALE_CONFIRM")
         fields = {
             "reference_order_id_path": order_id,
             "pancake_order_id_path": order_id,
@@ -2389,6 +2453,47 @@ class PancakeToThaiDuongSyncService:
     @staticmethod
     def _normalize_reference(value: Any) -> str:
         return re.sub(r"[^A-Za-z0-9]", "", str(value or "").strip()).upper()
+
+    @classmethod
+    def _is_dropo_order(cls, order: dict[str, Any]) -> bool:
+        """Dropo landing orders stay in Thai Duong's sale queue for manual sale."""
+        values = cls._extract_values_static(
+            order,
+            [
+                "note",
+                "account_source",
+                "source",
+                "ads_source",
+                "order_sources[].name",
+                "order_sources[].source_name",
+            ],
+        )
+        text = cls._normalize_compare_text(" ".join(str(value or "") for value in values))
+        return "dropo" in text
+
+    @staticmethod
+    def _extract_values_static(value: Any, paths: list[str]) -> list[Any]:
+        """Small path extractor for source detection without a service instance."""
+        result: list[Any] = []
+        for path in paths:
+            current: list[Any] = [value]
+            for part in str(path).split("."):
+                next_values: list[Any] = []
+                is_list = part.endswith("[]")
+                key = part[:-2] if is_list else part
+                for item in current:
+                    if not isinstance(item, dict) or key not in item:
+                        continue
+                    found = item.get(key)
+                    if is_list and isinstance(found, list):
+                        next_values.extend(found)
+                    elif not is_list:
+                        next_values.append(found)
+                current = next_values
+                if not current:
+                    break
+            result.extend(current)
+        return result
 
     @staticmethod
     def _hash_text(value: str) -> str:
