@@ -421,10 +421,20 @@ def test_jc_aliases_bo_trong_van_lay_ten_va_ma_web():
     bridge, _, _ = build_bridge([header])
     payload = bridge.build_order_payload(row, header)
 
-    assert payload["custom_id"] == "JC260918-095600-OEV1N1"
+    assert payload["custom_id"] == "JC260918-095600"
     assert payload["shipping_address"]["full_name"] == "Khách JC"
     assert payload["bill_full_name"] == "Khách JC"
     assert payload["ads_source"] == "Dropo"
+
+
+def test_jc_order_id_bo_hau_to_ngau_nhien_truoc_khi_gui_pancake():
+    header = HEADER + ["ma_don"]
+    row = make_row(**{"Thời gian": "2026-09-18 13:33:43+07:00"}) + [
+        "JC260918-133343-OENA5C"
+    ]
+    bridge, _, _ = build_bridge([header])
+    payload = bridge.build_order_payload(row, header)
+    assert payload["custom_id"] == "JC260918-133343"
 
 
 def test_gan_id_nguon_don_dropo_khi_tao_live():

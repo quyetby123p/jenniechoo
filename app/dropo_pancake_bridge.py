@@ -47,8 +47,8 @@ HANOI_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 # cắt phần lẻ THB để khớp cách hiển thị trên checkout (2,298 → giảm 344 → 1,954).
 SALE_PERCENT = 15
 SALE_PRODUCT_CODES = frozenset({
-    "JC-A-146", "JC-V-143", "JC-A-158", "JC-Q-158",
-    "JC-V-145", "JC-V-123", "JC-V-236", "JC-V-154",
+    "JC-A-146", "JC-A-158", "JC-Q-158",
+    "JC-V-145", "JC-V-123", "JC-V-236",
 })
 
 # Bắt mã dạng VXV002-DEN-M / VXV008-XANH MINT-XL, chấp nhận hậu tố lô "-B1".
@@ -744,7 +744,7 @@ class DropoPancakeBridge:
         for source_name in ("ma_don", "Order ID", "order_id"):
             candidate = str(self._cell(row, header, source_name) or "").strip()
             if re.fullmatch(r"(?:JC|DROPO)[A-Z0-9_-]{4,}", candidate, re.IGNORECASE):
-                source_order_id = candidate
+                source_order_id = self._public_order_id(candidate)
                 break
         # Một số tab Dropo cũ giữ header `ma_don` nhưng dữ liệu thực tế ở ô đó
         # lại là tóm tắt sản phẩm. Chỉ dùng mã đơn có hình dạng JC/DROPO làm
@@ -795,6 +795,14 @@ class DropoPancakeBridge:
         # sẽ thay bằng ID nguồn đơn thật trong trường order_sources.
         payload["ads_source"] = str(self.config.order_source_name or "Dropo").strip() or "Dropo"
         return payload
+
+    @staticmethod
+    def _public_order_id(value: Any) -> str:
+        """Bỏ hậu tố ngẫu nhiên khỏi mã JC hiển thị trong Pancake."""
+        candidate = str(value or "").strip()
+        if re.fullmatch(r"JC\d{6}-\d{6}-[A-Z0-9]{6}", candidate, re.IGNORECASE):
+            return candidate[:-7]
+        return candidate
 
     def _attach_order_source(self, payload: dict[str, Any]) -> None:
         """Gắn ID nguồn đơn Pancake ``Dropo`` vào payload tạo đơn."""
