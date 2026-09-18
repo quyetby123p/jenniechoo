@@ -691,7 +691,9 @@ class DropoPancakeBridge:
             get("Order value", "Giá trị đơn", "Tổng đơn", "tong_don", "value"), scale
         )
         name = str(
-            get(
+            self._first_nonempty_cell(
+                row,
+                header,
                 "ชื่อผู้รับ / Recipient",
                 "Tên người nhận",
                 "Tên khách",
@@ -734,7 +736,16 @@ class DropoPancakeBridge:
             province=province,
             post_code=post_code,
         )
-        source_order_id = str(get("Order ID", "ma_don", "order_id")).strip()
+        # The JC order-book has both the source `ma_don` and a separate
+        # `Order ID` column populated later with the Pancake numeric ID. Pick
+        # the first valid source code instead of treating a blank/legacy alias
+        # as authoritative and falling back to DROPO-<timestamp>-<phone>.
+        source_order_id = ""
+        for source_name in ("ma_don", "Order ID", "order_id"):
+            candidate = str(self._cell(row, header, source_name) or "").strip()
+            if re.fullmatch(r"(?:JC|DROPO)[A-Z0-9_-]{4,}", candidate, re.IGNORECASE):
+                source_order_id = candidate
+                break
         # Một số tab Dropo cũ giữ header `ma_don` nhưng dữ liệu thực tế ở ô đó
         # lại là tóm tắt sản phẩm. Chỉ dùng mã đơn có hình dạng JC/DROPO làm
         # custom_id; nếu không thì quay về timestamp + 4 số điện thoại.
@@ -1425,6 +1436,14 @@ class DropoPancakeBridge:
                 index = header.index(name)
                 if index < len(row):
                     return row[index]
+        return ""
+
+    @classmethod
+    def _first_nonempty_cell(cls, row: list[Any], header: list[str], *names: str) -> Any:
+        for name in names:
+            value = cls._cell(row, header, name)
+            if str(value or "").strip():
+                return value
         return ""
 
     @staticmethod

@@ -408,6 +408,22 @@ def test_payload_chuan_hoa_sdt_va_tong_tien():
     assert payload["currency"] == "THB"
     assert payload["is_free_shipping"] is True
     assert payload["items"][0]["quantity"] == 2
+
+
+def test_jc_aliases_bo_trong_van_lay_ten_va_ma_web():
+    header = HEADER + ["Tên khách", "Tên người nhận", "ma_don", "Order ID"]
+    row = make_row(**{"ชื่อผู้รับ / Recipient": ""}) + [
+        "Khách JC",
+        "",
+        "JC260918-095600-OEV1N1",
+        "",
+    ]
+    bridge, _, _ = build_bridge([header])
+    payload = bridge.build_order_payload(row, header)
+
+    assert payload["custom_id"] == "JC260918-095600-OEV1N1"
+    assert payload["shipping_address"]["full_name"] == "Khách JC"
+    assert payload["bill_full_name"] == "Khách JC"
     assert payload["ads_source"] == "Dropo"
 
 
