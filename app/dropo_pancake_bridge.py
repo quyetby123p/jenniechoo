@@ -443,6 +443,10 @@ class DropoPancakeBridge:
         # catalog và làm sai size/màu khách đặt.
         shared_color = str(get("Màu", "mau", "color") or "").strip()
         shared_size = str(get("Size", "size") or "").strip()
+        summary_options = self._parse_jennie_summary(
+            get("Tóm tắt đơn", "Tóm tắt", "tom_tat", "summary", "san_pham")
+        )
+        summary_occurrences: dict[str, int] = {}
         detail_rows = [row] + list(bundle_rows or [])
         items: list[dict[str, Any]] = []
         for index, raw_code in enumerate(codes, start=1):
@@ -465,19 +469,35 @@ class DropoPancakeBridge:
                     detail_row,
                 )
                 detail_get = lambda *names: self._cell(detail_row, header, *names)  # noqa: E731
+            occurrence = summary_occurrences.get(code, 0)
+            summary_candidates = summary_options.get(code, [])
+            summary_option = (
+                summary_candidates[occurrence]
+                if occurrence < len(summary_candidates)
+                else {}
+            )
+            summary_occurrences[code] = occurrence + 1
             color = str(
                 get(f"mau{index}", f"color{index}", f"Màu {index}")
                 or detail_get("Màu", "mau", "color")
+                or summary_option.get("color")
                 or shared_color
             ).strip()
             size = str(
                 get(f"size{index}", f"Size {index}")
                 or detail_get("Size", "size")
+                or summary_option.get("size")
                 or shared_size
             ).strip()
             quantity_raw = get(f"sl{index}", f"qty{index}", f"Quantity {index}")
             if not quantity_raw:
                 quantity_raw = detail_get("Số lượng", "sl", "quantity", "qty")
+            # The independent JC sheet stores the bundle total on the main
+            # row. Use the per-item quantity from the checkout summary when
+            # it is available, otherwise the first SKU incorrectly receives
+            # the total quantity (e.g. 156 x2 + 154 x1).
+            if summary_option.get("quantity") is not None:
+                quantity_raw = summary_option["quantity"]
             if not quantity_raw and len(codes) == 1:
                 quantity_raw = get("Số lượng", "sl", "quantity", "qty")
             quantity = self._to_int(quantity_raw) or 1
@@ -502,6 +522,39 @@ class DropoPancakeBridge:
                 item["variation_info"]["retail_price"] = retail
             items.append(item)
         return items
+
+    @classmethod
+    def _parse_jennie_summary(cls, value: Any) -> dict[str, list[dict[str, Any]]]:
+        """Parse per-item color, size and quantity from a JC checkout summary.
+
+        The main row can be written before hidden ``jcpost`` rows arrive. The
+        summary is written atomically with that row, so it is the reliable
+        fallback for mixed bundles and for the first run of the bridge.
+        Repeated product codes remain occurrence-aware so two sizes of the
+        same code do not get merged accidentally.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return {}
+        result: dict[str, list[dict[str, Any]]] = {}
+        pattern = re.compile(
+            r"(?P<code>JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+))\s*"
+            r"\((?P<color>[^()/|]+)\s*/\s*(?P<size>[^()|]+)\)"
+            r"\s*x\s*(?P<quantity>\d+)",
+            re.IGNORECASE,
+        )
+        for match in pattern.finditer(text):
+            code = cls._normalize_jennie_code(match.group("code"))
+            if not code:
+                continue
+            result.setdefault(code, []).append(
+                {
+                    "color": match.group("color").strip(),
+                    "size": match.group("size").strip(),
+                    "quantity": int(match.group("quantity")),
+                }
+            )
+        return result
 
     def resolve_items(self, selected_skus: str, fallback_sku: str = "") -> list[dict[str, Any]]:
         """Tách chuỗi Selected SKUs thành danh sách item Pancake, gộp số lượng.
@@ -688,7 +741,16 @@ class DropoPancakeBridge:
             )
 
         total_minor = self._to_minor(
-            get("Order value", "Giá trị đơn", "Tổng đơn", "tong_don", "value"), scale
+            self._first_nonempty_cell(
+                row,
+                header,
+                "Order value",
+                "Giá trị đơn",
+                "Tổng đơn",
+                "tong_don",
+                "value",
+            ),
+            scale,
         )
         name = str(
             self._first_nonempty_cell(
@@ -715,7 +777,7 @@ class DropoPancakeBridge:
                 get("Combo", "combo"),
                 get("Item choices in combo", "SP trong combo", "item_choices"),
                 get("Note", "Ghi chú", "ghi_chu", "c_ghichu"),
-                f"Nguồn: {get('Data source', 'Nguồn dữ liệu', 'nguon_du_lieu') or 'Dropo landing'}",
+                f"Nguồn: {self._first_nonempty_cell(row, header, 'Nguồn', 'source', 'landing_url', 'Data source', 'Nguồn dữ liệu', 'nguon_du_lieu') or 'https://th.jcdejc.com/'}",
             )
             if part
         )

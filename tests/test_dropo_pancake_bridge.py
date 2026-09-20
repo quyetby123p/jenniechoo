@@ -339,6 +339,53 @@ def test_jennie_bundle_uses_jcpost_rows_for_per_item_color_and_size():
     assert [item["variation_id"] for item in items] == ["jcv123-den-s", "jca158-nau-s", "jcq158-nau-s"]
 
 
+def test_jennie_bundle_uses_summary_quantity_when_main_row_has_bundle_total():
+    bridge, _, _ = build_bridge([HEADER])
+    bridge._pancake_catalog = {
+        "JC-CV-156": [{
+            "variation_id": "jccv156-kem-l",
+            "variation_sku": "JC-CV-156-KEM-L",
+            "size": "L",
+            "field_values": ["Kem", "L"],
+            "retail_price": 210000,
+        }],
+        "JC-V-154": [{
+            "variation_id": "jcv154-kem-l",
+            "variation_sku": "JC-V-154-KEM-L",
+            "size": "L",
+            "field_values": ["Kem", "L"],
+            "retail_price": 340000,
+        }],
+    }
+    header = ["SKU Code", "Mã sản phẩm", "Màu", "Size", "Số lượng", "Tóm tắt đơn"]
+    row = [
+        "JC-CV-156, JC-V-154",
+        "JC-CV-156",
+        "Kem",
+        "L",
+        "2",  # bundle total, not the first product quantity
+        "JC-CV-156 (Kem/L) x1 | JC-V-154 (Kem/L) x1",
+    ]
+
+    items = bridge.resolve_jennie_items(row, header)
+
+    assert [item["variation_id"] for item in items] == ["jccv156-kem-l", "jcv154-kem-l"]
+    assert [item["quantity"] for item in items] == [1, 1]
+
+
+def test_jennie_payload_uses_web_source_column_instead_of_dropo_fallback():
+    header = HEADER + ["Nguồn"]
+    row = make_row(**{"Nguồn": "https://th.jcdejc.com/?jcpost=1"}) + [
+        "https://th.jcdejc.com/?jcpost=1"
+    ]
+    bridge, _, _ = build_bridge([header])
+
+    payload = bridge.build_order_payload(row, header)
+
+    assert "Nguồn: https://th.jcdejc.com/?jcpost=1" in payload["note"]
+    assert "Dropo landing" not in payload["note"]
+
+
 def test_chuan_hoa_ma_tay_dai_giua_dopo_va_catalog_pancake():
     assert DropoPancakeBridge._normalize_jennie_code("JCV123T") == "JC-V-123T"
     assert DropoPancakeBridge._normalize_jennie_code("JCV123-Tay dài") == "JC-V-123T"
