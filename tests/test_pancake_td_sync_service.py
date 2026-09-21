@@ -452,6 +452,47 @@ def test_sync_transfer_order_sets_transfer_and_cod_zero(tmp_path: Path) -> None:
     assert thai_duong.status_update_calls[0]["payload"]["isNeedSale"] is False
 
 
+def test_sync_dropo_order_keeps_sale_queue_status(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "pc_dropo_1",
+                "custom_id": "JC_DROPO_1",
+                "note": "Nguồn: Dropo landing",
+                "inserted_at_timestamp": 1_714_000_002,
+                "payment_method": "cod",
+                "total_price": 500000,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "SP-01",
+                            "color": "kem",
+                            "retail_price": 500000,
+                            "name": "Ao thun",
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    thai_duong = FakeThaiDuongClient(
+        product_rows=[{"id": 101, "sku": "SP01", "color": "trắng", "name": "Ao thun TD"}],
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+
+    assert report["created"] == 1
+    assert report["sale_status_skipped"] == 1
+    assert report["sale_status_failed"] == 0
+    assert thai_duong.create_calls[0]["orderStatus"] == "DRAFT"
+    assert thai_duong.create_calls[0]["isNeedSale"] is True
+    assert thai_duong.status_update_calls == []
+
+
 def test_sync_writes_thai_duong_order_uid_to_pancake_print_note(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     _write_basic_sync_config(settings)

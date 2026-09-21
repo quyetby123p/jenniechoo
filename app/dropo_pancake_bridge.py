@@ -43,6 +43,14 @@ COL_SYNC_STATUS = "Sync status"
 SKIP_PREFIX = "BỎ QUA"
 HANOI_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
+# Giá SALE của storefront Jennie Choo: tính theo từng sản phẩm, giảm 15% và
+# cắt phần lẻ THB để khớp cách hiển thị trên checkout (2,298 → giảm 344 → 1,954).
+SALE_PERCENT = 15
+SALE_PRODUCT_CODES = frozenset({
+    "JC-A-146", "JC-A-158", "JC-Q-158",
+    "JC-V-145", "JC-V-123", "JC-V-236",
+})
+
 # Bắt mã dạng VXV002-DEN-M / VXV008-XANH MINT-XL, chấp nhận hậu tố lô "-B1".
 SKU_PATTERN = re.compile(
     r"VXV\d{3}-[^()·|,]+?-(?:XXL|XL|L|M)(?=-B\d+|[\s)·|,]|$)",
@@ -435,6 +443,10 @@ class DropoPancakeBridge:
         # catalog và làm sai size/màu khách đặt.
         shared_color = str(get("Màu", "mau", "color") or "").strip()
         shared_size = str(get("Size", "size") or "").strip()
+        summary_options = self._parse_jennie_summary(
+            get("Tóm tắt đơn", "Tóm tắt", "tom_tat", "summary", "san_pham")
+        )
+        summary_occurrences: dict[str, int] = {}
         detail_rows = [row] + list(bundle_rows or [])
         items: list[dict[str, Any]] = []
         for index, raw_code in enumerate(codes, start=1):
@@ -457,19 +469,35 @@ class DropoPancakeBridge:
                     detail_row,
                 )
                 detail_get = lambda *names: self._cell(detail_row, header, *names)  # noqa: E731
+            occurrence = summary_occurrences.get(code, 0)
+            summary_candidates = summary_options.get(code, [])
+            summary_option = (
+                summary_candidates[occurrence]
+                if occurrence < len(summary_candidates)
+                else {}
+            )
+            summary_occurrences[code] = occurrence + 1
             color = str(
                 get(f"mau{index}", f"color{index}", f"Màu {index}")
                 or detail_get("Màu", "mau", "color")
+                or summary_option.get("color")
                 or shared_color
             ).strip()
             size = str(
                 get(f"size{index}", f"Size {index}")
                 or detail_get("Size", "size")
+                or summary_option.get("size")
                 or shared_size
             ).strip()
             quantity_raw = get(f"sl{index}", f"qty{index}", f"Quantity {index}")
             if not quantity_raw:
                 quantity_raw = detail_get("Số lượng", "sl", "quantity", "qty")
+            # The independent JC sheet stores the bundle total on the main
+            # row. Use the per-item quantity from the checkout summary when
+            # it is available, otherwise the first SKU incorrectly receives
+            # the total quantity (e.g. 156 x2 + 154 x1).
+            if summary_option.get("quantity") is not None:
+                quantity_raw = summary_option["quantity"]
             if not quantity_raw and len(codes) == 1:
                 quantity_raw = get("Số lượng", "sl", "quantity", "qty")
             quantity = self._to_int(quantity_raw) or 1
@@ -485,20 +513,55 @@ class DropoPancakeBridge:
             item: dict[str, Any] = {
                 "variation_id": chosen["variation_id"],
                 "quantity": quantity,
-                "variation_info": {"sku": chosen.get("variation_sku") or code},
+                "variation_info": {
+                    "sku": chosen.get("variation_sku") or code,
+                    "product_code": code,
+                },
             }
             if retail > 0:
                 item["variation_info"]["retail_price"] = retail
             items.append(item)
         return items
 
+    @classmethod
+    def _parse_jennie_summary(cls, value: Any) -> dict[str, list[dict[str, Any]]]:
+        """Parse per-item color, size and quantity from a JC checkout summary.
+
+        The main row can be written before hidden ``jcpost`` rows arrive. The
+        summary is written atomically with that row, so it is the reliable
+        fallback for mixed bundles and for the first run of the bridge.
+        Repeated product codes remain occurrence-aware so two sizes of the
+        same code do not get merged accidentally.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return {}
+        result: dict[str, list[dict[str, Any]]] = {}
+        pattern = re.compile(
+            r"(?P<code>JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+))\s*"
+            r"\((?P<color>[^()/|]+)\s*/\s*(?P<size>[^()|]+)\)"
+            r"\s*x\s*(?P<quantity>\d+)",
+            re.IGNORECASE,
+        )
+        for match in pattern.finditer(text):
+            code = cls._normalize_jennie_code(match.group("code"))
+            if not code:
+                continue
+            result.setdefault(code, []).append(
+                {
+                    "color": match.group("color").strip(),
+                    "size": match.group("size").strip(),
+                    "quantity": int(match.group("quantity")),
+                }
+            )
+        return result
+
     def resolve_items(self, selected_skus: str, fallback_sku: str = "") -> list[dict[str, Any]]:
         """Tách chuỗi Selected SKUs thành danh sách item Pancake, gộp số lượng.
 
         Mỗi item mang retail_price = giá niêm yết gốc trong Pancake. Phần khuyến
-        mãi Bundle KHÔNG gắn vào từng dòng hàng mà dồn vào total_discount ở cấp
-        đơn (xem _order_discount_minor) — gắn cả hai chỗ thì Pancake có thể trừ
-        hai lần và thu thiếu tiền.
+        mãi được tính ở cấp đơn rồi phân bổ sang ``discount_each_product`` vì
+        Pancake POS bỏ qua ``total_discount`` nếu chỉ gửi ở cấp đơn.
         """
         found = SKU_PATTERN.findall(str(selected_skus or ""))
         if not found and fallback_sku:
@@ -523,13 +586,45 @@ class DropoPancakeBridge:
                 "quantity": qty,
                 "variation_info": {"sku": sku},
             }
+            product_code = self._normalize_jennie_code(entry.get("product_code"))
+            if product_code in SALE_PRODUCT_CODES:
+                item["variation_info"]["product_code"] = product_code
             if retail > 0:
                 item["variation_info"]["retail_price"] = retail
             items.append(item)
         return items
 
+    @classmethod
+    def _item_product_code(cls, item: dict[str, Any]) -> str:
+        info = item.get("variation_info") or {}
+        direct = cls._normalize_jennie_code(info.get("product_code") or info.get("product_id"))
+        if re.fullmatch(r"JC-[A-Z]+-\d+[A-Z]*", direct):
+            return direct
+        raw_sku = str(info.get("sku") or "").upper().strip()
+        match = re.match(r"(JC-[A-Z]+-\d+)(?:-|$)", raw_sku)
+        return match.group(1) if match else ""
+
+    @classmethod
+    def _sale_discount_minor(cls, items: list[dict[str, Any]]) -> int:
+        """Tính giảm SALE theo từng dòng hàng, đơn vị Pancake là minor."""
+        total = 0
+        for item in items:
+            info = item.get("variation_info") or {}
+            retail_minor = cls._to_int(info.get("retail_price"))
+            quantity = cls._to_int(item.get("quantity"))
+            if retail_minor <= 0 or quantity <= 0:
+                continue
+            if cls._item_product_code(item) not in SALE_PRODUCT_CODES:
+                continue
+            # Retail price của Pancake là THB × 100. Cắt phần lẻ ở THB trước
+            # khi nhân 15%, đúng với storefront đã hiển thị số nguyên.
+            retail_thb = retail_minor // 100
+            discount_thb = retail_thb * SALE_PERCENT // 100
+            total += discount_thb * 100 * quantity
+        return total
+
     def _order_discount_minor(self, items: list[dict[str, Any]], total_minor: int) -> int:
-        """Khuyến mãi Bundle tính ở cấp đơn: tổng giá niêm yết trừ đi số khách trả.
+        """Tính tổng giảm giá: tổng giá niêm yết trừ đi số khách trả.
 
         Không đọc chữ "Bundle 2 ลด 10%" để suy ra 10% — lấy thẳng hiệu số giữa
         giá gốc và cột Order value mà landing đã tính sẵn. Cách này ăn theo đúng
@@ -542,11 +637,11 @@ class DropoPancakeBridge:
         )
         if subtotal <= 0 or total_minor <= 0:
             return 0
-        discount = subtotal - total_minor
-        if discount <= 0:
-            # Khách trả bằng hoặc cao hơn giá niêm yết -> không giảm gì.
-            # Tuyệt đối không trả số âm, Pancake sẽ hiểu thành cộng thêm tiền.
-            return 0
+        inferred = subtotal - total_minor
+        sale_discount = self._sale_discount_minor(items)
+        if inferred <= 0:
+            return sale_discount
+        discount = max(sale_discount, inferred)
         if discount >= subtotal:
             # Giảm bằng cả đơn = biếu không. Gần như chắc chắn dữ liệu sai.
             self.logger.error(
@@ -554,6 +649,75 @@ class DropoPancakeBridge:
             )
             return 0
         return discount
+
+    def _apply_item_discounts(self, items: list[dict[str, Any]], total_discount: int) -> None:
+        """Gắn giảm giá vào từng item để Pancake thực sự tính vào đơn.
+
+        ``total_discount`` vẫn được giữ ở cấp đơn để audit, nhưng Pancake POS
+        tính tiền theo ``discount_each_product``. SALE được ưu tiên theo đúng
+        15% từng sản phẩm; phần giảm còn lại (ví dụ Bundle) được phân bổ theo
+        giá trị từng dòng.
+        """
+        target = max(0, self._to_int(total_discount))
+        if target <= 0:
+            return
+
+        line_data: list[dict[str, int | dict[str, Any]]] = []
+        sale_total = 0
+        for item in items:
+            info = item.get("variation_info") or {}
+            retail_minor = self._to_int(info.get("retail_price"))
+            quantity = self._to_int(item.get("quantity"))
+            if retail_minor <= 0 or quantity <= 0:
+                continue
+            sale_unit = 0
+            if self._item_product_code(item) in SALE_PRODUCT_CODES:
+                sale_unit = (retail_minor // 100) * SALE_PERCENT // 100 * 100
+            sale_line = min(retail_minor * quantity, sale_unit * quantity)
+            sale_total += sale_line
+            line_data.append({
+                "item": item,
+                "retail": retail_minor,
+                "quantity": quantity,
+                "base_unit": sale_unit,
+                "line_discount": sale_line,
+                "capacity": retail_minor * quantity - sale_line,
+            })
+
+        if not line_data:
+            return
+        remaining = max(0, target - sale_total)
+        capacity_total = sum(int(line["capacity"]) for line in line_data)
+        if capacity_total > 0 and remaining > 0:
+            remaining = min(remaining, capacity_total)
+            allocated = 0
+            for index, line in enumerate(line_data):
+                capacity = int(line["capacity"])
+                if index == len(line_data) - 1:
+                    extra_line = remaining - allocated
+                else:
+                    extra_line = remaining * capacity // capacity_total
+                quantity = int(line["quantity"])
+                extra_unit = extra_line // quantity
+                line["line_discount"] = int(line["line_discount"]) + extra_unit * quantity
+                allocated += extra_unit * quantity
+            # Bù phần dư nhỏ vào các dòng đơn chiếc để tổng giảm luôn khớp.
+            remainder = remaining - allocated
+            for line in line_data:
+                if remainder <= 0:
+                    break
+                if int(line["quantity"]) == 1:
+                    line["line_discount"] = int(line["line_discount"]) + remainder
+                    remainder = 0
+
+        for line in line_data:
+            item = line["item"]
+            quantity = int(line["quantity"])
+            line_discount = int(line["line_discount"])
+            unit_discount = line_discount // quantity
+            if unit_discount > 0:
+                item["discount_each_product"] = unit_discount
+                item["is_discount_percent"] = False
 
     def build_order_payload(
         self,
@@ -577,10 +741,21 @@ class DropoPancakeBridge:
             )
 
         total_minor = self._to_minor(
-            get("Order value", "Giá trị đơn", "Tổng đơn", "tong_don", "value"), scale
+            self._first_nonempty_cell(
+                row,
+                header,
+                "Order value",
+                "Giá trị đơn",
+                "Tổng đơn",
+                "tong_don",
+                "value",
+            ),
+            scale,
         )
         name = str(
-            get(
+            self._first_nonempty_cell(
+                row,
+                header,
                 "ชื่อผู้รับ / Recipient",
                 "Tên người nhận",
                 "Tên khách",
@@ -602,7 +777,7 @@ class DropoPancakeBridge:
                 get("Combo", "combo"),
                 get("Item choices in combo", "SP trong combo", "item_choices"),
                 get("Note", "Ghi chú", "ghi_chu", "c_ghichu"),
-                f"Nguồn: {get('Data source', 'Nguồn dữ liệu', 'nguon_du_lieu') or 'Dropo landing'}",
+                f"Nguồn: {self._first_nonempty_cell(row, header, 'Nguồn', 'source', 'landing_url', 'Data source', 'Nguồn dữ liệu', 'nguon_du_lieu') or 'https://th.jcdejc.com/'}",
             )
             if part
         )
@@ -623,7 +798,16 @@ class DropoPancakeBridge:
             province=province,
             post_code=post_code,
         )
-        source_order_id = str(get("Order ID", "ma_don", "order_id")).strip()
+        # The JC order-book has both the source `ma_don` and a separate
+        # `Order ID` column populated later with the Pancake numeric ID. Pick
+        # the first valid source code instead of treating a blank/legacy alias
+        # as authoritative and falling back to DROPO-<timestamp>-<phone>.
+        source_order_id = ""
+        for source_name in ("ma_don", "Order ID", "order_id"):
+            candidate = str(self._cell(row, header, source_name) or "").strip()
+            if re.fullmatch(r"(?:JC|DROPO)[A-Z0-9_-]{4,}", candidate, re.IGNORECASE):
+                source_order_id = self._public_order_id(candidate)
+                break
         # Một số tab Dropo cũ giữ header `ma_don` nhưng dữ liệu thực tế ở ô đó
         # lại là tóm tắt sản phẩm. Chỉ dùng mã đơn có hình dạng JC/DROPO làm
         # custom_id; nếu không thì quay về timestamp + 4 số điện thoại.
@@ -634,6 +818,19 @@ class DropoPancakeBridge:
             if source_order_id
             else self._build_custom_id(get("Thời gian", "created_at", "time"), phone)
         )
+
+        total_discount = self._order_discount_minor(items, total_minor)
+        self._apply_item_discounts(items, total_discount)
+        subtotal = sum(
+            self._to_int(i.get("variation_info", {}).get("retail_price"))
+            * self._to_int(i.get("quantity"))
+            for i in items
+        )
+        # Nếu landing cũ chưa biết SALE hoặc khách sửa tổng tiền, vẫn ép giá
+        # phải thu về đúng mức giảm tối thiểu của các mã SALE.
+        effective_total = total_minor
+        if subtotal > 0 and total_discount > 0:
+            effective_total = subtotal - total_discount
 
         payload: dict[str, Any] = {
             # Khoá định danh suy ra từ chính dữ liệu lead (thời gian + đuôi SĐT),
@@ -650,8 +847,8 @@ class DropoPancakeBridge:
             "shipping_fee": 0,
             # Pancake dùng đơn vị nhỏ (849 THB -> 84900). Gửi số thô 849 thì đơn
             # sẽ mang giá trị 8,49 THB.
-            "total_price": total_minor,
-            "total_discount": self._order_discount_minor(items, total_minor),
+            "total_price": effective_total,
+            "total_discount": total_discount,
             "currency": str(get("Currency", "Tiền tệ", "currency_code") or "THB").strip(),
         }
         if self.config.warehouse_id:
@@ -660,6 +857,14 @@ class DropoPancakeBridge:
         # sẽ thay bằng ID nguồn đơn thật trong trường order_sources.
         payload["ads_source"] = str(self.config.order_source_name or "Dropo").strip() or "Dropo"
         return payload
+
+    @staticmethod
+    def _public_order_id(value: Any) -> str:
+        """Bỏ hậu tố ngẫu nhiên khỏi mã JC hiển thị trong Pancake."""
+        candidate = str(value or "").strip()
+        if re.fullmatch(r"JC\d{6}-\d{6}-[A-Z0-9]{6}", candidate, re.IGNORECASE):
+            return candidate[:-7]
+        return candidate
 
     def _attach_order_source(self, payload: dict[str, Any]) -> None:
         """Gắn ID nguồn đơn Pancake ``Dropo`` vào payload tạo đơn."""
@@ -1221,11 +1426,18 @@ class DropoPancakeBridge:
     @staticmethod
     def _normalize_jennie_code(value: Any) -> str:
         raw = "".join(str(value or "").upper().split()).replace("_", "-")
-        if re.fullmatch(r"JC-[A-Z]+-\d+", raw):
-            return raw
-        match = re.fullmatch(r"JC(CV|[VAQ])[- ]?(\d+)", raw)
+        # Dropo storefront giữ hậu tố T cho mẫu tay dài (JCV123T), trong khi
+        # Pancake đặt tên product là JCV123-Tay dài. Chuẩn hóa cả hai về cùng
+        # một mã logic để không bị lệ thuộc cách từng hệ thống đặt tên.
+        ascii_raw = unicodedata.normalize("NFKD", raw)
+        ascii_raw = "".join(ch for ch in ascii_raw if not unicodedata.combining(ch))
+        match = re.fullmatch(
+            r"JC-?(CV|[VAQ])-?(\d+)(?:-?(T|TAYDAI))?",
+            ascii_raw,
+        )
         if match:
-            return f"JC-{match.group(1)}-{match.group(2)}"
+            suffix = "T" if match.group(3) else ""
+            return f"JC-{match.group(1)}-{match.group(2)}{suffix}"
         return raw
 
     @staticmethod
@@ -1270,6 +1482,12 @@ class DropoPancakeBridge:
                 continue
             scored.append((score, candidate))
         if not scored:
+            # Một số sản phẩm Pancake (ví dụ Classic Dress tay dài) chỉ khai
+            # size, không khai màu vì sản phẩm thực tế chỉ có một màu. Khi
+            # size đã lọc ra đúng một biến thể thì vẫn map được theo catalog,
+            # thay vì từ chối đơn chỉ vì landing gửi thêm màu hiển thị.
+            if len(sized) == 1:
+                return sized[0]
             return None
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return scored[0][1]
@@ -1288,6 +1506,14 @@ class DropoPancakeBridge:
                 index = header.index(name)
                 if index < len(row):
                     return row[index]
+        return ""
+
+    @classmethod
+    def _first_nonempty_cell(cls, row: list[Any], header: list[str], *names: str) -> Any:
+        for name in names:
+            value = cls._cell(row, header, name)
+            if str(value or "").strip():
+                return value
         return ""
 
     @staticmethod

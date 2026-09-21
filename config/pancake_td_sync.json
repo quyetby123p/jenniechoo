@@ -23,6 +23,9 @@
     "pancake_fetch_error_notify_cooldown_minutes": 15
   },
   "pancake": {
+    "detail_fetch": {
+      "enabled": true
+    },
     "order_id_paths": ["id"],
     "order_code_paths": ["custom_id", "display_id", "code"],
     "order_created_ts_paths": ["inserted_at_timestamp", "created_at_timestamp"],
@@ -193,8 +196,10 @@
       "cod_amount_path": "cod",
       "need_sale_confirm_path": "isNeedSale",
       "need_sale_confirm_value": false,
+      "dropo_need_sale_confirm_value": true,
       "order_status_path": "orderStatus",
       "order_status_value": "SALE_CONFIRM",
+      "dropo_order_status_value": "DRAFT",
       "items_path": "products",
       "note_path": "note",
       "copy_from_order": {

@@ -20,6 +20,7 @@ from app.settings import load_settings
 
 
 WAITING_CONFIRMATION_STATUS = 17
+WAITING_STOCK_STATUS = 11
 CONFIRMED_STATUS = 1
 STATUS_UPDATE_CONFIG = {
     # Chỉ đổi trạng thái; không PUT lại toàn bộ items vì Pancake sẽ kiểm tra
@@ -48,6 +49,7 @@ class PancakeAutoConfirmService:
             "fetched": 0,
             "candidates": 0,
             "updated": 0,
+            "moved_to_waiting_stock": 0,
             "skipped": 0,
             "skipped_reasons": [],
             "failed": 0,
@@ -96,8 +98,33 @@ class PancakeAutoConfirmService:
                     summary["updated"] += 1
             except Exception as exc:  # noqa: BLE001
                 if self._is_not_ready_error(exc):
-                    summary["skipped"] += 1
-                    summary["skipped_reasons"].append(f"Đơn {order_code}: {exc}")
+                    # Pancake không cho xác nhận khi catalog/tồn kho của item
+                    # chưa sẵn sàng. Đưa về Chờ hàng để đơn không bị kẹt mãi ở
+                    # Chờ xác nhận; phiên sau vẫn có thể xử lý tiếp khi hàng đủ.
+                    try:
+                        fallback = self.pancake.update_order_status(
+                            order_id,
+                            WAITING_STOCK_STATUS,
+                            update_cfg=STATUS_UPDATE_CONFIG,
+                        )
+                        if isinstance(fallback, dict) and fallback.get("skipped"):
+                            summary["skipped"] += 1
+                            summary["skipped_reasons"].append(
+                                f"Đơn {order_code}: Pancake chưa có thông tin sản phẩm; "
+                                f"không chuyển được sang Chờ hàng ({fallback.get('reason', 'skipped')})."
+                            )
+                        else:
+                            summary["moved_to_waiting_stock"] += 1
+                            self.logger.warning(
+                                "Đơn %s chưa đủ thông tin sản phẩm; đã chuyển sang Chờ hàng.",
+                                order_code,
+                            )
+                    except Exception as fallback_exc:  # noqa: BLE001
+                        summary["skipped"] += 1
+                        summary["skipped_reasons"].append(
+                            f"Đơn {order_code}: Pancake chưa có thông tin sản phẩm; "
+                            f"chuyển Chờ hàng thất bại: {fallback_exc}"
+                        )
                     continue
                 summary["failed"] += 1
                 summary["errors"].append(f"Đổi trạng thái đơn {order_code} thất bại: {exc}")

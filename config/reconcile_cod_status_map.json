@@ -33,6 +33,18 @@
     },
     "being returned": {
       "status": 4
+    },
+    "data faile": {
+      "status": 4,
+      "from_statuses": [2]
+    },
+    "data fail": {
+      "status": 4,
+      "from_statuses": [2]
+    },
+    "data failed": {
+      "status": 4,
+      "from_statuses": [2]
     }
   },
   "update_endpoint": {

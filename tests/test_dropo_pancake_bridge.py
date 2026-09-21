@@ -129,6 +129,15 @@ class FakePancake:
         return self.response
 
 
+class CatalogFakePancake(FakePancake):
+    def __init__(self, products: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self.products = products
+
+    def list_products(self, **_: Any) -> list[dict[str, Any]]:
+        return self.products
+
+
 class SourceFakePancake(FakePancake):
     def __init__(self, sources: list[dict[str, Any]]) -> None:
         super().__init__()
@@ -330,6 +339,83 @@ def test_jennie_bundle_uses_jcpost_rows_for_per_item_color_and_size():
     assert [item["variation_id"] for item in items] == ["jcv123-den-s", "jca158-nau-s", "jcq158-nau-s"]
 
 
+def test_jennie_bundle_uses_summary_quantity_when_main_row_has_bundle_total():
+    bridge, _, _ = build_bridge([HEADER])
+    bridge._pancake_catalog = {
+        "JC-CV-156": [{
+            "variation_id": "jccv156-kem-l",
+            "variation_sku": "JC-CV-156-KEM-L",
+            "size": "L",
+            "field_values": ["Kem", "L"],
+            "retail_price": 210000,
+        }],
+        "JC-V-154": [{
+            "variation_id": "jcv154-kem-l",
+            "variation_sku": "JC-V-154-KEM-L",
+            "size": "L",
+            "field_values": ["Kem", "L"],
+            "retail_price": 340000,
+        }],
+    }
+    header = ["SKU Code", "Mã sản phẩm", "Màu", "Size", "Số lượng", "Tóm tắt đơn"]
+    row = [
+        "JC-CV-156, JC-V-154",
+        "JC-CV-156",
+        "Kem",
+        "L",
+        "2",  # bundle total, not the first product quantity
+        "JC-CV-156 (Kem/L) x1 | JC-V-154 (Kem/L) x1",
+    ]
+
+    items = bridge.resolve_jennie_items(row, header)
+
+    assert [item["variation_id"] for item in items] == ["jccv156-kem-l", "jcv154-kem-l"]
+    assert [item["quantity"] for item in items] == [1, 1]
+
+
+def test_jennie_payload_uses_web_source_column_instead_of_dropo_fallback():
+    header = HEADER + ["Nguồn"]
+    row = make_row(**{"Nguồn": "https://th.jcdejc.com/?jcpost=1"}) + [
+        "https://th.jcdejc.com/?jcpost=1"
+    ]
+    bridge, _, _ = build_bridge([header])
+
+    payload = bridge.build_order_payload(row, header)
+
+    assert "Nguồn: https://th.jcdejc.com/?jcpost=1" in payload["note"]
+    assert "Dropo landing" not in payload["note"]
+
+
+def test_chuan_hoa_ma_tay_dai_giua_dopo_va_catalog_pancake():
+    assert DropoPancakeBridge._normalize_jennie_code("JCV123T") == "JC-V-123T"
+    assert DropoPancakeBridge._normalize_jennie_code("JCV123-Tay dài") == "JC-V-123T"
+
+
+def test_map_san_pham_tay_dai_khi_pancake_khong_khai_mau():
+    pancake = CatalogFakePancake([
+        {
+            "custom_id": "JCV123-Tay dài",
+            "variations": [
+                {
+                    "id": "jcv123t-s",
+                    "custom_id": "JC-V-123-TAYDAI-S",
+                    "retail_price": 300000,
+                    "fields": [{"name": "Size", "value": "S", "keyValue": "S"}],
+                }
+            ],
+        }
+    ])
+    bridge, _, _ = build_bridge([HEADER], pancake=pancake)
+    bridge._load_pancake_sku_map()
+    header = ["SKU Code", "Màu", "Size", "Số lượng"]
+    row = ["JCV123T", "Đen", "S", "1"]
+
+    items = bridge.resolve_jennie_items(row, header)
+
+    assert items[0]["variation_id"] == "jcv123t-s"
+    assert items[0]["variation_info"]["product_code"] == "JC-V-123T"
+
+
 def test_geo_match_tach_ten_thai_va_ten_anh():
     bridge, _, _ = build_bridge([HEADER])
     rows = [{"id": "ranong", "name": "ระนอง/ Ranong", "name_en": "ระนอง"}]
@@ -369,7 +455,33 @@ def test_payload_chuan_hoa_sdt_va_tong_tien():
     assert payload["currency"] == "THB"
     assert payload["is_free_shipping"] is True
     assert payload["items"][0]["quantity"] == 2
+
+
+def test_jc_aliases_bo_trong_van_lay_ten_va_ma_web():
+    header = HEADER + ["Tên khách", "Tên người nhận", "ma_don", "Order ID"]
+    row = make_row(**{"ชื่อผู้รับ / Recipient": ""}) + [
+        "Khách JC",
+        "",
+        "JC260918-095600-OEV1N1",
+        "",
+    ]
+    bridge, _, _ = build_bridge([header])
+    payload = bridge.build_order_payload(row, header)
+
+    assert payload["custom_id"] == "JC260918-095600"
+    assert payload["shipping_address"]["full_name"] == "Khách JC"
+    assert payload["bill_full_name"] == "Khách JC"
     assert payload["ads_source"] == "Dropo"
+
+
+def test_jc_order_id_bo_hau_to_ngau_nhien_truoc_khi_gui_pancake():
+    header = HEADER + ["ma_don"]
+    row = make_row(**{"Thời gian": "2026-09-18 13:33:43+07:00"}) + [
+        "JC260918-133343-OENA5C"
+    ]
+    bridge, _, _ = build_bridge([header])
+    payload = bridge.build_order_payload(row, header)
+    assert payload["custom_id"] == "JC260918-133343"
 
 
 def test_gan_id_nguon_don_dropo_khi_tao_live():
@@ -807,9 +919,22 @@ PRICED_MAP = {
     },
 }
 
+SALE_PRICED_MAP = {
+    "VXV002-DEN-M": {
+        "variation_id": "var-sale",
+        "product_code": "JC-A-146",
+        "retail_price_minor": 160000,
+    },
+}
+
 
 def priced_payload(**overrides: Any) -> dict:
     bridge, _, _ = build_bridge([HEADER], sku_map=PRICED_MAP)
+    return bridge.build_order_payload(make_row(**overrides), HEADER)
+
+
+def sale_priced_payload(**overrides: Any) -> dict:
+    bridge, _, _ = build_bridge([HEADER], sku_map=SALE_PRICED_MAP)
     return bridge.build_order_payload(make_row(**overrides), HEADER)
 
 
@@ -827,11 +952,11 @@ def test_bundle2_giam_dung_10_phan_tram():
     assert payload["total_price"] + payload["total_discount"] == 259800
 
 
-def test_khuyen_mai_khong_gan_vao_tung_dong_hang():
-    """Gắn cả total_discount lẫn discount_each_product thì Pancake có thể trừ
-    hai lần -> thu thiếu tiền. Chỉ được giảm ở MỘT cấp."""
+def test_khuyen_mai_duoc_gan_vao_tung_dong_hang_de_pancake_tinh_dung():
+    """Pancake cần discount_each_product để áp dụng giảm giá thực tế."""
     payload = priced_payload(**{"Order value": "2338"})
-    assert "discount_each_product" not in payload["items"][0]
+    assert payload["items"][0]["discount_each_product"] == 13000
+    assert payload["items"][0]["is_discount_percent"] is False
     assert payload["items"][0]["variation_info"]["retail_price"] == 129900
 
 
@@ -875,6 +1000,29 @@ def test_bundle_tron_mau_van_cong_dung_gia_goc():
     assert len(payload["items"]) == 2
     assert gia_niem_yet(payload) == 259800
     assert payload["total_discount"] == 26000
+
+
+def test_sale_ep_giam_15_phan_tram_theo_tung_san_pham():
+    # 1,600 THB → giảm 240 THB → khách trả 1,360 THB, kể cả khi
+    # landing cũ gửi tổng giá niêm yết chưa giảm.
+    payload = sale_priced_payload(**{"Selected SKUs": "VXV002-DEN-M", "Order value": "1600"})
+    assert payload["total_discount"] == 24000
+    assert payload["total_price"] == 136000
+    assert payload["total_price"] + payload["total_discount"] == 160000
+    assert payload["items"][0]["discount_each_product"] == 24000
+    assert payload["items"][0]["is_discount_percent"] is False
+
+
+def test_sale_nhieu_so_luong_tinh_giam_cho_tung_don_vi():
+    payload = sale_priced_payload(
+        **{
+            "Selected SKUs": "Item 1: (VXV002-DEN-M) · Item 2: (VXV002-DEN-M)",
+            "Order value": "3200",
+        }
+    )
+    assert payload["total_discount"] == 48000
+    assert payload["total_price"] == 272000
+    assert payload["items"][0]["discount_each_product"] == 24000
 
 
 @pytest.mark.parametrize(
