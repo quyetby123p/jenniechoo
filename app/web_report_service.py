@@ -729,7 +729,8 @@ class WebReportService:
             if created_dt is None or not (start_date <= created_dt.date() <= end_date):
                 continue
 
-            td_status = self._normalize_text(self._extract_first_text(row, self._thai_duong_shipping_status_fields()))
+            td_status_raw = self._extract_first_text(row, self._thai_duong_shipping_status_fields())
+            td_status = self._normalize_thai_duong_shipping_status(td_status_raw)
             if td_status not in eligible_td_statuses:
                 continue
 
@@ -772,7 +773,7 @@ class WebReportService:
                     "match_result": "thai_duong_order_pending_cashflow",
                     "reason": "Thái Dương đã giao/đang hoàn, Pancake vẫn Đã gửi hàng và chưa có trong Dòng tiền.",
                     "td_awb": td_awb,
-                    "td_status": self._extract_first_text(row, self._thai_duong_shipping_status_fields()),
+                    "td_status": td_status_raw,
                     "customer_name": customer_name,
                     "settlement_date": "",
                     "created_at": self._format_dt(created_dt, tz=tz),
@@ -848,7 +849,7 @@ class WebReportService:
                 continue
 
             td_status_raw = self._extract_first_text(row, self._thai_duong_shipping_status_fields())
-            td_status = self._normalize_text(td_status_raw)
+            td_status = self._normalize_thai_duong_shipping_status(td_status_raw)
             if td_status not in eligible_td_statuses:
                 continue
 
@@ -923,6 +924,34 @@ class WebReportService:
             "delivery_status",
             "status",
         )
+
+    def _normalize_thai_duong_shipping_status(self, raw: Any) -> str:
+        """Map Thai Duong display labels to the reconciliation API vocabulary."""
+        normalized = self._normalize_text(str(raw or "").strip())
+        if normalized in {
+            "success",
+            "giao hang thanh cong",
+            "giao thanh cong",
+            "delivered",
+            "delivery successful",
+        }:
+            return "success"
+        if normalized in {
+            "being_returned",
+            "dang hoan hang",
+            "dang hoan",
+            "returning",
+        }:
+            return "being_returned"
+        if normalized in {
+            "returned",
+            "hoan hang thanh cong",
+            "da hoan",
+            "return completed",
+            "returned successfully",
+        }:
+            return "returned"
+        return normalized
 
     def _extract_thai_duong_order_datetime(self, row: dict[str, Any], *, tz: timezone | ZoneInfo) -> datetime | None:
         for field in (
@@ -1265,7 +1294,7 @@ class WebReportService:
                 if not isinstance(record, dict):
                     continue
                 match_result = self._normalize_text(str(record.get("match_result", "")).strip())
-                td_status = self._normalize_text(str(record.get("td_status", "")).strip())
+                td_status = self._normalize_thai_duong_shipping_status(str(record.get("td_status", "")).strip())
                 row = self._build_reconcile_row(record, match_result)
                 order_ref = self._normalize_text(str(row.get("pancake_order_ref", "")).strip())
                 fingerprint = self._normalize_text(str(record.get("fingerprint", "")).strip())

@@ -1247,6 +1247,59 @@ def test_reconcile_received_uses_live_cashflow_rows_mapped_to_pancake(tmp_path: 
     }
 
 
+def test_live_reconcile_accepts_thai_duong_display_status_labels(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    dump_json(
+        settings.pancake_td_sync_config_path,
+        {
+            "thai_duong": {
+                "order_lookup_endpoint": {
+                    "method": "POST",
+                    "path": "/api/v1/orders/list",
+                    "result_path": "data.data",
+                }
+            }
+        },
+    )
+    fake_td = _FakeThaiDuongClient(
+        [
+            {
+                "orderUID": "THA-VI-PENDING",
+                "pancakeOrderId": "JC-VI-PENDING",
+                "shippingOrderCode": "AWB-VI-PENDING",
+                "shippingOrderStatus": "Giao hàng thành công",
+                "createdAt": "2026-06-01T09:00:00+07:00",
+                "cod": 3500,
+            },
+            {
+                "orderUID": "THA-VI-RECEIVED",
+                "pancakeOrderId": "JC-VI-RECEIVED",
+                "shippingOrderCode": "AWB-VI-RECEIVED",
+                "shippingOrderStatus": "Hoàn hàng thành công",
+                "codPaymentDate": "2026-06-01",
+                "cod": 2400,
+            },
+        ]
+    )
+    fake_pancake = _FakePancakeClient(
+        [],
+        details={"JC-VI-PENDING": {"id": "JC-VI-PENDING", "status": 2}},
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=fake_pancake,
+        thai_duong_client=fake_td,  # type: ignore[arg-type]
+    )
+
+    snapshot = service.get_snapshot(date(2026, 6, 1))
+
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 1
+    assert snapshot["metrics"]["pending_reconcile_value_minor"] == 350_000
+    assert snapshot["metrics"]["reconcile_received_orders"] == 1
+    assert snapshot["metrics"]["reconcile_received_value_minor"] == 240_000
+
+
 def test_pending_reconcile_uses_td_success_not_in_cashflow_mode(tmp_path: Path) -> None:
     config_root = tmp_path / "config"
     config_root.mkdir(parents=True, exist_ok=True)
