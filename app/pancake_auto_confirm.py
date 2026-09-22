@@ -28,6 +28,11 @@ STATUS_UPDATE_CONFIG = {
     "method": "PUT",
     "path": "/shops/{shop_id}/orders/{order_id}",
     "status_field": "status",
+    # Pancake validates items/tồn kho when PUT đổi trạng thái; gửi riêng
+    # status sẽ bị 422 dù đơn đã có đủ thông tin. Gửi lại full order để giữ
+    # nguyên dữ liệu và tránh ghi đè nếu đơn đã được xử lý ở phiên khác.
+    "safe_full_order_update": True,
+    "expected_current_status": WAITING_CONFIRMATION_STATUS,
     "verify_after_update": True,
     "extra_payload": {},
 }

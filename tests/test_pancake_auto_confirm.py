@@ -53,6 +53,8 @@ def test_only_waiting_confirmation_orders_are_updated() -> None:
     assert [item["order_id"] for item in pancake.status_updates] == ["waiting", "waiting_string"]
     assert all(item["status"] == CONFIRMED_STATUS for item in pancake.status_updates)
     assert all(item["update_cfg"] == STATUS_UPDATE_CONFIG for item in pancake.status_updates)
+    assert STATUS_UPDATE_CONFIG["safe_full_order_update"] is True
+    assert STATUS_UPDATE_CONFIG["expected_current_status"] == WAITING_CONFIRMATION_STATUS
     assert pancake.fetch_calls[0][1] - pancake.fetch_calls[0][0] == 168 * 3600
 
 
