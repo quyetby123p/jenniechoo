@@ -440,6 +440,7 @@ class PancakeToThaiDuongSyncService:
                 order_id=order_id,
                 order_code=order_code,
                 pancake_order=order,
+                expected_products=mapped_items,
                 create_result=create_result,
                 cfg=cfg,
                 summary=summary,
@@ -794,6 +795,7 @@ class PancakeToThaiDuongSyncService:
         cfg: dict[str, Any],
         summary: dict[str, Any],
         create_result: dict[str, Any] | None = None,
+        expected_products: list[dict[str, Any]] | None = None,
     ) -> None:
         if not isinstance(pancake_order, dict) or not self._is_dropo_order(pancake_order):
             return
@@ -806,6 +808,14 @@ class PancakeToThaiDuongSyncService:
             reference_candidates=[order_code, order_id],
         )
         row = lookup_rows[0] if lookup_rows and isinstance(lookup_rows[0], dict) else {}
+        if not row and isinstance(create_result, dict):
+            candidate = create_result.get("data") if isinstance(create_result.get("data"), dict) else create_result
+            if isinstance(candidate, dict) and (
+                candidate.get("id")
+                or candidate.get("orderUID")
+                or candidate.get("pancakeOrderId")
+            ):
+                row = candidate
         if not row:
             return
 
@@ -844,6 +854,14 @@ class PancakeToThaiDuongSyncService:
             quantity = self._to_int(product.get("quantity"), fallback=0)
             if sku and quantity > 0:
                 products.append({"sku": sku, "quantity": quantity})
+        if not products and isinstance(expected_products, list):
+            for product in expected_products:
+                if not isinstance(product, dict):
+                    continue
+                sku = str(product.get("sku") or "").strip()
+                quantity = self._to_int(product.get("quantity"), fallback=0)
+                if sku and quantity > 0:
+                    products.append({"sku": sku, "quantity": quantity})
         if not products:
             summary["dropo_status_failed"] = self._to_int(summary.get("dropo_status_failed")) + 1
             summary["errors"].append(
@@ -2541,6 +2559,15 @@ class PancakeToThaiDuongSyncService:
                     "method": "POST",
                     "path": "/api/v1/orders",
                 },
+                "order_update_endpoint": {
+                    "base_url_env": "THAI_DUONG_API_BASE_URL",
+                    "token_env": "THAI_DUONG_API_TOKEN",
+                    "token_header": "Authorization",
+                    "token_prefix": "Bearer ",
+                    "method": "PUT",
+                    "path": "/api/v1/orders/{order_id}",
+                    "use_session_login": False,
+                },
                 "sale_status_sync": {
                     "enabled": True,
                     "order_id_paths": ["id", "data.id", "data.data.id", "data.order.id", "result.id"],
@@ -2583,8 +2610,10 @@ class PancakeToThaiDuongSyncService:
                     "cod_amount_path": "cod",
                     "need_sale_confirm_path": "isNeedSale",
                     "need_sale_confirm_value": False,
+                    "dropo_need_sale_confirm_value": True,
                     "order_status_path": "orderStatus",
                     "order_status_value": "SALE_CONFIRM",
+                    "dropo_order_status_value": "DRAFT",
                     "items_path": "products",
                     "note_path": "note",
                     "copy_from_order": {},
@@ -2654,9 +2683,18 @@ class PancakeToThaiDuongSyncService:
             ],
         )
         text = cls._normalize_compare_text(" ".join(str(value or "") for value in values))
+        compact = re.sub(r"[^a-z0-9]", "", text)
         return any(
-            marker in text
-            for marker in ("dropo", "1022160", "thjcdejccom", "dropoio")
+            marker in text or marker in compact
+            for marker in (
+                "dropo",
+                "1022160",
+                "thjcdejccom",
+                "thjenniechoocom",
+                "jcdejccom",
+                "jenniechoocom",
+                "dropoio",
+            )
         )
 
     @staticmethod

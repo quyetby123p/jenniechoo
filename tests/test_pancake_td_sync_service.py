@@ -18,6 +18,12 @@ def test_candidate_sku_keys_extracts_product_code_after_thai_duong_prefix() -> N
     assert "JCV123" in keys
 
 
+def test_web_order_detector_accepts_pancake_dropo_source_fields() -> None:
+    assert PancakeToThaiDuongSyncService._is_dropo_order({"ads_source": "Dropo"}) is True
+    assert PancakeToThaiDuongSyncService._is_dropo_order({"order_sources": "1022160"}) is True
+    assert PancakeToThaiDuongSyncService._is_dropo_order({"note": "Nguồn: https://th.jcdejc.com/"}) is True
+
+
 def test_sku_mapping_keeps_style_descriptor_and_embedded_size(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     _write_basic_sync_config(settings)
