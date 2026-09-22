@@ -126,11 +126,14 @@ class FakePancakeClient:
         *,
         fetch_error: Exception | None = None,
         note_update_error: Exception | None = None,
+        details: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self.orders = orders
         self.fetch_error = fetch_error
         self.note_update_error = note_update_error
+        self.details = {str(key): dict(value) for key, value in (details or {}).items()}
         self.calls: list[tuple[int, int]] = []
+        self.detail_calls: list[str] = []
         self.note_updates: list[dict[str, Any]] = []
 
     def fetch_orders_by_timestamp_range(self, start_ts: int, end_ts: int) -> list[dict]:
@@ -138,6 +141,10 @@ class FakePancakeClient:
         if self.fetch_error is not None:
             raise self.fetch_error
         return list(self.orders)
+
+    def get_order_detail(self, order_id: str) -> dict[str, Any]:
+        self.detail_calls.append(str(order_id))
+        return dict(self.details.get(str(order_id), {}))
 
     def update_order_note_print(
         self,
@@ -188,6 +195,7 @@ class FakeThaiDuongClient:
         self.create_calls: list[dict] = []
         self.lookup_calls: list[str] = []
         self.status_update_calls: list[dict[str, Any]] = []
+        self.order_update_calls: list[dict[str, Any]] = []
 
     def fetch_products_for_sync(self, endpoint_cfg: dict) -> list[dict]:  # noqa: ARG002
         return list(self.product_rows)
@@ -231,6 +239,22 @@ class FakeThaiDuongClient:
         if self.status_update_error is not None:
             raise self.status_update_error
         self.status_update_calls.append(
+            {
+                "order_id": order_id,
+                "payload": dict(payload or {}),
+                "endpoint_cfg": dict(endpoint_cfg or {}),
+            }
+        )
+        return {"success": True}
+
+    def update_order_for_sync(
+        self,
+        *,
+        order_id: str,
+        payload: dict[str, Any] | None = None,
+        endpoint_cfg: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.order_update_calls.append(
             {
                 "order_id": order_id,
                 "payload": dict(payload or {}),
@@ -497,6 +521,77 @@ def test_sync_dropo_order_keeps_sale_queue_status(tmp_path: Path) -> None:
     assert thai_duong.create_calls[0]["orderStatus"] == "DRAFT"
     assert thai_duong.create_calls[0]["isNeedSale"] is True
     assert thai_duong.status_update_calls == []
+
+
+def test_sync_dropo_detail_source_repairs_existing_order_status(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    _write_basic_sync_config(settings)
+    dump_json(
+        settings.pancake_td_sync_state_file,
+        {"processed_order_ids": {"pc_dropo_detail": "2026-09-23T00:00:00+00:00"}},
+    )
+    pancake = FakePancakeClient(
+        [
+            {
+                "id": "pc_dropo_detail",
+                "custom_id": "JC_DROPO_DETAIL",
+                "inserted_at_timestamp": 1_758_600_002,
+            }
+        ],
+        details={
+            "pc_dropo_detail": {
+                "id": "pc_dropo_detail",
+                "custom_id": "JC_DROPO_DETAIL",
+                "landing_url": "https://th.jcdejc.com/order/123",
+                "inserted_at_timestamp": 1_758_600_002,
+                "payment_method": "cod",
+                "total_price": 500000,
+                "items": [
+                    {
+                        "quantity": 1,
+                        "variation_info": {
+                            "sku": "SP-01",
+                            "color": "kem",
+                            "retail_price": 500000,
+                            "name": "Ao thun",
+                        },
+                    }
+                ],
+            }
+        },
+    )
+    thai_duong = FakeThaiDuongClient(
+        lookup_rows_by_reference={
+            "JC_DROPO_DETAIL": [
+                {
+                    "id": "td_dropo_detail",
+                    "orderUID": "THA356_DROPO_DETAIL",
+                    "pancakeOrderId": "JC_DROPO_DETAIL",
+                    "orderStatus": "SALE_CONFIRM",
+                    "orderConfirmStatus": "SALE_CONFIRM",
+                    "isNeedSale": False,
+                    "configFee": 0,
+                    "products": [{"sku": "SP01", "quantity": 1}],
+                }
+            ]
+        },
+    )
+    service = PancakeToThaiDuongSyncService(settings, logging.getLogger("test"), pancake, thai_duong)
+
+    report = service.sync_once()
+    assert pancake.detail_calls == ["pc_dropo_detail"]
+    assert report["skipped_local_duplicate"] == 1
+    assert report["dropo_status_synced"] == 1
+    assert report["dropo_status_failed"] == 0
+    assert len(thai_duong.order_update_calls) == 1
+    assert thai_duong.order_update_calls[0]["order_id"] == "td_dropo_detail"
+    assert thai_duong.order_update_calls[0]["payload"] == {
+        "products": [{"sku": "SP01", "quantity": 1}],
+        "orderStatus": "DRAFT",
+        "orderConfirmStatus": "DRAFT",
+        "isNeedSale": True,
+        "configFee": 1,
+    }
 
 
 def test_sync_writes_thai_duong_order_uid_to_pancake_print_note(tmp_path: Path) -> None:
