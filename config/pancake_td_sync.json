@@ -155,6 +155,15 @@
       "method": "POST",
       "path": "/api/v1/orders"
     },
+    "order_update_endpoint": {
+      "base_url_env": "THAI_DUONG_API_BASE_URL",
+      "token_env": "THAI_DUONG_API_TOKEN",
+      "token_header": "Authorization",
+      "token_prefix": "Bearer ",
+      "method": "PUT",
+      "path": "/api/v1/orders/{order_id}",
+      "use_session_login": false
+    },
     "sale_status_sync": {
       "enabled": true,
       "order_id_paths": ["id", "data.id", "data.data.id", "data.order.id", "result.id"],

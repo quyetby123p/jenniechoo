@@ -33,6 +33,7 @@ class PancakeToThaiDuongSyncService:
         self.thai_duong = thai_duong_client
         self._product_cache_at: datetime | None = None
         self._product_index: dict[str, list[dict[str, Any]]] = {}
+        self._remote_order_lookup_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self._ensure_layout()
 
     def _ensure_layout(self) -> None:
@@ -170,6 +171,8 @@ class PancakeToThaiDuongSyncService:
             "sale_status_synced": 0,
             "sale_status_failed": 0,
             "sale_status_skipped": 0,
+            "dropo_status_synced": 0,
+            "dropo_status_failed": 0,
             "manual_order_code": normalized_manual_order_code,
             "run_path": "",
             "notify": False,
@@ -251,6 +254,8 @@ class PancakeToThaiDuongSyncService:
 
             order_id = self._extract_order_id(order, cfg)
             order_code = self._extract_order_code(order, cfg)
+            order = self._hydrate_pancake_order_for_sync(order=order, cfg=cfg)
+            order_code = self._extract_order_code(order, cfg) or order_code
             order_created_ts = self._extract_order_created_ts(order, cfg)
             if order_created_ts > max_seen_ts:
                 max_seen_ts = order_created_ts
@@ -261,6 +266,13 @@ class PancakeToThaiDuongSyncService:
                 continue
             if order_id in local_processed_ids:
                 summary["skipped_local_duplicate"] += 1
+                self._sync_dropo_status_to_thai_duong(
+                    order_id=order_id,
+                    order_code=order_code,
+                    pancake_order=order,
+                    cfg=cfg,
+                    summary=summary,
+                )
                 if manual_force_retry_failed:
                     self._sync_existing_order_metadata_manual(
                         order_id=order_id,
@@ -270,8 +282,6 @@ class PancakeToThaiDuongSyncService:
                         summary=summary,
                     )
                 continue
-            order = self._hydrate_pancake_order_for_sync(order=order, cfg=cfg)
-            order_code = self._extract_order_code(order, cfg) or order_code
             order_fingerprint = self._order_fingerprint(order, cfg)
             suppress_repeated_error_notify = False
             known_failed = failed_store.get(order_id)
@@ -290,6 +300,13 @@ class PancakeToThaiDuongSyncService:
             try:
                 if self._exists_remote_order(order_id=order_id, order_code=order_code, cfg=cfg):
                     summary["skipped_remote_duplicate"] += 1
+                    self._sync_dropo_status_to_thai_duong(
+                        order_id=order_id,
+                        order_code=order_code,
+                        pancake_order=order,
+                        cfg=cfg,
+                        summary=summary,
+                    )
                     if manual_force_retry_failed:
                         self._sync_existing_order_metadata_manual(
                             order_id=order_id,
@@ -419,6 +436,14 @@ class PancakeToThaiDuongSyncService:
                 )
                 continue
 
+            self._sync_dropo_status_to_thai_duong(
+                order_id=order_id,
+                order_code=order_code,
+                pancake_order=order,
+                create_result=create_result,
+                cfg=cfg,
+                summary=summary,
+            )
             self._sync_sale_status_to_thai_duong(
                 order_id=order_id,
                 order_code=order_code,
@@ -510,6 +535,8 @@ class PancakeToThaiDuongSyncService:
                 "sale_status_synced": 0,
                 "sale_status_failed": 0,
                 "sale_status_skipped": 0,
+                "dropo_status_synced": 0,
+                "dropo_status_failed": 0,
                 "manual_order_code": "",
                 "run_path": "",
                 "notify": True,
@@ -538,6 +565,8 @@ class PancakeToThaiDuongSyncService:
                 f"Sale xác nhận đã cập nhật: {self._to_int(report.get('sale_status_synced')):,}",
                 f"Sale xác nhận lỗi: {self._to_int(report.get('sale_status_failed')):,}",
                 f"Sale xác nhận bỏ qua (Dropo): {self._to_int(report.get('sale_status_skipped')):,}",
+                f"Dropo đã sửa trạng thái: {self._to_int(report.get('dropo_status_synced')):,}",
+                f"Dropo sửa trạng thái lỗi: {self._to_int(report.get('dropo_status_failed')):,}",
                 f"Trùng local: {self._to_int(report.get('skipped_local_duplicate')):,}",
                 f"Trùng remote: {self._to_int(report.get('skipped_remote_duplicate')):,}",
                 f"Không map được: {self._to_int(report.get('skipped_unmapped')):,}",
@@ -724,6 +753,14 @@ class PancakeToThaiDuongSyncService:
             extra_filters=self._lookup_filters(td_cfg),
         )
         if not rows:
+            fetch_all = getattr(self.thai_duong, "fetch_orders_for_sync", None)
+            if callable(fetch_all):
+                rows = fetch_all(
+                    endpoint_cfg=lookup_cfg,
+                    search_text="",
+                    extra_filters=self._lookup_filters(td_cfg),
+                )
+        if not rows:
             return False
         reference_paths = self._as_list(td_cfg.get("order_reference_paths"))
         if not reference_paths:
@@ -734,11 +771,120 @@ class PancakeToThaiDuongSyncService:
             self._normalize_reference(lookup_value),
         }
         normalized_targets.discard("")
+        matched_rows: list[dict[str, Any]] = []
         for row in rows:
-            for ref in self._extract_values(row, reference_paths):
-                if self._normalize_reference(ref) in normalized_targets:
-                    return True
+            if any(
+                self._normalize_reference(ref) in normalized_targets
+                for ref in self._extract_values(row, reference_paths)
+            ):
+                matched_rows.append(row)
+        if matched_rows:
+            self._remote_order_lookup_cache[
+                (self._normalize_reference(order_id), self._normalize_reference(order_code))
+            ] = matched_rows
+            return True
         return False
+
+    def _sync_dropo_status_to_thai_duong(
+        self,
+        *,
+        order_id: str,
+        order_code: str,
+        pancake_order: dict[str, Any] | None,
+        cfg: dict[str, Any],
+        summary: dict[str, Any],
+        create_result: dict[str, Any] | None = None,
+    ) -> None:
+        if not isinstance(pancake_order, dict) or not self._is_dropo_order(pancake_order):
+            return
+
+        td_cfg = cfg.get("thai_duong", {}) if isinstance(cfg.get("thai_duong"), dict) else {}
+        lookup_rows = self._lookup_thai_duong_orders_with_retry(
+            order_id=order_id,
+            order_code=order_code,
+            cfg=cfg,
+            reference_candidates=[order_code, order_id],
+        )
+        row = lookup_rows[0] if lookup_rows and isinstance(lookup_rows[0], dict) else {}
+        if not row:
+            return
+
+        td_order_id = str(row.get("id") or "").strip()
+        if not td_order_id:
+            td_order_id = self._extract_thai_duong_order_id(
+                create_result=row,
+                order_id=order_id,
+                order_code=order_code,
+                cfg=cfg,
+                sale_cfg=self._resolve_sale_status_sync_cfg(cfg),
+            )
+        if not td_order_id:
+            summary["dropo_status_failed"] = self._to_int(summary.get("dropo_status_failed")) + 1
+            summary["errors"].append(
+                f"Không lấy được ID đơn Thái Dương để sửa trạng thái Dropo cho {order_code or order_id}."
+            )
+            return
+
+        current_status = str(row.get("orderStatus") or "").strip().upper()
+        current_confirm = str(row.get("orderConfirmStatus") or "").strip().upper()
+        current_need_sale = row.get("isNeedSale") is True
+        try:
+            current_fee = int(float(row.get("configFee")))
+        except (TypeError, ValueError):
+            current_fee = 0
+        if current_status == "DRAFT" and current_confirm == "DRAFT" and current_need_sale and current_fee == 1:
+            return
+
+        products: list[dict[str, Any]] = []
+        raw_products = row.get("products") if isinstance(row.get("products"), list) else []
+        for product in raw_products:
+            if not isinstance(product, dict):
+                continue
+            sku = str(product.get("sku") or "").strip()
+            quantity = self._to_int(product.get("quantity"), fallback=0)
+            if sku and quantity > 0:
+                products.append({"sku": sku, "quantity": quantity})
+        if not products:
+            summary["dropo_status_failed"] = self._to_int(summary.get("dropo_status_failed")) + 1
+            summary["errors"].append(
+                f"Không có sản phẩm để bảo toàn khi sửa trạng thái Dropo cho {order_code or order_id}."
+            )
+            return
+
+        endpoint = td_cfg.get("order_update_endpoint", {})
+        if not isinstance(endpoint, dict):
+            endpoint = {}
+        endpoint = {
+            "base_url_env": str(endpoint.get("base_url_env", "THAI_DUONG_API_BASE_URL")).strip()
+            or "THAI_DUONG_API_BASE_URL",
+            "method": str(endpoint.get("method", "PUT")).strip().upper() or "PUT",
+            "path": str(endpoint.get("path", "/api/v1/orders/{order_id}")).strip()
+            or "/api/v1/orders/{order_id}",
+            "use_session_login": bool(endpoint.get("use_session_login", False)),
+            "login_path": str(endpoint.get("login_path", "")).strip(),
+        }
+        payload = {
+            "products": products,
+            "orderStatus": "DRAFT",
+            "orderConfirmStatus": "DRAFT",
+            "isNeedSale": True,
+            "configFee": 1,
+        }
+        updater = getattr(self.thai_duong, "update_order_for_sync", None)
+        if not callable(updater):
+            summary["dropo_status_failed"] = self._to_int(summary.get("dropo_status_failed")) + 1
+            summary["errors"].append(
+                f"Client Thái Dương chưa hỗ trợ sửa trạng thái Dropo cho {order_code or order_id}."
+            )
+            return
+        try:
+            updater(order_id=td_order_id, payload=payload, endpoint_cfg=endpoint)
+            summary["dropo_status_synced"] = self._to_int(summary.get("dropo_status_synced")) + 1
+        except Exception as exc:  # noqa: BLE001
+            summary["dropo_status_failed"] = self._to_int(summary.get("dropo_status_failed")) + 1
+            summary["errors"].append(
+                f"Sửa trạng thái Dropo lỗi cho {order_code or order_id}: {exc}"
+            )
 
     def _sync_sale_status_to_thai_duong(
         self,
@@ -1057,6 +1203,11 @@ class PancakeToThaiDuongSyncService:
         if not references:
             return []
 
+        cache_key = (self._normalize_reference(order_id), self._normalize_reference(order_code))
+        cached_rows = self._remote_order_lookup_cache.get(cache_key)
+        if cached_rows is not None:
+            return list(cached_rows)
+
         reference_filter_field = str(td_cfg.get("reference_filter_field", "")).strip()
         extra_filters = self._lookup_filters(td_cfg)
         attempts, delays = self._resolve_post_create_lookup_retry_cfg(cfg)
@@ -1072,12 +1223,45 @@ class PancakeToThaiDuongSyncService:
                 except Exception:  # noqa: BLE001
                     continue
                 if rows:
+                    self._remote_order_lookup_cache[cache_key] = list(rows)
                     return rows
             if attempt >= (attempts - 1):
                 break
             delay = delays[min(attempt, len(delays) - 1)] if delays else 0.0
             if delay > 0:
                 time.sleep(delay)
+
+        # Some Thai Duong search indexes do not match the Pancake reference
+        # when the order is in HAVE_ISSUE or has a legacy note. Scan the
+        # paginated list once and match exact reference fields before creating.
+        try:
+            all_rows = self.thai_duong.fetch_orders_for_sync(
+                endpoint_cfg=lookup_cfg,
+                search_text="",
+                extra_filters=extra_filters,
+            )
+        except Exception:  # noqa: BLE001
+            return []
+        reference_paths = self._as_list(td_cfg.get("order_reference_paths"))
+        if not reference_paths:
+            reference_paths = ["orderUID", "pancakeOrderId", "referenceCode", "reference", "note"]
+        normalized_targets = {
+            self._normalize_reference(value)
+            for value in [*references, order_code, order_id]
+            if self._normalize_reference(value)
+        }
+        matches: list[dict[str, Any]] = []
+        for row in all_rows:
+            if not isinstance(row, dict):
+                continue
+            if any(
+                self._normalize_reference(ref) in normalized_targets
+                for ref in self._extract_values(row, reference_paths)
+            ):
+                matches.append(row)
+        if matches:
+            self._remote_order_lookup_cache[cache_key] = matches
+            return matches
         return []
 
     def _resolve_post_create_lookup_retry_cfg(self, cfg: dict[str, Any]) -> tuple[int, list[float]]:
@@ -2464,12 +2648,16 @@ class PancakeToThaiDuongSyncService:
                 "account_source",
                 "source",
                 "ads_source",
+                "order_sources",
                 "order_sources[].name",
                 "order_sources[].source_name",
             ],
         )
         text = cls._normalize_compare_text(" ".join(str(value or "") for value in values))
-        return "dropo" in text
+        return any(
+            marker in text
+            for marker in ("dropo", "1022160", "thjcdejccom", "dropoio")
+        )
 
     @staticmethod
     def _extract_values_static(value: Any, paths: list[str]) -> list[Any]:
