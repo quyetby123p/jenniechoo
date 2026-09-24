@@ -35,6 +35,8 @@ HEADER = [
     "Data source",
     "Pancake Order ID",
     "Sync status",
+    "Phương thức thanh toán",
+    "Trạng thái thanh toán",
 ]
 
 SKU_MAP = {
@@ -455,6 +457,20 @@ def test_payload_chuan_hoa_sdt_va_tong_tien():
     assert payload["currency"] == "THB"
     assert payload["is_free_shipping"] is True
     assert payload["items"][0]["quantity"] == 2
+    assert payload["cod"] == 233800
+    assert payload["charged_by_card"] == 0
+
+
+def test_jc_online_paid_order_ghi_nhan_tien_da_thanh_toan_bang_the():
+    bridge, _, _ = build_bridge([HEADER])
+    row = make_row(**{"Phương thức thanh toán": "online_card", "Trạng thái thanh toán": "paid"})
+
+    payload = bridge.build_order_payload(row, HEADER)
+
+    assert payload["cod"] == 0
+    assert payload["cash"] == 0
+    assert payload["transfer_money"] == 0
+    assert payload["charged_by_card"] == 233800
 
 
 def test_jc_aliases_bo_trong_van_lay_ten_va_ma_web():
@@ -657,8 +673,8 @@ def test_sdt_ngan_bi_bo_qua_va_khong_goi_lai_pancake():
 
 
 def test_tu_them_cot_theo_doi_khi_sheet_chua_co():
-    header_short = HEADER[:-2]
-    row = make_row()[:-2]
+    header_short = [column for column in HEADER if column not in {"Pancake Order ID", "Sync status"}]
+    row = [make_row()[HEADER.index(column)] for column in header_short]
     values = [list(header_short), row]
     bridge, session, _ = build_bridge(values)
     bridge.run_once()

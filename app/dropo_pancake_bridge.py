@@ -48,7 +48,7 @@ HANOI_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 SALE_PERCENT = 15
 SALE_PRODUCT_CODES = frozenset({
     "JC-A-146", "JC-A-158", "JC-Q-158",
-    "JC-V-145", "JC-V-123", "JC-V-236",
+    "JC-V-145", "JC-V-123", "JC-V-236", "JC-V-154",
 })
 
 # Bắt mã dạng VXV002-DEN-M / VXV008-XANH MINT-XL, chấp nhận hậu tố lô "-B1".
@@ -851,12 +851,92 @@ class DropoPancakeBridge:
             "total_discount": total_discount,
             "currency": str(get("Currency", "Tiền tệ", "currency_code") or "THB").strip(),
         }
+        # Pancake keeps the amount still phải thu (`cod`) separate from the
+        # amount already received by card (`charged_by_card`).  The JC web
+        # checkout only forwards an online order after PayPal capture has
+        # completed, so mark that amount as card-paid at creation time.  COD
+        # rows remain collect-on-delivery.  Only activate this block for a
+        # sheet carrying the JC payment columns (or an older row whose note
+        # explicitly says PayPal), so legacy VAYXA/Dropo payloads stay intact.
+        payment_headers = {
+            "Phương thức thanh toán",
+            "payment_method",
+            "paymentType",
+            "Trạng thái thanh toán",
+            "payment_status",
+            "paymentStatus",
+        }
+        if payment_headers.intersection(header) or self._is_online_paid_order(row, header):
+            payload.update(self._payment_fields(row, header, effective_total))
         if self.config.warehouse_id:
             payload["warehouse_id"] = self.config.warehouse_id
         # Tên hiển thị giúp dry-run dễ kiểm tra. Khi chạy live, _attach_order_source
         # sẽ thay bằng ID nguồn đơn thật trong trường order_sources.
         payload["ads_source"] = str(self.config.order_source_name or "Dropo").strip() or "Dropo"
         return payload
+
+    @classmethod
+    def _is_online_paid_order(cls, row: list[Any], header: list[str]) -> bool:
+        """Return whether a JC row represents a successfully paid online order.
+
+        New rows have explicit payment columns written by the JC Apps Script.
+        The note fallback keeps rows created by the earlier deployed receiver
+        compatible while still requiring an online/paid signal; a plain COD
+        note can never be promoted to paid by this fallback.
+        """
+        status = cls._normalize_payment_text(
+            cls._first_nonempty_cell(
+                row,
+                header,
+                "Trạng thái thanh toán",
+                "payment_status",
+                "paymentStatus",
+            )
+        )
+        method = cls._normalize_payment_text(
+            cls._first_nonempty_cell(
+                row,
+                header,
+                "Phương thức thanh toán",
+                "payment_method",
+                "paymentType",
+            )
+        )
+        note = cls._normalize_payment_text(
+            cls._first_nonempty_cell(row, header, "Ghi chú", "ghi_chu", "note", "c_ghichu")
+        )
+        if status in {"paid", "completed", "success", "da thanh toan"}:
+            return True
+        if method in {"paypal", "online", "online card", "online_card", "card", "paid"}:
+            return True
+        return "paypal" in note and "cod" not in note
+
+    @classmethod
+    def _payment_fields(
+        cls,
+        row: list[Any],
+        header: list[str],
+        total_minor: int,
+    ) -> dict[str, int]:
+        amount = max(0, cls._to_int(total_minor))
+        if cls._is_online_paid_order(row, header):
+            return {
+                "cash": 0,
+                "cod": 0,
+                "charged_by_card": amount,
+                "transfer_money": 0,
+            }
+        return {
+            "cash": 0,
+            "cod": amount,
+            "charged_by_card": 0,
+            "transfer_money": 0,
+        }
+
+    @staticmethod
+    def _normalize_payment_text(value: Any) -> str:
+        raw = unicodedata.normalize("NFKD", str(value or "")).casefold()
+        return "".join(char for char in raw if not unicodedata.combining(char)).strip()
 
     @staticmethod
     def _public_order_id(value: Any) -> str:
