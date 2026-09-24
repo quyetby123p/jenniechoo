@@ -907,7 +907,16 @@ class DropoPancakeBridge:
         )
         if status in {"paid", "completed", "success", "da thanh toan"}:
             return True
-        if method in {"paypal", "online", "online card", "online_card", "card", "paid"}:
+        if method in {
+            "paypal",
+            "online",
+            "online card",
+            "online_card",
+            "thanh toán online",
+            "thanh toan online",
+            "card",
+            "paid",
+        }:
             return True
         return "paypal" in note and "cod" not in note
 

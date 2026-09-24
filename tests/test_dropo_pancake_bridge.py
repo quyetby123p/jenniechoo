@@ -473,6 +473,16 @@ def test_jc_online_paid_order_ghi_nhan_tien_da_thanh_toan_bang_the():
     assert payload["charged_by_card"] == 233800
 
 
+def test_jc_nhan_dien_nhan_hien_thi_thanh_toan_online():
+    bridge, _, _ = build_bridge([HEADER])
+    row = make_row(**{"Phương thức thanh toán": "Thanh toán online", "Trạng thái thanh toán": "Đã thanh toán"})
+
+    payload = bridge.build_order_payload(row, HEADER)
+
+    assert payload["cod"] == 0
+    assert payload["charged_by_card"] == 233800
+
+
 def test_jc_aliases_bo_trong_van_lay_ten_va_ma_web():
     header = HEADER + ["Tên khách", "Tên người nhận", "ma_don", "Order ID"]
     row = make_row(**{"ชื่อผู้รับ / Recipient": ""}) + [
