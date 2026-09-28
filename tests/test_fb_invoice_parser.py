@@ -3,7 +3,14 @@ from datetime import date
 import logging
 
 from app import fb_payment_reconcile_service as reconcile
-from app.fb_payment_reconcile_service import FbPaymentReconcileService, decimal_text, parse_invoice_pdf
+from app.fb_payment_reconcile_service import FbPaymentReconcileService, decimal_text, normalize_account, parse_invoice_pdf
+
+
+def test_account_labels_keep_jc_singapore_separate() -> None:
+    assert normalize_account("JC") == "JC"
+    assert normalize_account("hoá đơn JC Singapore") == "JC Singapore"
+    assert normalize_account("JC SG") == "JC Singapore"
+    assert normalize_account("Vayxa") == "VAYXA"
 
 
 def test_parser_reads_facebook_fields_when_values_are_on_following_lines(monkeypatch) -> None:  # noqa: ANN001
@@ -148,6 +155,47 @@ def test_payment_labels_are_written_to_column_m_only() -> None:
         {"range": "'Tiền trừ thẻ'!M1", "majorDimension": "ROWS", "values": [["FB_label"]]},
         {"range": "'Tiền trừ thẻ'!M2", "majorDimension": "ROWS", "values": [["JC"]]},
     ]
+
+
+def test_payment_labels_write_jc_singapore_to_column_m() -> None:
+    class Settings:
+        fb_reconcile_sheet_id = "sheet"
+        fb_reconcile_card_last4 = "3036"
+
+    class FakeGoogle:
+        def __init__(self) -> None:
+            self.updates: list[dict] = []
+
+        def fetch_sheet_values(self, **_kwargs):  # noqa: ANN003
+            return {
+                "values": [
+                    [
+                        "payment_id", "transaction_date", "posting_date", "amount", "currency",
+                        "bank_fee", "fx_rate", "description", "merchant_name", "account_hint",
+                        "reference", "note",
+                    ],
+                    ["P3036-SG", "2026-09-10", "", "100", "USD", "", "", "clear", "FACEBK", "", "", ""],
+                ]
+            }
+
+        def batch_update_sheet_values(self, **kwargs):  # noqa: ANN003
+            self.updates.append(kwargs)
+            return {"ok": True}
+
+    fake_google = FakeGoogle()
+    service = FbPaymentReconcileService(
+        settings=Settings(), google=fake_google, storage=None, logger=logging.getLogger("test")
+    )
+    detail_row = [
+        "run", "file", "JC Singapore", "", "", "", "", "P3036-SG", "", "", "", "", "", "", "", "", "KHỚP", ""
+    ]
+
+    result = service._write_payment_labels({"detail_rows": [detail_row]})
+
+    assert result["labels"] == {"P3036-SG": "JC Singapore"}
+    assert fake_google.updates[0]["data"][-1] == {
+        "range": "'Tiền trừ thẻ'!M2", "majorDimension": "ROWS", "values": [["JC Singapore"]]
+    }
 
 
 def test_parser_reads_meta_billing_report_as_transactions_and_filters_card(monkeypatch) -> None:  # noqa: ANN001

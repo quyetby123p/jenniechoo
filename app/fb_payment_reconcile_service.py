@@ -372,7 +372,11 @@ class FbPaymentReconcileService:
             if not located:
                 continue
             row_number, row = located
-            label = " + ".join(account for account in ("JC", "VAYXA") if account in accounts)
+            # Keep the invoice source distinct: JC Singapore must not be folded
+            # into the domestic JC label when both are reconciled to the card.
+            label = " + ".join(
+                account for account in ("JC", "JC Singapore", "VAYXA") if account in accounts
+            )
             if not label:
                 continue
             labels_written[payment_id] = label
@@ -625,7 +629,7 @@ def parse_invoice_pdf(
         if "VAYXA" in upper_name or "ADS2" in upper_name:
             account = "VAYXA"
         elif re.search(r"(^|[^A-Z])JC([^A-Z]|$)", upper_name):
-            account = "JC"
+            account = "JC Singapore" if re.search(r"SINGAPORE", upper_name) else "JC"
     if not account:
         warning_parts.append("Chưa nhận diện được tài khoản JC/Vayxa.")
 
@@ -1022,7 +1026,12 @@ def normalize_account(value: Any) -> str:
     text = _fold(str(value or "")).upper()
     if "VAYXA" in text or text in {"ADS2", "VX"}:
         return "VAYXA"
-    if text == "JC" or re.search(r"(^|[^A-Z])JC([^A-Z]|$)", text):
+    has_jc = bool(re.search(r"(^|[^A-Z])JC([^A-Z]|$)", text))
+    has_singapore = bool(re.search(r"(^|[^A-Z])SINGAPORE([^A-Z]|$)", text))
+    has_sg = bool(re.search(r"(^|[^A-Z])SG([^A-Z]|$)", text))
+    if has_jc and (has_singapore or has_sg):
+        return "JC Singapore"
+    if text == "JC" or has_jc:
         return "JC"
     return ""
 
