@@ -256,7 +256,9 @@ async def run_token_health(runtime: ScheduledRuntime) -> None:
     await runtime.bot._send_token_health_report(
         chat_id=runtime.settings.telegram_allowed_user_id,
         trigger_label="Kiểm tra định kỳ GitHub Actions",
-        notify_success=True,
+        # Scheduled health checks stay quiet when everything is healthy.
+        # A failure still sends the full diagnostic report to Telegram.
+        notify_success=False,
     )
 
 

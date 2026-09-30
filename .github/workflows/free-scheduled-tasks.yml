@@ -6,7 +6,8 @@ on:
       task:
         description: "Task to run"
         required: true
-        default: "token-health"
+        # Safety default: malformed cron input must not create repeated health reports.
+        default: "pancake-td-sync"
         type: choice
         options:
           - token-health

@@ -8,6 +8,7 @@ from app.scheduled_tasks import (
     build_parser,
     run_bot3_task_weekly_summary,
     run_media_performance,
+    run_token_health,
     run_work_progress_report,
 )
 
@@ -156,3 +157,26 @@ def test_run_work_progress_weekly_sends_once() -> None:
 
     assert sent_messages == ["weekly 2026-06-06"]
     assert saved_states == [{"weekly": "2026-06-06"}]
+
+
+def test_run_token_health_only_notifies_on_failure() -> None:
+    calls: list[dict] = []
+
+    class FakeBot:
+        async def _send_token_health_report(self, **kwargs):  # noqa: ANN003
+            calls.append(kwargs)
+
+    runtime = SimpleNamespace(
+        settings=SimpleNamespace(telegram_allowed_user_id=123456),
+        bot=FakeBot(),
+    )
+
+    asyncio.run(run_token_health(runtime))
+
+    assert calls == [
+        {
+            "chat_id": 123456,
+            "trigger_label": "Kiểm tra định kỳ GitHub Actions",
+            "notify_success": False,
+        }
+    ]

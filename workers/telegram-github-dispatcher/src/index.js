@@ -700,7 +700,9 @@ export default {
         const dispatchInputs = inputs.dispatch_inputs && typeof inputs.dispatch_inputs === "object"
           ? inputs.dispatch_inputs
           : Object.fromEntries(
-            Object.entries(inputs).filter(([key]) => !["task", "workflow_file", "dispatch_inputs"].includes(key)),
+            // Keep `task`: without it, free-scheduled-tasks.yml falls back to
+            // its default task and can turn every cron dispatch into health checks.
+            Object.entries(inputs).filter(([key]) => !["workflow_file", "dispatch_inputs"].includes(key)),
           );
         await dispatchGitHubInputs(dispatchInputs, env, workflowFile);
         console.log(`Dispatched GitHub task ${label} from cron ${event.cron}`);
