@@ -375,6 +375,53 @@ def test_jennie_bundle_uses_summary_quantity_when_main_row_has_bundle_total():
     assert [item["quantity"] for item in items] == [1, 1]
 
 
+def test_jennie_summary_color_wins_over_shared_color_for_each_item():
+    """Không map màu của item đầu tiên cho các item còn lại trong bundle."""
+    bridge, _, _ = build_bridge([HEADER])
+    bridge._pancake_catalog = {
+        "JC-A-250": [
+            {
+                "variation_id": "jca250-kem-m",
+                "variation_sku": "JC-A-250-KEM-M",
+                "size": "M",
+                "field_values": ["Kem", "M"],
+                "retail_price": 250000,
+            },
+            {
+                "variation_id": "jca250-den-m",
+                "variation_sku": "JC-A-250-DEN-M",
+                "size": "M",
+                "field_values": ["Đen", "M"],
+                "retail_price": 250000,
+            },
+        ],
+        "JC-V-140": [{
+            "variation_id": "jcv140-kem-m",
+            "variation_sku": "JC-V-140-KEM-M",
+            "size": "M",
+            "field_values": ["Kem", "M"],
+            "retail_price": 340000,
+        }],
+    }
+    header = ["SKU Code", "Mã sản phẩm", "Màu", "Size", "Số lượng", "Tóm tắt đơn"]
+    row = [
+        "JC-A-250, JC-V-140",
+        "JC-A-250",
+        "Kem",  # cột dùng chung có thể mang màu item đầu tiên
+        "M",
+        "2",
+        "JC-A-250 (Đen/M) x1 | JC-V-140 (Kem/M) x1",
+    ]
+    details = [["", "JC-V-140", "Kem", "M", "1", ""]]
+
+    items = bridge.resolve_jennie_items(row, header, bundle_rows=details)
+
+    assert [item["variation_id"] for item in items] == [
+        "jca250-den-m",
+        "jcv140-kem-m",
+    ]
+
+
 def test_jennie_payload_uses_web_source_column_instead_of_dropo_fallback():
     header = HEADER + ["Nguồn"]
     row = make_row(**{"Nguồn": "https://th.jcdejc.com/?jcpost=1"}) + [
@@ -416,6 +463,36 @@ def test_map_san_pham_tay_dai_khi_pancake_khong_khai_mau():
 
     assert items[0]["variation_id"] == "jcv123t-s"
     assert items[0]["variation_info"]["product_code"] == "JC-V-123T"
+
+
+def test_map_mau_jennie_tu_sku_khi_catalog_khong_tra_field_mau():
+    pancake = CatalogFakePancake([
+        {
+            "custom_id": "JCA250",
+            "variations": [
+                {
+                    "id": "jca250-kem-m",
+                    "custom_id": "JC-A-250-KEM-M",
+                    "retail_price": 250000,
+                    "fields": [{"name": "Size", "value": "M", "keyValue": "M"}],
+                },
+                {
+                    "id": "jca250-den-m",
+                    "custom_id": "JC-A-250-DEN-M",
+                    "retail_price": 250000,
+                    "fields": [{"name": "Size", "value": "M", "keyValue": "M"}],
+                },
+            ],
+        }
+    ])
+    bridge, _, _ = build_bridge([HEADER], pancake=pancake)
+    bridge._load_pancake_sku_map()
+    header = ["SKU Code", "Màu", "Size", "Số lượng"]
+    row = ["JCA250", "Đen", "M", "1"]
+
+    items = bridge.resolve_jennie_items(row, header)
+
+    assert items[0]["variation_id"] == "jca250-den-m"
 
 
 def test_geo_match_tach_ten_thai_va_ten_anh():

@@ -477,16 +477,20 @@ class DropoPancakeBridge:
                 else {}
             )
             summary_occurrences[code] = occurrence + 1
+            # Tóm tắt đơn là snapshot lựa chọn theo từng sản phẩm tại lúc
+            # checkout. Ưu tiên nó trước các cột Màu/Size dùng chung của dòng
+            # chính; các cột dùng chung có thể còn giữ lựa chọn của sản phẩm
+            # đầu tiên và làm sản phẩm màu Đen bị map nhầm sang Kem.
             color = str(
-                get(f"mau{index}", f"color{index}", f"Màu {index}")
+                summary_option.get("color")
+                or get(f"mau{index}", f"color{index}", f"Màu {index}")
                 or detail_get("Màu", "mau", "color")
-                or summary_option.get("color")
                 or shared_color
             ).strip()
             size = str(
-                get(f"size{index}", f"Size {index}")
+                summary_option.get("size")
+                or get(f"size{index}", f"Size {index}")
                 or detail_get("Size", "size")
-                or summary_option.get("size")
                 or shared_size
             ).strip()
             quantity_raw = get(f"sl{index}", f"qty{index}", f"Quantity {index}")
@@ -1498,6 +1502,12 @@ class DropoPancakeBridge:
                     "size": size,
                     "field_values": field_values,
                 }
+                # Một số catalog Pancake không trả field Màu trong endpoint
+                # products nhưng vẫn giữ màu trong SKU biến thể (ví dụ
+                # ...-DEN-M / ...-KEM-M). Đưa SKU vào haystack để không rơi
+                # về biến thể đầu tiên, vốn thường là màu Kem.
+                if entry["variation_sku"]:
+                    entry["field_values"].append(entry["variation_sku"])
                 catalog.setdefault(code, []).append(entry)
                 result[entry["variation_sku"] or variation_id] = entry
         self._pancake_catalog = catalog
