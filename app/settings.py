@@ -101,6 +101,7 @@ class Settings:
     audiences_config_path_raw: str = "config/audiences.json"
     objective_config_path_raw: str = "config/objective.json"
     message_templates_path_raw: str = "config/message_templates.json"
+    sku_catalog_path_raw: str = ""
     meta_creative_access_token: str = ""
     meta_app_id: str = ""
     meta_app_secret: str = ""
@@ -116,6 +117,14 @@ class Settings:
     @property
     def message_templates_path(self) -> Path:
         return self._resolve_project_path(self.message_templates_path_raw, "config/message_templates.json")
+
+    @property
+    def sku_catalog_path(self) -> Path:
+        return self._resolve_project_path(self.sku_catalog_path_raw, "config/sku_catalog.json")
+
+    @property
+    def profile_name(self) -> str:
+        return self.profile
 
     def _resolve_project_path(self, raw: str, default: str) -> Path:
         text = str(raw or default).strip() or default
@@ -431,8 +440,9 @@ def load_settings(
     if env_file.exists():
         load_dotenv(env_file, override=True)
 
-    is_default_profile = profile_name == "default"
+    is_default_profile = profile_name in {"default", "main"}
     is_ads2_profile = profile_name == "ads2"
+    profile_suffix = "" if is_default_profile else f"/{profile_name}"
     telegram_bot_token = _profile_env(
         "TELEGRAM_BOT_TOKEN",
         profile_name,
@@ -744,7 +754,12 @@ def load_settings(
         max_value=10000,
     )
     reconcile_cod_enabled = _parse_bool(
-        os.getenv("RECONCILE_COD_ENABLED", "0"),
+        _profile_env(
+            "RECONCILE_COD_ENABLED",
+            profile_name,
+            default="0",
+            allow_base_fallback=is_default_profile,
+        ),
         default=False,
     )
     reconcile_cod_auto_enabled = _parse_bool(
@@ -857,7 +872,12 @@ def load_settings(
         "https://oauth2.googleapis.com/token",
     ).strip() or "https://oauth2.googleapis.com/token"
     pancake_td_sync_enabled = _parse_bool(
-        os.getenv("PANCAKE_TD_SYNC_ENABLED", "0"),
+        _profile_env(
+            "PANCAKE_TD_SYNC_ENABLED",
+            profile_name,
+            default="0",
+            allow_base_fallback=is_default_profile,
+        ),
         default=False,
     )
     pancake_td_sync_poll_seconds = _parse_int_with_range(
@@ -882,10 +902,15 @@ def load_settings(
         min_value=1,
         max_value=1440,
     )
-    pancake_td_sync_state_path = os.getenv(
+    pancake_td_sync_state_path = _profile_env(
         "PANCAKE_TD_SYNC_STATE_PATH",
-        "storage/pancake_td_sync/state.json",
+        profile_name,
+        default=f"storage{profile_suffix}/pancake_td_sync/state.json",
+        allow_base_fallback=is_default_profile,
     ).strip()
+    if pancake_td_sync_enabled and pancake_shop_id <= 0:
+        required_shop_key = "PANCAKE_SHOP_ID" if is_default_profile else f"{profile_name.upper()}_PANCAKE_SHOP_ID"
+        raise ConfigError(f"Thiếu {required_shop_key} khi PANCAKE_TD_SYNC_ENABLED bật.")
     web_report_refresh_seconds = _parse_int_with_range(
         os.getenv("WEB_REPORT_REFRESH_SECONDS", "600"),
         default=600,
@@ -925,6 +950,12 @@ def load_settings(
         "MESSAGE_TEMPLATES_PATH",
         profile_name,
         default=f"config{profile_suffix}/message_templates.json",
+        allow_base_fallback=False,
+    )
+    sku_catalog_path_raw = _profile_env(
+        "SKU_CATALOG_PATH",
+        profile_name,
+        default=f"config{profile_suffix}/sku_catalog.json",
         allow_base_fallback=False,
     )
     storage_root_raw = _profile_env(
@@ -968,7 +999,8 @@ def load_settings(
         profile=profile_name,
         audiences_config_path_raw=audiences_config_path_raw,
         objective_config_path_raw=objective_config_path_raw,
-        message_templates_path_raw=message_templates_path_raw,
+          message_templates_path_raw=message_templates_path_raw,
+          sku_catalog_path_raw=sku_catalog_path_raw,
         telegram_bot_token=telegram_bot_token,
         telegram_allowed_user_id=telegram_allowed_user_id,
         meta_access_token=meta_access_token,

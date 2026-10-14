@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "source": {
+    "spreadsheet_id": "12s9p2o11HOPp83AX3mLEXmphHxEMWSxNJGkgkXGbrVQ",
+    "sheet_name": "Sản phẩm và giá",
+    "column": "J",
+    "range": "J2:J1000"
+  },
+  "synced_at": "2026-10-14T00:00:00+00:00",
+  "products": [
+    {"sku": "ADB485", "source_product": "ADB485.C2608"},
+    {"sku": "ADB486", "source_product": "ADB486.C2608"},
+    {"sku": "ADB494", "source_product": "ADB494.C2608"},
+    {"sku": "ADF484", "source_product": "ADF484.C2608"},
+    {"sku": "ADF489", "source_product": "ADF489.C2608"},
+    {"sku": "ANB481", "source_product": "ANB481.C2607"},
+    {"sku": "ANF488", "source_product": "ANF488.C2608"},
+    {"sku": "ANF490", "source_product": "ANF490.C2608"},
+    {"sku": "ANF491", "source_product": "ANF491.C2608"},
+    {"sku": "ANF497", "source_product": "ANF497.C2608"},
+    {"sku": "KVF272", "source_product": "KVF272.C2607"},
+    {"sku": "KVF273", "source_product": "KVF273.C2608"},
+    {"sku": "QDF186", "source_product": "QDF186.C2608"},
+    {"sku": "QLF137", "source_product": "QLF137.C2511"},
+    {"sku": "QLF191", "source_product": "QLF191.C2608"},
+    {"sku": "QSF128", "source_product": "QSF128.C2510"},
+    {"sku": "QSF170", "source_product": "QSF170.C2604"},
+    {"sku": "VAC024", "source_product": "VAC024.L2611"},
+    {"sku": "VAF145", "source_product": "VAF145.C2604"},
+    {"sku": "VAF158", "source_product": "VAF158.C2606"},
+    {"sku": "VCF149", "source_product": "VCF149.C2605"},
+    {"sku": "VCF165", "source_product": "VCF165.C2608"},
+    {"sku": "VSF159", "source_product": "VSF159.C2606"},
+    {"sku": "VXF144", "source_product": "VXF144.C2604"},
+    {"sku": "VCF166", "source_product": "VCF166.C2608"},
+    {"sku": "ADB422", "source_product": "ADB422.C2604"},
+    {"sku": "VBC016", "source_product": "VBC016"}
+  ],
+  "sku_codes": [
+    "ADB485", "ADB486", "ADB494", "ADF484", "ADF489", "ANB481",
+    "ANF488", "ANF490", "ANF491", "ANF497", "KVF272", "KVF273",
+    "QDF186", "QLF137", "QLF191", "QSF128", "QSF170", "VAC024",
+    "VAF145", "VAF158", "VCF149", "VCF165", "VSF159", "VXF144",
+    "VCF166", "ADB422", "VBC016"
+  ]
+}

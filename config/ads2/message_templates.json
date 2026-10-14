@@ -1,84 +1,10 @@
 {
-  "default_template_name": "Mess Cơ bản",
+  "default_template_name": "Chào Ruza",
   "templates": {
-    "Mess Cơ bản": {
-      "description": "Template mac dinh VAYXA theo mau da luu trong Ads Manager.",
-      "creative_patch": {
-        "page_welcome_message": {
-          "ai_gen_conversation_model_version": "IBV1",
-          "ai_generated_icebreaker_toggle_enabled": true,
-          "has_ai_generated_welcome_message": false,
-          "ice_breakers_edited": true,
-          "image_format": {
-            "customer_action_type": "quick_replies",
-            "message": {
-              "attachment": {
-                "payload": {
-                  "elements": [
-                    {
-                      "buttons": [],
-                      "image_hash": "",
-                      "title": ""
-                    }
-                  ],
-                  "template_type": "generic"
-                },
-                "type": "template"
-              },
-              "quick_replies": [
-                {
-                  "content_type": "text",
-                  "response_type": "text",
-                  "title": "Tôi muốn tìm hiểu thêm"
-                }
-              ],
-              "text": "𝐕𝐀𝐘𝐗𝐀 ขอเรียนทักทายค่ะ 🤍\nขอบคุณที่ให้ความสนใจในแบรนด์ 𝐕𝐀𝐘𝐗𝐀\nทางเรายินดีเป็นอย่างยิ่งในการให้คำแนะนำเกี่ยวกับ ดีไซน์ ขนาด และรายละเอียดของสินค้า เพื่อช่วยให้คุณเลือกแบบที่เหมาะสมที่สุดค่ะ"
-            }
-          },
-          "is_eligible_for_customized_greeting": false,
-          "is_eligible_for_leveraging_inbox_faqs": false,
-          "is_user_editing": false,
-          "landing_screen_type": "welcome_message",
-          "media_type": "text",
-          "reengagement": {
-            "include_products": false,
-            "text": "Xin chào {{user_first_name}}! Bạn có thắc mắc nào cần trao đổi thêm với chúng tôi không?"
-          },
-          "reengagement_disabled": false,
-          "surface": "visual_editor_new",
-          "template_id": "962707759488898",
-          "text_format": {
-            "customer_action_type": "ice_breakers",
-            "message": {
-              "quick_replies": [],
-              "text": "𝐕𝐀𝐘𝐗𝐀 ขอเรียนทักทายค่ะ 🤍\nขอบคุณที่ให้ความสนใจในแบรนด์ 𝐕𝐀𝐘𝐗𝐀\nทางเรายินดีเป็นอย่างยิ่งในการให้คำแนะนำเกี่ยวกับ ดีไซน์ ขนาด และรายละเอียดของสินค้า เพื่อช่วยให้คุณเลือกแบบที่เหมาะสมที่สุดค่ะ"
-            }
-          },
-          "type": "VISUAL_EDITOR",
-          "user_edit": true,
-          "version": 2,
-          "video_format": {
-            "customer_action_type": "quick_replies",
-            "message": {
-              "attachment": {
-                "payload": {
-                  "attachment_id": ""
-                },
-                "type": "video"
-              },
-              "quick_replies": [
-                {
-                  "content_type": "text",
-                  "response_type": "text",
-                  "title": "Tôi muốn tìm hiểu thêm"
-                }
-              ],
-              "text": "𝐕𝐀𝐘𝐗𝐀 ขอเรียนทักทายค่ะ 🤍\nขอบคุณที่ให้ความสนใจในแบรนด์ 𝐕𝐀𝐘𝐗𝐀\nทางเรายินดีเป็นอย่างยิ่งในการให้คำแนะนำเกี่ยวกับ ดีไซน์ ขนาด และรายละเอียดของสินค้า เพื่อช่วยให้คุณเลือกแบบที่เหมาะสมที่สุดค่ะ"
-            }
-          },
-          "welcome_message_edited": true
-        }
-      },
+    "Chào Ruza": {
+      "description": "Template Messenger đã lưu trong Ads Manager cho page VAYXA/RUZA Thailand.",
+      "greeting_text": "สวัสดีคุณ Quyet ♡\nขอบคุณที่ให้ความสนใจในแบรนด์ RUZA\nทางเรายินดีเป็นอย่างยิ่งในการให้คำแนะนำเกี่ยวกับ ดีไซน์ ขนาด และรายละเอียดของสินค้า เพื่อช่วยให้คุณเลือกแบบที่เหมาะสมที่สุดค่ะ",
+      "creative_patch": {},
       "ad_patch": {},
       "adset_patch": {}
     }

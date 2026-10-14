@@ -5,6 +5,7 @@ import re
 import unicodedata
 from zoneinfo import ZoneInfo
 
+from app.ads_sku_catalog import AdsSkuCatalogError, extract_catalog_codes
 from app.exceptions import CommandParseError, ValidationError
 from app.models import AdsCommand, MediaPerformanceCommand
 from app.utils import is_supported_facebook_url
@@ -19,7 +20,10 @@ _EXISTING_MODE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _NEW_MODE_FLAG_PATTERN = re.compile(r"(?:lên\s*mới|len\s*moi)\s*[.!?]*\s*$", re.IGNORECASE)
-_MANUAL_SKU_PATTERN = re.compile(r"(?<![0-9A-Z])(?:JC|VXV)[0-9A-Z]+(?![0-9A-Z])", re.IGNORECASE)
+_MANUAL_SKU_PATTERN = re.compile(
+    r"(?<![0-9A-Z])(?P<code>[A-Z]{2,}[0-9][A-Z0-9]*)(?:\.[A-Z0-9]+)?(?![0-9A-Z])",
+    re.IGNORECASE,
+)
 _VXV_CODE_PATTERN = re.compile(r"(?<![0-9A-Z])VXV[0-9A-Z]+(?![0-9A-Z])", re.IGNORECASE)
 _LEADING_ADS_PREFIX_PATTERN = re.compile(r"^\s*/ads\b", re.IGNORECASE)
 _MEDIA_PERF_SLASH_PATTERN = re.compile(r"^\s*/media_perf(?:@[a-z0-9_]+)?\b", re.IGNORECASE)
@@ -67,7 +71,7 @@ def _extract_budget(raw: str) -> int:
     )
 
 
-def _extract_manual_sku_keywords(raw: str) -> list[str]:
+def _extract_manual_sku_keywords(raw: str, allowed_sku_codes: tuple[str, ...] = ()) -> list[str]:
     cleaned = _URL_PATTERN.sub(" ", raw)
     for pattern in _BUDGET_PATTERNS:
         cleaned = pattern.sub(" ", cleaned)
@@ -75,10 +79,16 @@ def _extract_manual_sku_keywords(raw: str) -> list[str]:
     cleaned = _NEW_MODE_FLAG_PATTERN.sub(" ", cleaned)
     cleaned = _LEADING_ADS_PREFIX_PATTERN.sub(" ", cleaned)
 
+    if allowed_sku_codes:
+        try:
+            return extract_catalog_codes(cleaned, allowed_sku_codes, strict=True)
+        except AdsSkuCatalogError as exc:
+            raise CommandParseError(str(exc)) from exc
+
     keywords: list[str] = []
     seen: set[str] = set()
     for match in _MANUAL_SKU_PATTERN.finditer(cleaned):
-        code = str(match.group(0)).strip().upper()
+        code = str(match.group("code")).strip().upper()
         if not code or code in seen:
             continue
         seen.add(code)
@@ -111,7 +121,12 @@ def _resolve_campaign_mode(raw: str) -> tuple[bool, str]:
     return has_existing_mode_flag, campaign_hint
 
 
-def parse_ads_command(text: str) -> AdsCommand:
+def parse_ads_command(
+    text: str,
+    *,
+    allowed_sku_codes: tuple[str, ...] = (),
+    allow_new_sku_override: bool = False,
+) -> AdsCommand:
     raw = (text or "").strip()
     if not raw:
         raise CommandParseError(
@@ -136,7 +151,11 @@ def parse_ads_command(text: str) -> AdsCommand:
     budget = _extract_budget_optional(raw) if use_existing_campaign else _extract_budget(raw)
     if budget is None:
         budget = 0
-    manual_sku_keywords = _extract_manual_sku_keywords(raw) if use_existing_campaign else []
+    manual_sku_keywords = (
+        _extract_manual_sku_keywords(raw, allowed_sku_codes)
+        if use_existing_campaign or allow_new_sku_override
+        else []
+    )
 
     if (not use_existing_campaign) and budget <= 0:
         raise ValidationError("Ngân sách phải lớn hơn 0 VND.")

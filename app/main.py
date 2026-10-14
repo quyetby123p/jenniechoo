@@ -8,6 +8,8 @@ import sys
 import time
 
 from app.approval_service import ApprovalService
+from app.ads_sku_catalog import AdsSkuCatalogError, load_snapshot
+from app.campaign_planner import resolve_audience_layout, resolve_sku_catalog
 from app.daily_report_service import DailyReportService
 from app.daily_task_summary_service import DailyTaskSummaryService
 from app.dedup_service import DedupService
@@ -31,6 +33,11 @@ def check_runtime_configuration(profile: str | None = None) -> str:
     settings = load_settings(profile=profile)
     audiences = load_json(settings.audiences_config_path)
     objective = load_json(settings.objective_config_path)
+    if objective.get("sku_catalog_required"):
+        try:
+            objective["sku_catalog"] = load_snapshot(settings.sku_catalog_path)
+        except AdsSkuCatalogError as exc:
+            return f"Config chua hop le, catalog SKU: {exc}"
     templates = load_json(settings.message_templates_path)
 
     missing = []
@@ -134,14 +141,16 @@ def check_runtime_configuration(profile: str | None = None) -> str:
         if not settings.thai_duong_order_payload_template_path.exists():
             missing.append(str(settings.thai_duong_order_payload_template_path))
 
-    for key in (
-        "thoi_trang_saved_audience_id",
-        "du_lich_saved_audience_id",
-        "tiec_saved_audience_id",
-    ):
-        value = str(audiences.get(key, "")).strip()
+    try:
+        audience_slots = resolve_audience_layout(audiences)
+    except ValueError as exc:
+        missing.append(str(exc))
+        audience_slots = []
+    for key, label, _suffix, value in audience_slots:
         if not value or value == "replace_me":
-            missing.append(f"audiences.{key}")
+            missing.append(f"audiences.{key} ({label})")
+    if objective.get("sku_catalog_required") and not resolve_sku_catalog(objective):
+        missing.append("config.sku_catalog.json")
 
     template_name = str(objective.get("message_template_name", "")).strip()
     if not template_name:

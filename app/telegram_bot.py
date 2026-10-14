@@ -20,12 +20,14 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from app.approval_service import ApprovalService
+from app.ads_sku_catalog import AdsSkuCatalogError, load_snapshot
 from app.campaign_planner import (
     DEFAULT_AUDIENCE_LAYOUT,
     build_campaign_plan,
     build_existing_campaign_plan,
     build_non_jc_hashtag_suffix,
     extract_sku_codes,
+    resolve_sku_catalog,
     resolve_sku_prefix,
 )
 from app.command_parser import (
@@ -109,6 +111,15 @@ class TelegramAdsBot:
         self.router.message.register(self.handle_new_chat_members, F.new_chat_members)
         self.router.message.register(self.handle_text_message, F.text)
         self.router.callback_query.register(self.handle_callback, F.data)
+
+    def _load_objective_config(self) -> dict[str, Any]:
+        objective = load_json(self.settings.objective_config_path)
+        if objective.get("sku_catalog_required"):
+            try:
+                objective["sku_catalog"] = load_snapshot(self.settings.sku_catalog_path)
+            except AdsSkuCatalogError as exc:
+                raise ValidationError(f"Catalog SKU Ruza không hợp lệ: {exc}") from exc
+        return objective
 
     async def run(self) -> None:
         bot = Bot(token=self.settings.telegram_bot_token)
@@ -456,7 +467,17 @@ class TelegramAdsBot:
             return
 
         try:
-            command = parse_ads_command(raw_text)
+            allowed_sku_codes: tuple[str, ...] = ()
+            allow_new_sku_override = False
+            if str(getattr(self.settings, "profile", "")).strip().lower() == "ads2":
+                objective_for_parse = self._load_objective_config()
+                allowed_sku_codes = resolve_sku_catalog(objective_for_parse)
+                allow_new_sku_override = True
+            command = parse_ads_command(
+                raw_text,
+                allowed_sku_codes=allowed_sku_codes,
+                allow_new_sku_override=allow_new_sku_override,
+            )
         except (CommandParseError, ValidationError) as exc:
             await message.answer(str(exc))
             return
@@ -916,7 +937,7 @@ class TelegramAdsBot:
         request_id: str | None = None,
     ) -> None:
         audiences = load_json(self.settings.audiences_config_path)
-        objective = load_json(self.settings.objective_config_path)
+        objective = self._load_objective_config()
         templates = load_json(self.settings.message_templates_path)
         sku_prefix = resolve_sku_prefix(objective)
 
@@ -1496,7 +1517,7 @@ class TelegramAdsBot:
         source_request_id: str | None = None,
     ) -> None:
         try:
-            objective = load_json(self.settings.objective_config_path)
+            objective = self._load_objective_config()
             sku_prefix = resolve_sku_prefix(objective)
             resolved_post = await asyncio.to_thread(self.meta.resolve_post, command.post_url)
             await asyncio.to_thread(self.meta.ensure_ads_token_can_access_page)
@@ -1607,7 +1628,7 @@ class TelegramAdsBot:
         campaign_keywords: list[str],
         request_id: str | None = None,
     ) -> None:
-        objective = load_json(self.settings.objective_config_path)
+        objective = self._load_objective_config()
         templates = load_json(self.settings.message_templates_path)
         audiences = load_json(self.settings.audiences_config_path)
         sku_prefix = resolve_sku_prefix(objective)

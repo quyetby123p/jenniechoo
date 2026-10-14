@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from app.ads_sku_catalog import AdsSkuCatalogError, catalog_codes, extract_catalog_codes
 from app.models import AdsCommand, AudienceSlot, PlannedCampaign, ResolvedPost
 from app.utils import deep_merge
 
@@ -55,7 +56,16 @@ def extract_jc_codes(message_text: str) -> list[str]:
     return extract_sku_codes(message_text, _DEFAULT_SKU_PREFIX)
 
 
-def extract_sku_codes(message_text: str, sku_prefix: str = _DEFAULT_SKU_PREFIX) -> list[str]:
+def extract_sku_codes(
+    message_text: str,
+    sku_prefix: str = _DEFAULT_SKU_PREFIX,
+    allowed_codes: tuple[str, ...] = (),
+) -> list[str]:
+    if allowed_codes:
+        try:
+            return extract_catalog_codes(message_text, allowed_codes, strict=True)
+        except AdsSkuCatalogError as exc:
+            raise ValueError(str(exc)) from exc
     codes: list[str] = []
     seen: set[str] = set()
     for match in _sku_code_pattern(sku_prefix).finditer(message_text or ""):
@@ -71,13 +81,23 @@ def extract_non_jc_hashtags(message_text: str) -> list[str]:
     return extract_non_sku_hashtags(message_text, _DEFAULT_SKU_PREFIX)
 
 
-def extract_non_sku_hashtags(message_text: str, sku_prefix: str = _DEFAULT_SKU_PREFIX) -> list[str]:
+def extract_non_sku_hashtags(
+    message_text: str,
+    sku_prefix: str = _DEFAULT_SKU_PREFIX,
+    allowed_codes: tuple[str, ...] = (),
+) -> list[str]:
     hashtags: list[str] = []
     seen: set[str] = set()
     sku_only_pattern = _sku_code_only_pattern(sku_prefix)
     for match in _HASHTAG_PATTERN.finditer(message_text or ""):
         tag = match.group("tag").strip()
-        if not tag or sku_only_pattern.fullmatch(tag):
+        is_catalog_tag = False
+        if allowed_codes:
+            try:
+                is_catalog_tag = bool(extract_catalog_codes(tag, allowed_codes, strict=True))
+            except AdsSkuCatalogError:
+                is_catalog_tag = False
+        if not tag or sku_only_pattern.fullmatch(tag) or tag.upper().split(".", 1)[0] in allowed_codes or is_catalog_tag:
             continue
         dedup_key = tag.lower()
         if dedup_key in seen:
@@ -87,8 +107,12 @@ def extract_non_sku_hashtags(message_text: str, sku_prefix: str = _DEFAULT_SKU_P
     return hashtags
 
 
-def build_non_jc_hashtag_suffix(message_text: str, sku_prefix: str = _DEFAULT_SKU_PREFIX) -> str:
-    hashtags = extract_non_sku_hashtags(message_text, sku_prefix)
+def build_non_jc_hashtag_suffix(
+    message_text: str,
+    sku_prefix: str = _DEFAULT_SKU_PREFIX,
+    allowed_codes: tuple[str, ...] = (),
+) -> str:
+    hashtags = extract_non_sku_hashtags(message_text, sku_prefix, allowed_codes)
     if not hashtags:
         return ""
     return f"|{'_'.join(hashtags)}"
@@ -115,6 +139,54 @@ def _format_plan_template(template: object, *, campaign_name: str, sku_code_text
     )
 
 
+def resolve_sku_catalog(objective_config: dict | None) -> tuple[str, ...]:
+    raw_catalog = (objective_config or {}).get("sku_catalog", {})
+    if isinstance(raw_catalog, dict):
+        try:
+            codes = catalog_codes(raw_catalog)
+        except AdsSkuCatalogError as exc:
+            raise ValueError(str(exc)) from exc
+        if codes:
+            return codes
+    raw_codes = (objective_config or {}).get("sku_codes", [])
+    if isinstance(raw_codes, list) and raw_codes:
+        try:
+            return catalog_codes({"sku_codes": raw_codes})
+        except AdsSkuCatalogError as exc:
+            raise ValueError(str(exc)) from exc
+    return ()
+
+
+def resolve_audience_layout(audiences_config: dict) -> list[tuple[str, str, str, str]]:
+    raw_slots = audiences_config.get("slots") if isinstance(audiences_config, dict) else None
+    if isinstance(raw_slots, list) and raw_slots:
+        result: list[tuple[str, str, str, str]] = []
+        for index, raw in enumerate(raw_slots, start=1):
+            if not isinstance(raw, dict):
+                raise ValueError(f"audiences.slots[{index}] phải là object.")
+            key = str(raw.get("key") or f"slot_{index}").strip()
+            label = str(raw.get("label") or "").strip()
+            suffix = str(raw.get("suffix") or key.upper()).strip()
+            audience_id = str(raw.get("saved_audience_id") or "").strip()
+            if not label:
+                raise ValueError(f"audiences.slots[{index}] thiếu label.")
+            result.append((key, label, suffix, audience_id))
+        return result
+    return [(key, label, suffix, str(audiences_config.get(key, "")).strip()) for key, label, suffix in DEFAULT_AUDIENCE_LAYOUT]
+
+
+def _market_name(objective_config: dict) -> str:
+    return str(objective_config.get("market_name", "ThaiLan")).strip() or "ThaiLan"
+
+
+def _campaign_name(sku_code_text: str, objective_config: dict, *, default_suffix: str = "|Codex") -> str:
+    template = objective_config.get("campaign_name_template")
+    if template:
+        return _format_plan_template(template, campaign_name="", sku_code_text=sku_code_text)
+    suffix = str(objective_config.get("campaign_name_suffix", default_suffix)).strip()
+    return f"ADS:QUYET|MK:{_market_name(objective_config)}|{sku_code_text}{suffix}"
+
+
 def _adset_overrides_have_targeting(objective_config: dict) -> bool:
     overrides = objective_config.get("adset_payload_overrides", {})
     if not isinstance(overrides, dict):
@@ -136,7 +208,28 @@ def build_campaign_plan(
     _ = timezone_name
 
     sku_prefix = resolve_sku_prefix(objective_config)
-    sku_codes = extract_sku_codes(resolved_post.message_text, sku_prefix)
+    allowed_codes = resolve_sku_catalog(objective_config)
+    sku_codes = extract_sku_codes(resolved_post.message_text, sku_prefix, allowed_codes)
+    normalized_override: list[str] = []
+    seen_override: set[str] = set()
+    for value in command.manual_sku_keywords:
+        try:
+            values = extract_catalog_codes(str(value), allowed_codes, strict=True) if allowed_codes else [str(value).strip().upper()]
+        except AdsSkuCatalogError as exc:
+            raise ValueError(str(exc)) from exc
+        for code in values:
+            if code not in seen_override:
+                seen_override.add(code)
+                normalized_override.append(code)
+    if sku_codes and normalized_override and sku_codes != normalized_override:
+        raise ValueError("SKU trong lệnh không khớp SKU trong caption bài viết.")
+    if not sku_codes:
+        sku_codes = normalized_override
+    if not sku_codes and (objective_config.get("sku_catalog_required") or allowed_codes):
+        raise ValueError(
+            "Caption bài viết chưa có SKU Ruza trong catalog cột J. "
+            "Anh thêm mã như #KVF273 hoặc KVF273_QLF191 rồi gửi lại."
+        )
     if not sku_codes:
         raise ValueError(
             f"Không tìm thấy mã sản phẩm dạng #{sku_prefix}... trong nội dung bài viết.\n"
@@ -144,18 +237,10 @@ def build_campaign_plan(
         )
     sku_code_text = "_".join(sku_codes)
 
-    campaign_name_template = str(
-        objective_config.get("campaign_name_template", "ADS:QUYET|MK:ThaiLan|{sku_code_text}|Codex")
-        or "ADS:QUYET|MK:ThaiLan|{sku_code_text}|Codex"
-    )
-    campaign_name = _format_plan_template(
-        campaign_name_template,
-        campaign_name="",
-        sku_code_text=sku_code_text,
-    )
+    campaign_name = _campaign_name(sku_code_text, objective_config)
     media_label = (resolved_post.media_label or "Anh").strip() or "Anh"
-    non_sku_suffix = build_non_jc_hashtag_suffix(resolved_post.message_text, sku_prefix)
-    ad_name = f"ADS:QUYET|MK:ThaiLan|SKU:{sku_code_text}|MED:{media_label}{non_sku_suffix}"
+    non_sku_suffix = build_non_jc_hashtag_suffix(resolved_post.message_text, sku_prefix, allowed_codes)
+    ad_name = f"ADS:QUYET|MK:{_market_name(objective_config)}|SKU:{sku_code_text}|MED:{media_label}{non_sku_suffix}"
 
     template_name, templates = _resolve_template_name(objective_config, template_config)
 
@@ -192,8 +277,7 @@ def build_campaign_plan(
             )
         )
     else:
-        for key, label, suffix in _AUDIENCE_LAYOUT:
-            audience_id = str(audiences_config.get(key, "")).strip()
+        for key, label, suffix, audience_id in resolve_audience_layout(audiences_config):
             if not audience_id or audience_id == "replace_me":
                 raise ValueError(
                     f"Saved Audience ID cho '{label}' chua duoc cau hinh trong audiences.json."
@@ -243,14 +327,22 @@ def build_existing_campaign_plan(
     _ = timezone_name
     sku_prefix = resolve_sku_prefix(objective_config)
 
+    allowed_codes = resolve_sku_catalog(objective_config)
     normalized_codes: list[str] = []
     seen: set[str] = set()
     for value in sku_keywords:
-        code = str(value).strip().upper()
-        if not code or code in seen:
-            continue
-        seen.add(code)
-        normalized_codes.append(code)
+        if allowed_codes:
+            try:
+                values = extract_catalog_codes(str(value), allowed_codes, strict=True)
+            except AdsSkuCatalogError as exc:
+                raise ValueError(str(exc)) from exc
+        else:
+            values = [str(value).strip().upper()]
+        for code in values:
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            normalized_codes.append(code)
     if not normalized_codes:
         raise ValueError(
             "Không tìm thấy mã SKU để map campaign cũ.\n"
@@ -259,7 +351,7 @@ def build_existing_campaign_plan(
         )
     sku_code_text = "_".join(normalized_codes)
 
-    campaign_name = f"ADS:QUYET|MK:ThaiLan|{sku_code_text}|Codex"
+    campaign_name = _campaign_name(sku_code_text, objective_config)
     media_label = (resolved_post.media_label or "Anh").strip() or "Anh"
 
     template_name, templates = _resolve_template_name(objective_config, template_config)
