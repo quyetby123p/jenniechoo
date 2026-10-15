@@ -225,17 +225,13 @@ def build_campaign_plan(
         raise ValueError("SKU trong lệnh không khớp SKU trong caption bài viết.")
     if not sku_codes:
         sku_codes = normalized_override
-    if not sku_codes and (objective_config.get("sku_catalog_required") or allowed_codes):
-        raise ValueError(
-            "Caption bài viết chưa có SKU Ruza trong catalog cột J. "
-            "Anh thêm mã như #KVF273 hoặc KVF273_QLF191 rồi gửi lại."
-        )
     if not sku_codes:
-        raise ValueError(
-            f"Không tìm thấy mã sản phẩm dạng #{sku_prefix}... trong nội dung bài viết.\n"
-            f"Anh thêm hashtag mã (ví dụ {_sku_example(sku_prefix)}) vào bài viết rồi gửi lại link giúp em."
-        )
-    sku_code_text = "_".join(sku_codes)
+        if not (objective_config.get("sku_catalog_required") or allowed_codes):
+            raise ValueError(
+                f"Không tìm thấy mã sản phẩm dạng #{sku_prefix}... trong nội dung bài viết.\n"
+                f"Anh thêm hashtag mã (ví dụ {_sku_example(sku_prefix)}) vào bài viết rồi gửi lại link giúp em."
+            )
+    sku_code_text = "_".join(sku_codes) or "ALL"
 
     campaign_name = _campaign_name(sku_code_text, objective_config)
     media_label = (resolved_post.media_label or "Anh").strip() or "Anh"

@@ -106,17 +106,22 @@ def test_ruza_campaign_rejects_missing_or_unknown_caption_sku() -> None:
         message_text="Không có mã",
         media_label="Video",
     )
-    with pytest.raises(ValueError, match="SKU Ruza"):
-        build_campaign_plan(
-            command=command,
-            resolved_post=resolved,
-            post_fingerprint="ruza-test",
-            version=1,
-            timezone_name="Asia/Bangkok",
-            audiences_config=_ruza_audiences(),
-            objective_config=_ruza_objective(),
-            template_config=_ruza_templates(),
-        )
+    plan = build_campaign_plan(
+        command=command,
+        resolved_post=resolved,
+        post_fingerprint="ruza-test",
+        version=1,
+        timezone_name="Asia/Bangkok",
+        audiences_config=_ruza_audiences(),
+        objective_config=_ruza_objective(),
+        template_config=_ruza_templates(),
+    )
+    assert plan.sku_code_text == "ALL"
+    assert plan.campaign_name == "ADS:QUYET|MK:Thailand|ALL"
+    assert all(
+        slot.ad_name == "ADS:QUYET|MK:Thailand|SKU:ALL|MED:Video"
+        for slot in plan.audiences
+    )
 
     resolved.message_text = "#NOT999"
     with pytest.raises(ValueError, match="không có trong catalog"):
