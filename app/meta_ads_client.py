@@ -41,6 +41,10 @@ class MetaAdsClient:
     _INSTAGRAM_MEDIA_REQUIREMENT_ERROR_MARKERS = (
         "bài viết của bạn không có hình ảnh hoặc video",
         "instagram hiện chỉ hỗ trợ bài viết video, ảnh và liên kết",
+        "bài viết đã chọn không chứa từ 2-20 hình ảnh hoặc video",
+        "bài viết được chọn không chứa từ 2-20 hình ảnh hoặc video",
+        "selected post does not contain 2-20 images or videos",
+        "the selected post does not contain 2-20 images or videos",
         "your post has no image or video",
         "instagram ads currently only support video, image and link posts",
     )
