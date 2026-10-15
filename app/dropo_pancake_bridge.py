@@ -48,7 +48,7 @@ HANOI_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 SALE_PERCENT = 15
 SALE_PRODUCT_CODES = frozenset({
     "JC-A-146", "JC-A-158", "JC-Q-158",
-    "JC-V-145", "JC-V-123", "JC-V-236", "JC-V-154",
+    "JC-V-145", "JC-V-123", "JC-V-236",
 })
 
 # Bắt mã dạng VXV002-DEN-M / VXV008-XANH MINT-XL, chấp nhận hậu tố lô "-B1".

@@ -1030,6 +1030,14 @@ SALE_PRICED_MAP = {
     },
 }
 
+FULL_PRICE_154_MAP = {
+    "VXV154-KEM-M": {
+        "variation_id": "var-154-kem-m",
+        "product_code": "JC-V-154",
+        "retail_price_minor": 340000,
+    },
+}
+
 
 def priced_payload(**overrides: Any) -> dict:
     bridge, _, _ = build_bridge([HEADER], sku_map=PRICED_MAP)
@@ -1038,6 +1046,11 @@ def priced_payload(**overrides: Any) -> dict:
 
 def sale_priced_payload(**overrides: Any) -> dict:
     bridge, _, _ = build_bridge([HEADER], sku_map=SALE_PRICED_MAP)
+    return bridge.build_order_payload(make_row(**overrides), HEADER)
+
+
+def full_price_154_payload(**overrides: Any) -> dict:
+    bridge, _, _ = build_bridge([HEADER], sku_map=FULL_PRICE_154_MAP)
     return bridge.build_order_payload(make_row(**overrides), HEADER)
 
 
@@ -1126,6 +1139,19 @@ def test_sale_nhieu_so_luong_tinh_giam_cho_tung_don_vi():
     assert payload["total_discount"] == 48000
     assert payload["total_price"] == 272000
     assert payload["items"][0]["discount_each_product"] == 24000
+
+
+def test_ma_154_da_het_sale_giu_nguyen_gia_goc():
+    payload = full_price_154_payload(
+        **{
+            "Selected SKUs": "VXV154-KEM-M",
+            "SKU Code": "JC-V-154",
+            "Order value": "3400",
+        }
+    )
+    assert payload["total_discount"] == 0
+    assert payload["total_price"] == 340000
+    assert "discount_each_product" not in payload["items"][0]
 
 
 @pytest.mark.parametrize(
