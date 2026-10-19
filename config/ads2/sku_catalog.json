@@ -6,7 +6,7 @@
     "column": "J",
     "range": "J2:J1000"
   },
-  "synced_at": "2026-10-14T00:00:00+00:00",
+  "synced_at": "2026-10-19T07:41:12.6773172Z",
   "products": [
     {"sku": "ADB485", "source_product": "ADB485.C2608"},
     {"sku": "ADB486", "source_product": "ADB486.C2608"},
@@ -34,13 +34,32 @@
     {"sku": "VXF144", "source_product": "VXF144.C2604"},
     {"sku": "VCF166", "source_product": "VCF166.C2608"},
     {"sku": "ADB422", "source_product": "ADB422.C2604"},
-    {"sku": "VBC016", "source_product": "VBC016"}
+    {"sku": "VBC016", "source_product": "VBC016"},
+    {"sku": "ADB452", "source_product": "ADB452.C2606"},
+    {"sku": "ADB496", "source_product": "ADB496.C2608"},
+    {"sku": "ANB487", "source_product": "ANB487.C2608"},
+    {"sku": "ANB492", "source_product": "ANB492.C2608"},
+    {"sku": "ANF498", "source_product": "ANF498.C2608"},
+    {"sku": "ANF499", "source_product": "ANF499.C2608"},
+    {"sku": "ANF495", "source_product": "ANF495.C2608"},
+    {"sku": "QSF174", "source_product": "QSF174.C2605"},
+    {"sku": "QSF179", "source_product": "QSF179.C2606"},
+    {"sku": "QSF188", "source_product": "QSF188.C2608"},
+    {"sku": "VDF132", "source_product": "VDF132.C2511"},
+    {"sku": "VAF146", "source_product": "VAF146.C2604"},
+    {"sku": "VAF157", "source_product": "VAF157.C2606"},
+    {"sku": "VCF168", "source_product": "VCF168.C2608"},
+    {"sku": "VNF161", "source_product": "VNF161.C2606"},
+    {"sku": "DDF008", "source_product": "DDF008.C2608"}
   ],
   "sku_codes": [
     "ADB485", "ADB486", "ADB494", "ADF484", "ADF489", "ANB481",
     "ANF488", "ANF490", "ANF491", "ANF497", "KVF272", "KVF273",
     "QDF186", "QLF137", "QLF191", "QSF128", "QSF170", "VAC024",
     "VAF145", "VAF158", "VCF149", "VCF165", "VSF159", "VXF144",
-    "VCF166", "ADB422", "VBC016"
+    "VCF166", "ADB422", "VBC016", "ADB452", "ADB496", "ANB487",
+    "ANB492", "ANF498", "ANF499", "ANF495", "QSF174", "QSF179",
+    "QSF188", "VDF132", "VAF146", "VAF157", "VCF168", "VNF161",
+    "DDF008"
   ]
 }
