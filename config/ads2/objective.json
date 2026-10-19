@@ -8,6 +8,7 @@
   "campaign_name_suffix": "",
   "sku_catalog_path": "config/ads2/sku_catalog.json",
   "sku_catalog_required": true,
+  "sku_catalog_ignore_unknown": true,
   "campaign_payload_overrides": {},
   "adset_payload_overrides": {
     "destination_type": "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",

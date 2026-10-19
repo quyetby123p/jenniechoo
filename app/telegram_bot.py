@@ -473,10 +473,16 @@ class TelegramAdsBot:
                 objective_for_parse = self._load_objective_config()
                 allowed_sku_codes = resolve_sku_catalog(objective_for_parse)
                 allow_new_sku_override = True
+                ignore_unknown_sku_codes = str(
+                    objective_for_parse.get("sku_catalog_ignore_unknown", False)
+                ).strip().lower() in {"1", "true", "yes", "on"}
+            else:
+                ignore_unknown_sku_codes = False
             command = parse_ads_command(
                 raw_text,
                 allowed_sku_codes=allowed_sku_codes,
                 allow_new_sku_override=allow_new_sku_override,
+                ignore_unknown_sku_codes=ignore_unknown_sku_codes,
             )
         except (CommandParseError, ValidationError) as exc:
             await message.answer(str(exc))

@@ -20,6 +20,7 @@ def _ruza_objective() -> dict:
             spreadsheet_id="sheet",
             sheet_name="Sản phẩm và giá",
         ),
+        "sku_catalog_ignore_unknown": True,
         "campaign_payload_overrides": {},
         "adset_payload_overrides": {},
         "creative_payload_overrides": {},
@@ -95,7 +96,7 @@ def test_ruza_campaign_has_two_audiences_and_expected_names() -> None:
     )
 
 
-def test_ruza_campaign_rejects_missing_or_unknown_caption_sku() -> None:
+def test_ruza_campaign_uses_all_when_caption_has_no_known_sku() -> None:
     command = AdsCommand(post_url="https://www.facebook.com/ruza.th/posts/1", budget_daily_vnd=1)
     resolved = ResolvedPost(
         post_id="1",
@@ -124,17 +125,31 @@ def test_ruza_campaign_rejects_missing_or_unknown_caption_sku() -> None:
     )
 
     resolved.message_text = "#NOT999"
-    with pytest.raises(ValueError, match="không có trong catalog"):
-        build_campaign_plan(
-            command=command,
-            resolved_post=resolved,
-            post_fingerprint="ruza-test",
-            version=1,
-            timezone_name="Asia/Bangkok",
-            audiences_config=_ruza_audiences(),
-            objective_config=_ruza_objective(),
-            template_config=_ruza_templates(),
-        )
+    plan = build_campaign_plan(
+        command=command,
+        resolved_post=resolved,
+        post_fingerprint="ruza-test",
+        version=1,
+        timezone_name="Asia/Bangkok",
+        audiences_config=_ruza_audiences(),
+        objective_config=_ruza_objective(),
+        template_config=_ruza_templates(),
+    )
+    assert plan.sku_code_text == "ALL"
+
+    resolved.message_text = "#NOT999 #KVF273"
+    plan = build_campaign_plan(
+        command=command,
+        resolved_post=resolved,
+        post_fingerprint="ruza-test",
+        version=1,
+        timezone_name="Asia/Bangkok",
+        audiences_config=_ruza_audiences(),
+        objective_config=_ruza_objective(),
+        template_config=_ruza_templates(),
+    )
+    assert plan.sku_code_text == "KVF273"
+    assert plan.audiences[0].ad_name == "ADS:QUYET|MK:Thailand|SKU:KVF273|MED:Video"
 
 
 def test_ruza_campaign_rejects_missing_saved_audience_id() -> None:
@@ -179,6 +194,16 @@ def test_ruza_new_command_accepts_catalog_sku_override() -> None:
     )
     assert command.use_existing_campaign is False
     assert command.manual_sku_keywords == ["KVF273", "QLF191"]
+
+
+def test_ruza_new_command_ignores_unknown_sku_override() -> None:
+    command = parse_ads_command(
+        "https://www.facebook.com/ruza.th/posts/1 RQF168 ADB452 ngân sách 200000 lên mới",
+        allowed_sku_codes=("ADB452",),
+        allow_new_sku_override=True,
+        ignore_unknown_sku_codes=True,
+    )
+    assert command.manual_sku_keywords == ["ADB452"]
 
 
 def test_ruza_new_plan_uses_explicit_sku_when_caption_is_empty() -> None:

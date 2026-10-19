@@ -71,7 +71,12 @@ def _extract_budget(raw: str) -> int:
     )
 
 
-def _extract_manual_sku_keywords(raw: str, allowed_sku_codes: tuple[str, ...] = ()) -> list[str]:
+def _extract_manual_sku_keywords(
+    raw: str,
+    allowed_sku_codes: tuple[str, ...] = (),
+    *,
+    ignore_unknown_sku_codes: bool = False,
+) -> list[str]:
     cleaned = _URL_PATTERN.sub(" ", raw)
     for pattern in _BUDGET_PATTERNS:
         cleaned = pattern.sub(" ", cleaned)
@@ -81,7 +86,11 @@ def _extract_manual_sku_keywords(raw: str, allowed_sku_codes: tuple[str, ...] = 
 
     if allowed_sku_codes:
         try:
-            return extract_catalog_codes(cleaned, allowed_sku_codes, strict=True)
+            return extract_catalog_codes(
+                cleaned,
+                allowed_sku_codes,
+                strict=not ignore_unknown_sku_codes,
+            )
         except AdsSkuCatalogError as exc:
             raise CommandParseError(str(exc)) from exc
 
@@ -126,6 +135,7 @@ def parse_ads_command(
     *,
     allowed_sku_codes: tuple[str, ...] = (),
     allow_new_sku_override: bool = False,
+    ignore_unknown_sku_codes: bool = False,
 ) -> AdsCommand:
     raw = (text or "").strip()
     if not raw:
@@ -152,7 +162,11 @@ def parse_ads_command(
     if budget is None:
         budget = 0
     manual_sku_keywords = (
-        _extract_manual_sku_keywords(raw, allowed_sku_codes)
+        _extract_manual_sku_keywords(
+            raw,
+            allowed_sku_codes,
+            ignore_unknown_sku_codes=ignore_unknown_sku_codes,
+        )
         if use_existing_campaign or allow_new_sku_override
         else []
     )

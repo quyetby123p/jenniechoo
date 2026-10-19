@@ -60,10 +60,12 @@ def extract_sku_codes(
     message_text: str,
     sku_prefix: str = _DEFAULT_SKU_PREFIX,
     allowed_codes: tuple[str, ...] = (),
+    *,
+    strict_catalog: bool = True,
 ) -> list[str]:
     if allowed_codes:
         try:
-            return extract_catalog_codes(message_text, allowed_codes, strict=True)
+            return extract_catalog_codes(message_text, allowed_codes, strict=strict_catalog)
         except AdsSkuCatalogError as exc:
             raise ValueError(str(exc)) from exc
     codes: list[str] = []
@@ -85,6 +87,9 @@ def extract_non_sku_hashtags(
     message_text: str,
     sku_prefix: str = _DEFAULT_SKU_PREFIX,
     allowed_codes: tuple[str, ...] = (),
+    *,
+    strict_catalog: bool = True,
+    ignore_unknown_sku_codes: bool = False,
 ) -> list[str]:
     hashtags: list[str] = []
     seen: set[str] = set()
@@ -94,9 +99,15 @@ def extract_non_sku_hashtags(
         is_catalog_tag = False
         if allowed_codes:
             try:
-                is_catalog_tag = bool(extract_catalog_codes(tag, allowed_codes, strict=True))
+                is_catalog_tag = bool(extract_catalog_codes(tag, allowed_codes, strict=strict_catalog))
             except AdsSkuCatalogError:
                 is_catalog_tag = False
+        if (
+            ignore_unknown_sku_codes
+            and not is_catalog_tag
+            and re.fullmatch(r"[A-Z]{2,}[0-9]{2,}(?:\.[A-Z0-9]+)?", tag, flags=re.IGNORECASE)
+        ):
+            continue
         if not tag or sku_only_pattern.fullmatch(tag) or tag.upper().split(".", 1)[0] in allowed_codes or is_catalog_tag:
             continue
         dedup_key = tag.lower()
@@ -111,8 +122,17 @@ def build_non_jc_hashtag_suffix(
     message_text: str,
     sku_prefix: str = _DEFAULT_SKU_PREFIX,
     allowed_codes: tuple[str, ...] = (),
+    *,
+    strict_catalog: bool = True,
+    ignore_unknown_sku_codes: bool = False,
 ) -> str:
-    hashtags = extract_non_sku_hashtags(message_text, sku_prefix, allowed_codes)
+    hashtags = extract_non_sku_hashtags(
+        message_text,
+        sku_prefix,
+        allowed_codes,
+        strict_catalog=strict_catalog,
+        ignore_unknown_sku_codes=ignore_unknown_sku_codes,
+    )
     if not hashtags:
         return ""
     return f"|{'_'.join(hashtags)}"
@@ -209,12 +229,23 @@ def build_campaign_plan(
 
     sku_prefix = resolve_sku_prefix(objective_config)
     allowed_codes = resolve_sku_catalog(objective_config)
-    sku_codes = extract_sku_codes(resolved_post.message_text, sku_prefix, allowed_codes)
+    ignore_unknown_sku_codes = _config_bool(objective_config.get("sku_catalog_ignore_unknown"), default=False)
+    strict_catalog = not ignore_unknown_sku_codes
+    sku_codes = extract_sku_codes(
+        resolved_post.message_text,
+        sku_prefix,
+        allowed_codes,
+        strict_catalog=strict_catalog,
+    )
     normalized_override: list[str] = []
     seen_override: set[str] = set()
     for value in command.manual_sku_keywords:
         try:
-            values = extract_catalog_codes(str(value), allowed_codes, strict=True) if allowed_codes else [str(value).strip().upper()]
+            values = (
+                extract_catalog_codes(str(value), allowed_codes, strict=strict_catalog)
+                if allowed_codes
+                else [str(value).strip().upper()]
+            )
         except AdsSkuCatalogError as exc:
             raise ValueError(str(exc)) from exc
         for code in values:
@@ -235,7 +266,13 @@ def build_campaign_plan(
 
     campaign_name = _campaign_name(sku_code_text, objective_config)
     media_label = (resolved_post.media_label or "Anh").strip() or "Anh"
-    non_sku_suffix = build_non_jc_hashtag_suffix(resolved_post.message_text, sku_prefix, allowed_codes)
+    non_sku_suffix = build_non_jc_hashtag_suffix(
+        resolved_post.message_text,
+        sku_prefix,
+        allowed_codes,
+        strict_catalog=strict_catalog,
+        ignore_unknown_sku_codes=ignore_unknown_sku_codes,
+    )
     ad_name = f"ADS:QUYET|MK:{_market_name(objective_config)}|SKU:{sku_code_text}|MED:{media_label}{non_sku_suffix}"
 
     template_name, templates = _resolve_template_name(objective_config, template_config)
@@ -324,12 +361,14 @@ def build_existing_campaign_plan(
     sku_prefix = resolve_sku_prefix(objective_config)
 
     allowed_codes = resolve_sku_catalog(objective_config)
+    ignore_unknown_sku_codes = _config_bool(objective_config.get("sku_catalog_ignore_unknown"), default=False)
+    strict_catalog = not ignore_unknown_sku_codes
     normalized_codes: list[str] = []
     seen: set[str] = set()
     for value in sku_keywords:
         if allowed_codes:
             try:
-                values = extract_catalog_codes(str(value), allowed_codes, strict=True)
+                values = extract_catalog_codes(str(value), allowed_codes, strict=strict_catalog)
             except AdsSkuCatalogError as exc:
                 raise ValueError(str(exc)) from exc
         else:
@@ -339,13 +378,13 @@ def build_existing_campaign_plan(
                 continue
             seen.add(code)
             normalized_codes.append(code)
-    if not normalized_codes:
+    if not normalized_codes and not ignore_unknown_sku_codes:
         raise ValueError(
             "Không tìm thấy mã SKU để map campaign cũ.\n"
             f"Anh gửi theo cú pháp: <link> {_sku_example(sku_prefix, with_hash=False)} lên cũ\n"
             f"hoặc đảm bảo bài viết có hashtag #{sku_prefix}... ."
         )
-    sku_code_text = "_".join(normalized_codes)
+    sku_code_text = "_".join(normalized_codes) or "ALL"
 
     campaign_name = _campaign_name(sku_code_text, objective_config)
     media_label = (resolved_post.media_label or "Anh").strip() or "Anh"
