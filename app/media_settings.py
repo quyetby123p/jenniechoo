@@ -37,6 +37,8 @@ class MediaSettings:
     sheet_oauth_token_uri: str
     media_research_enabled: bool = True
     work_progress_enabled: bool = False
+    media_clone_enabled: bool = True
+    media_clone_profiles_path: Path | None = None
 
     @property
     def runs_dir(self) -> Path:
@@ -57,6 +59,14 @@ class MediaSettings:
     @property
     def lock_file(self) -> Path:
         return self.state_root / "media_bot.instance.lock"
+
+    @property
+    def clone_profiles_path(self) -> Path:
+        return self.media_clone_profiles_path or (self.project_root / "config" / "media_clone_profiles.json")
+
+    @property
+    def clone_jobs_dir(self) -> Path:
+        return self.project_root / "storage" / "media_clone" / "jobs"
 
 
 def _require_env(key: str) -> str:
@@ -169,6 +179,14 @@ def load_media_settings(project_root: Path | None = None) -> MediaSettings:
         os.getenv("MEDIA_BOT_WORK_PROGRESS_ENABLED", "0"),
         default=False,
     )
+    media_clone_enabled = _parse_bool(
+        os.getenv("MEDIA_BOT_MEDIA_CLONE_ENABLED", "1"),
+        default=True,
+    )
+    profiles_raw = _optional_env("MEDIA_CLONE_PROFILES_PATH", "config/media_clone_profiles.json")
+    media_clone_profiles_path = Path(profiles_raw)
+    if not media_clone_profiles_path.is_absolute():
+        media_clone_profiles_path = project_root / media_clone_profiles_path
 
     storage_root = project_root / "storage" / "media_research"
     logs_root = project_root / "logs" / "media_bot"
@@ -201,4 +219,6 @@ def load_media_settings(project_root: Path | None = None) -> MediaSettings:
         sheet_oauth_token_uri=sheet_oauth_token_uri,
         media_research_enabled=media_research_enabled,
         work_progress_enabled=work_progress_enabled,
+        media_clone_enabled=media_clone_enabled,
+        media_clone_profiles_path=media_clone_profiles_path,
     )
