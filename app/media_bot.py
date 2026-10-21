@@ -189,7 +189,7 @@ class MediaResearchBot:
         )
         await message.answer(
             f"Đã mở retry cho {job_id}. Trạng thái: ready_for_codex.\n"
-            f"Mở Codex và gửi: đăng job {updated.get('job_id')}"
+            "Job đã được đưa vào luồng Codex Browser tự động; anh không cần gửi thêm lệnh."
         )
 
     async def handle_progress_command(self, message: Message) -> None:
@@ -566,7 +566,7 @@ class MediaResearchBot:
                 f"- Job: {job_id}\n"
                 f"- Manifest: {self.clone_storage.manifest_path(job_id)}\n"
                 f"- Trạng thái: {updated.get('status')}\n\n"
-                f"Mở Codex và gửi: đăng job {job_id}\n"
+                "Job đã được đưa vào luồng Codex Browser tự động; anh không cần gửi thêm lệnh.\n"
                 "Codex sẽ tải media bản gốc, hiện preview thực tế và hỏi xác nhận ngay trước khi đăng."
             )
 
