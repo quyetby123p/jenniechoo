@@ -17,6 +17,15 @@ from app.exceptions import CommandParseError
 from app.media_approval_service import MediaApprovalService
 from app.media_command_parser import is_media_command_text, parse_media_caption
 from app.media_constants import MEDIA_SHEET_HEADERS
+from app.media_clone_service import (
+    clone_dedupe_key,
+    get_clone_profile,
+    new_clone_manifest,
+    new_product_clone_manifest,
+    parse_clone_product_command,
+    parse_clone_source_url,
+    MediaCloneStorageService,
+)
 from app.media_research_service import MediaResearchService
 from app.media_settings import MediaSettings
 from app.media_sheet_service import MediaSheetService
@@ -47,6 +56,7 @@ class MediaResearchBot:
         self.research = research
         self.sheet = sheet
         self.approval = approval
+        self.clone_storage = MediaCloneStorageService(settings)
         self.work_progress = work_progress_service
         self.work_progress_scheduler = work_progress_scheduler
         self.work_progress_api_server = work_progress_api_server
@@ -58,6 +68,10 @@ class MediaResearchBot:
         self.router.message.register(self.handle_start_command, Command("start"))
         self.router.message.register(self.handle_media_help_command, Command("media_help"))
         self.router.message.register(self.handle_media_status_command, Command("media_status"))
+        self.router.message.register(self.handle_clone_help_command, Command("clone_help"))
+        self.router.message.register(self.handle_clone_status_command, Command("clone_status"))
+        self.router.message.register(self.handle_clone_cancel_command, Command("clone_cancel"))
+        self.router.message.register(self.handle_clone_retry_command, Command("clone_retry"))
         self.router.message.register(self.handle_progress_command, Command("progress"))
         self.router.message.register(self.handle_photo_message, F.photo)
         self.router.message.register(self.handle_text_message, F.text)
@@ -110,6 +124,74 @@ class MediaResearchBot:
             return
         await message.answer(self._status_text())
 
+    async def handle_clone_help_command(self, message: Message) -> None:
+        if not self._is_authorized(message.from_user.id if message.from_user else None):
+            await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
+            return
+        await message.answer(self._clone_help_text())
+
+    async def handle_clone_status_command(self, message: Message) -> None:
+        if not self._is_authorized(message.from_user.id if message.from_user else None):
+            await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
+            return
+        job_id = self._command_argument(message.text)
+        job = self._load_clone_job(job_id) if job_id else self.clone_storage.find_active_draft(
+            chat_id=message.chat.id,
+            creator_id=message.from_user.id if message.from_user else 0,
+        )
+        if not job:
+            await message.answer("Không tìm thấy clone job. Anh gửi link nguồn để tạo job mới.")
+            return
+        if not self._clone_owner_matches(job, message.chat.id, message.from_user.id if message.from_user else None):
+            await message.answer("Clone job này không thuộc chat/user hiện tại.")
+            return
+        await message.answer(self._clone_status_text(job))
+
+    async def handle_clone_cancel_command(self, message: Message) -> None:
+        if not self._is_authorized(message.from_user.id if message.from_user else None):
+            await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
+            return
+        job_id = self._command_argument(message.text)
+        job = self._load_clone_job(job_id) if job_id else self.clone_storage.find_active_draft(
+            chat_id=message.chat.id,
+            creator_id=message.from_user.id if message.from_user else 0,
+        )
+        if not job:
+            await message.answer("Không có clone job đang chờ để hủy.")
+            return
+        if not self._clone_owner_matches(job, message.chat.id, message.from_user.id if message.from_user else None):
+            await message.answer("Clone job này không thuộc chat/user hiện tại.")
+            return
+        if str(job.get("status", "")) in {"published", "cancelled"}:
+            await message.answer(f"Job {job.get('job_id', '')} đang ở trạng thái {job.get('status')}, không thể hủy.")
+            return
+        updated = self.clone_storage.update_job(str(job["job_id"]), {"status": "cancelled"})
+        await message.answer(f"Đã hủy job {updated.get('job_id')}.")
+
+    async def handle_clone_retry_command(self, message: Message) -> None:
+        if not self._is_authorized(message.from_user.id if message.from_user else None):
+            await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
+            return
+        job_id = self._command_argument(message.text)
+        if not job_id:
+            await message.answer("Dùng: /clone_retry clone_abc123")
+            return
+        job = self._load_clone_job(job_id)
+        if not job or not self._clone_owner_matches(job, message.chat.id, message.from_user.id if message.from_user else None):
+            await message.answer("Không tìm thấy job hoặc job không thuộc chat/user hiện tại.")
+            return
+        if str(job.get("status", "")) not in {"failed", "partial", "published"}:
+            await message.answer("Chỉ retry được job failed, partial hoặc published; job này chưa ở trạng thái đó.")
+            return
+        updated = self.clone_storage.update_job(
+            job_id,
+            {"status": "ready_for_codex", "retry_requested_at": now_utc_iso(), "retry_requested_by": message.from_user.id},
+        )
+        await message.answer(
+            f"Đã mở retry cho {job_id}. Trạng thái: ready_for_codex.\n"
+            f"Mở Codex và gửi: đăng job {updated.get('job_id')}"
+        )
+
     async def handle_progress_command(self, message: Message) -> None:
         await self._handle_progress_command_text(message)
 
@@ -126,6 +208,28 @@ class MediaResearchBot:
 
         if not self._is_authorized(message.from_user.id if message.from_user else None):
             return
+        if self.settings.media_clone_enabled:
+            draft = self.clone_storage.find_active_draft(
+                chat_id=message.chat.id,
+                creator_id=message.from_user.id if message.from_user else 0,
+            )
+            source = parse_clone_source_url(text)
+            product_code = parse_clone_product_command(text)
+            if draft:
+                if source:
+                    await message.answer(
+                        f"Đang có job {draft.get('job_id')} chờ caption. Dùng /clone_cancel trước nếu muốn đổi link nguồn."
+                    )
+                    return
+                if str(draft.get("status", "")) == "draft":
+                    await self._complete_clone_caption(message, draft, text)
+                    return
+            if source:
+                await self._start_clone_from_source(message, source)
+                return
+            if product_code:
+                await self._start_clone_from_product_code(message, product_code)
+                return
         if is_media_command_text(text):
             if not self.settings.media_research_enabled:
                 await message.answer("Media research đang tắt (`MEDIA_BOT_MEDIA_RESEARCH_ENABLED=0`).")
@@ -272,8 +376,221 @@ class MediaResearchBot:
         if action.action == "media_sheet_cancel":
             await self._on_sheet_cancel(query, action.value)
             return
+        if action.action in {"clone_fb", "clone_ig", "clone_both"}:
+            await self._on_clone_platform(query, action.action, action.value)
+            return
+        if action.action == "clone_approve":
+            await self._on_clone_approve(query, action.value)
+            return
+        if action.action == "clone_cancel":
+            await self._on_clone_cancel(query, action.value)
+            return
 
         await query.answer()
+
+    async def _start_clone_from_source(self, message: Message, source: Any) -> None:
+        user_id = message.from_user.id if message.from_user else None
+        if not user_id:
+            return
+        active = self.clone_storage.find_active_draft(chat_id=message.chat.id, creator_id=user_id)
+        if active:
+            await message.answer(
+                f"Đang có job {active.get('job_id')} chờ caption hoặc chọn nền tảng. "
+                "Dùng /clone_cancel trước nếu muốn bắt đầu link khác."
+            )
+            return
+        try:
+            profile = get_clone_profile(self.settings.clone_profiles_path, "ruza_th")
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+        job_id = self.clone_storage.generate_job_id()
+        manifest = new_clone_manifest(
+            job_id=job_id,
+            source=source,
+            caption="",
+            creator_id=user_id,
+            chat_id=message.chat.id,
+            profile_id="ruza_th",
+            profile=profile,
+            message_id=message.message_id,
+        )
+        self.clone_storage.save_job(manifest)
+        await message.answer(
+            "Đã nhận link nguồn "
+            f"({source.platform}). Anh gửi caption mới ở tin nhắn tiếp theo; em giữ nguyên Unicode và xuống dòng.\n"
+            f"Job tạm: {job_id}\nDùng /clone_cancel nếu muốn hủy."
+        )
+
+    async def _start_clone_from_product_code(self, message: Message, product_code: str) -> None:
+        user_id = message.from_user.id if message.from_user else None
+        if not user_id:
+            return
+        active = self.clone_storage.find_active_draft(chat_id=message.chat.id, creator_id=user_id)
+        if active:
+            await message.answer(
+                f"Đang có job {active.get('job_id')} chờ xử lý. "
+                "Dùng /clone_cancel trước nếu muốn bắt đầu mã khác."
+            )
+            return
+        try:
+            profile = get_clone_profile(self.settings.clone_profiles_path, "ruza_th")
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+        job_id = self.clone_storage.generate_job_id()
+        duplicate_filter = self.clone_storage.build_product_duplicate_filter(product_code)
+        manifest = new_product_clone_manifest(
+            job_id=job_id,
+            product_code=product_code,
+            creator_id=user_id,
+            chat_id=message.chat.id,
+            profile_id="ruza_th",
+            profile=profile,
+            duplicate_filter=duplicate_filter,
+            message_id=message.message_id,
+        )
+        self.clone_storage.save_job(manifest)
+        await message.answer(
+            self._clone_preview_text(manifest)
+            + "\n\nEm sẽ tìm đúng bài trên Page RUZA Việt Nam theo mã này, dịch caption gốc sang tiếng Thái, "
+            "bỏ CTA được cấu hình và thêm footer. Chọn nền tảng đích:",
+            reply_markup=self.approval.clone_platform_keyboard(job_id),
+        )
+
+    async def _complete_clone_caption(self, message: Message, draft: dict[str, Any], caption: str) -> None:
+        if not caption.strip():
+            await message.answer("Caption đang trống, anh gửi lại caption giúp em.")
+            return
+        job_id = str(draft.get("job_id", ""))
+        updated = self.clone_storage.update_job(
+            job_id,
+            {"caption": caption, "status": "awaiting_platform", "caption_message_id": message.message_id},
+        )
+        await message.answer(
+            self._clone_preview_text(updated) + "\n\nChọn nền tảng đích:",
+            reply_markup=self.approval.clone_platform_keyboard(job_id),
+        )
+
+    async def _on_clone_platform(self, query: CallbackQuery, action: str, job_id: str) -> None:
+        job = self.clone_storage.load_job(job_id)
+        if not job:
+            await query.answer("Clone job không tồn tại.", show_alert=True)
+            return
+        if not self._clone_owner_matches(
+            job,
+            query.message.chat.id if query.message else None,
+            query.from_user.id if query.from_user else None,
+        ):
+            await query.answer("Clone job không thuộc chat/user hiện tại.", show_alert=True)
+            return
+        if str(job.get("status", "")) != "awaiting_platform":
+            await query.answer(f"Job đang ở trạng thái {job.get('status')}.", show_alert=True)
+            return
+        targets = {"clone_fb": ["facebook"], "clone_ig": ["instagram"], "clone_both": ["facebook", "instagram"]}[action]
+        updated = self.clone_storage.update_job(job_id, {"targets": targets})
+        await query.answer()
+        if query.message:
+            await query.message.edit_text(
+                self._clone_preview_text(updated) + "\n\nAnh kiểm tra lại và bấm Duyệt để tạo job cho Codex:",
+                reply_markup=self.approval.clone_approval_keyboard(job_id),
+            )
+
+    async def _on_clone_approve(self, query: CallbackQuery, job_id: str) -> None:
+        job = self.clone_storage.load_job(job_id)
+        if not job:
+            await query.answer("Clone job không tồn tại.", show_alert=True)
+            return
+        if not self._clone_owner_matches(
+            job,
+            query.message.chat.id if query.message else None,
+            query.from_user.id if query.from_user else None,
+        ):
+            await query.answer("Clone job không thuộc chat/user hiện tại.", show_alert=True)
+            return
+        if str(job.get("status", "")) != "awaiting_platform" or not job.get("targets"):
+            await query.answer("Job chưa có nền tảng đích hoặc đã được xử lý.", show_alert=True)
+            return
+        source_selector = job.get("source_selector", {}) if isinstance(job.get("source_selector"), dict) else {}
+        is_product_job = str(source_selector.get("type", "")) == "product_code"
+        duplicate_filter = job.get("duplicate_filter", {}) if isinstance(job.get("duplicate_filter"), dict) else {}
+        if is_product_job:
+            duplicate_filter = self.clone_storage.build_product_duplicate_filter(
+                str(job.get("requested_product_code", ""))
+            )
+        source_data = job.get("source", {}) if isinstance(job.get("source"), dict) else {}
+        source_url = str(source_data.get("url", "")).strip()
+        if is_product_job:
+            source_url = f"product_request:{str(job.get('requested_product_code', '')).strip().upper()}:{job_id}"
+        elif not source_url:
+            source_url = f"product:{str(job.get('requested_product_code', '')).strip().upper()}"
+        caption_for_dedupe = str(job.get("caption", ""))
+        if not caption_for_dedupe:
+            caption_for_dedupe = f"auto_translate_source_to_thai:{str(job.get('requested_product_code', '')).strip().upper()}"
+        dedupe_key = clone_dedupe_key(
+            source_url=source_url,
+            caption=caption_for_dedupe,
+            targets=job.get("targets", []),
+            profile_id=str(job.get("profile_id", "ruza_th")),
+        )
+        duplicate = self.clone_storage.find_duplicate(dedupe_key)
+        if not is_product_job:
+            duplicate = duplicate or self.clone_storage.find_source_duplicate(
+                source_url=source_url,
+                targets=job.get("targets", []),
+                profile_id=str(job.get("profile_id", "ruza_th")),
+                exclude_job_id=job_id,
+            )
+        if duplicate and str(duplicate.get("job_id")) != job_id and str(duplicate.get("status")) != "cancelled":
+            await query.answer(
+                f"Nội dung đã có job {duplicate.get('job_id')} ({duplicate.get('status')}). Dùng /clone_status hoặc /clone_retry.",
+                show_alert=True,
+            )
+            return
+        updated = self.clone_storage.update_job(
+            job_id,
+            {
+                "status": "ready_for_codex",
+                "dedupe_key": dedupe_key,
+                "duplicate_filter": duplicate_filter,
+                "approved_at": now_utc_iso(),
+                "result_path": str(self.clone_storage.result_path(job_id)),
+            },
+        )
+        await query.answer("Đã duyệt job cho Codex.")
+        if query.message:
+            with suppress(Exception):
+                await query.message.edit_reply_markup(reply_markup=None)
+            await query.message.answer(
+                "Đã tạo clone job thành công.\n"
+                f"- Job: {job_id}\n"
+                f"- Manifest: {self.clone_storage.manifest_path(job_id)}\n"
+                f"- Trạng thái: {updated.get('status')}\n\n"
+                f"Mở Codex và gửi: đăng job {job_id}\n"
+                "Codex sẽ tải media bản gốc, hiện preview thực tế và hỏi xác nhận ngay trước khi đăng."
+            )
+
+    async def _on_clone_cancel(self, query: CallbackQuery, job_id: str) -> None:
+        job = self.clone_storage.load_job(job_id)
+        if not job:
+            await query.answer("Clone job không tồn tại.", show_alert=True)
+            return
+        if not self._clone_owner_matches(
+            job,
+            query.message.chat.id if query.message else None,
+            query.from_user.id if query.from_user else None,
+        ):
+            await query.answer("Clone job không thuộc chat/user hiện tại.", show_alert=True)
+            return
+        if str(job.get("status", "")) == "published":
+            await query.answer("Job đã đăng, không thể hủy.", show_alert=True)
+            return
+        self.clone_storage.update_job(job_id, {"status": "cancelled", "cancelled_at": now_utc_iso()})
+        await query.answer("Đã hủy clone job.")
+        if query.message:
+            with suppress(Exception):
+                await query.message.edit_reply_markup(reply_markup=None)
+            await query.message.answer(f"Đã hủy job {job_id}.")
 
     async def _on_sheet_apply(self, query: CallbackQuery, request_id: str) -> None:
         request = self.storage.get_pending_request(request_id)
@@ -539,6 +856,8 @@ class MediaResearchBot:
             f"- Sheet sync: {sheet_status}\n"
             f"- Market scope: {self.settings.market_scope}\n"
             f"- Platform allowlist: {', '.join(self.settings.platform_allowlist)}\n"
+            f"- Clone bài viết: {'Bật' if self.settings.media_clone_enabled else 'Tắt'}\n"
+            f"- Clone jobs: {self.settings.clone_jobs_dir}\n"
             f"- Work progress: {wp_status}"
         )
 
@@ -552,11 +871,108 @@ class MediaResearchBot:
             "   (Vẫn hỗ trợ: /media SKU123 váy hoa nữ)\n"
             "3) Bot tìm ảnh/video thị trường và gửi preview.\n"
             "4) Bấm Duyệt để ghi Google Sheet hoặc Hủy để bỏ qua.\n\n"
+            "Clone bài viết RUZA Thailand:\n"
+            "1) Gửi link bài Facebook/Instagram nguồn.\n"
+            "2) Gửi caption mới ở tin nhắn tiếp theo.\n"
+            "3) Chọn Facebook, Instagram hoặc Cả hai; kiểm tra và bấm Duyệt.\n"
+            "4) Mở Codex, gửi `đăng job clone_...`; Codex tải media gốc và hỏi xác nhận trước khi đăng.\n"
+            "   Hoặc gửi `clone ANB492` để Codex tự lọc đúng bài theo mã và tự dịch caption sang tiếng Thái.\n"
+            "   Bot không giữ mật khẩu/OTP/session và không tự đăng công khai.\n\n"
             "Lệnh bổ sung:\n"
             "- /media_help\n"
             "- /media_status\n"
+            "- /clone_help\n"
+            "- /clone_status [job_id]\n"
+            "- /clone_cancel [job_id]\n"
+            "- /clone_retry <job_id> (chỉ khi cần retry rõ ràng)\n"
             "- /progress help (nếu bật work progress trong Bot 2)"
         )
+
+    @staticmethod
+    def _clone_help_text() -> str:
+        return (
+            "Luồng clone bài viết:\n"
+            "1) Gửi một link bài Facebook hoặc Instagram nguồn.\n"
+            "2) Gửi caption mới, có thể nhiều dòng và Unicode.\n"
+            "3) Chọn Facebook, Instagram hoặc Cả hai.\n"
+            "4) Kiểm tra preview rồi bấm Duyệt.\n"
+            "5) Mở Codex và gửi: đăng job clone_abc123\n\n"
+            "Có thể bỏ qua bước gửi link/caption bằng cú pháp `clone ANB492`; Codex sẽ tìm bài đúng mã trên Page RUZA Việt Nam, dịch caption gốc sang tiếng Thái, bỏ CTA đã cấu hình và thêm footer.\n\n"
+            "Đích mặc định: RUZA Thailand và @ruza.thailand.\n"
+            "Instagram sẽ chia carousel tối đa 10 ảnh/bài; video là bài riêng.\n"
+            "Codex tải media bản gốc và luôn hỏi xác nhận trước khi đăng.\n"
+            "Lệnh: /clone_status, /clone_cancel, /clone_retry <job_id>."
+        )
+
+    def _clone_preview_text(self, job: dict[str, Any]) -> str:
+        source = job.get("source", {}) if isinstance(job.get("source"), dict) else {}
+        profile = job.get("destination_profile", {}) if isinstance(job.get("destination_profile"), dict) else {}
+        targets = job.get("targets", []) if isinstance(job.get("targets"), list) else []
+        target_text = ", ".join(str(item) for item in targets) or "chưa chọn"
+        caption = str(job.get("caption", ""))
+        selector = job.get("source_selector", {}) if isinstance(job.get("source_selector"), dict) else {}
+        source_text = str(source.get("url", ""))
+        if selector.get("type") == "product_code":
+            source_text = (
+                f"lọc theo mã {selector.get('value', '')} trên "
+                f"{selector.get('page_url', profile.get('source_facebook_page_url', ''))}"
+            )
+        caption_text = caption
+        if not caption_text and str(job.get("caption_mode", "")) == "translate_source_to_thai":
+            caption_text = (
+                "[Codex tự dịch caption gốc sang tiếng Thái; loại câu CTA đã cấu hình; "
+                "giữ bố cục đoạn; thêm footer ข้อมูลสินค้า + Instagram/Facebook/Order]"
+            )
+        if len(caption) > 2800:
+            caption = caption[:2800] + "\n… [caption hiển thị rút gọn; manifest giữ nguyên bản]"
+        return (
+            "Preview clone bài viết:\n"
+            f"- Job: {job.get('job_id', '')}\n"
+            f"- Nguồn ({source.get('platform', '')}): {source_text}\n"
+            f"- Đích: {profile.get('facebook_page', '')} / @{profile.get('instagram_username', '')}\n"
+            f"- Nền tảng đã chọn: {target_text}\n"
+            "- Caption:\n"
+            f"{caption_text}"
+        )
+
+    def _clone_status_text(self, job: dict[str, Any]) -> str:
+        result = self.clone_storage.load_result(str(job.get("job_id", "")))
+        lines = [
+            f"Clone job {job.get('job_id', '')}",
+            f"- Trạng thái: {job.get('status', '')}",
+            f"- Link nguồn: {job.get('source', {}).get('url', '') if isinstance(job.get('source'), dict) else ''}",
+            f"- Đích: {', '.join(str(item) for item in job.get('targets', []))}",
+            f"- Manifest: {self.clone_storage.manifest_path(str(job.get('job_id', '')))}",
+        ]
+        errors = job.get("errors", [])
+        if isinstance(errors, list) and errors:
+            lines.append("- Lỗi: " + " | ".join(str(item) for item in errors[:5]))
+        if result:
+            lines.append(f"- Result: {self.clone_storage.result_path(str(job.get('job_id', '')))}")
+            for key in ("facebook_url", "instagram_url"):
+                if result.get(key):
+                    lines.append(f"- {key}: {result.get(key)}")
+        return "\n".join(lines)
+
+    def _load_clone_job(self, job_id: str) -> dict[str, Any] | None:
+        try:
+            return self.clone_storage.load_job(job_id)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _command_argument(text: str | None) -> str:
+        raw = str(text or "").strip()
+        parts = raw.split(maxsplit=1)
+        return parts[1].strip() if len(parts) > 1 else ""
+
+    @staticmethod
+    def _clone_owner_matches(job: dict[str, Any], chat_id: int | None, user_id: int | None) -> bool:
+        owner = job.get("created_by", {}) if isinstance(job.get("created_by"), dict) else {}
+        try:
+            return int(owner.get("chat_id", -1)) == int(chat_id) and int(owner.get("telegram_user_id", -1)) == int(user_id)
+        except (TypeError, ValueError):
+            return False
 
     @staticmethod
     def _progress_help_text() -> str:
