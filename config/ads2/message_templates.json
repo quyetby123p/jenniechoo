@@ -4,7 +4,12 @@
     "Chào Ruza": {
       "description": "Template Messenger đã lưu trong Ads Manager cho page VAYXA/RUZA Thailand.",
       "greeting_text": "สวัสดีคุณ Quyet ♡\nขอบคุณที่ให้ความสนใจในแบรนด์ RUZA\nทางเรายินดีเป็นอย่างยิ่งในการให้คำแนะนำเกี่ยวกับ ดีไซน์ ขนาด และรายละเอียดของสินค้า เพื่อช่วยให้คุณเลือกแบบที่เหมาะสมที่สุดค่ะ",
-      "creative_patch": {},
+      "creative_patch": {
+        "page_welcome_message": {
+          "template_id": "1789046865760268",
+          "template_version": 0
+        }
+      },
       "ad_patch": {},
       "adset_patch": {}
     }
