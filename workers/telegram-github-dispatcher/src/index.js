@@ -70,6 +70,7 @@ function looksRelevantDirectText(text) {
     text.startsWith("/") ||
     lower.includes("facebook.com") ||
     lower.includes("fb.watch") ||
+    lower.includes("drive.google.com") ||
     lower.includes("lên") ||
     lower.includes("len ") ||
     lower.includes("báo cáo") ||
