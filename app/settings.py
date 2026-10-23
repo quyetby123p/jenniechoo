@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 from dotenv import load_dotenv
 import os
@@ -43,10 +44,23 @@ class Settings:
     pancake_page_size: int
     report_thb_to_vnd_rate: float
     report_thb_minor_unit_factor: int
+    report_pos_default_currency: str = "THB"
+    meta_creative_access_token: str = ""
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    meta_pixel_id: str = ""
+    meta_instagram_user_id: str = ""
+    new_web_ads_enabled: bool = False
+    new_messenger_media_ads_enabled: bool = False
     daily_report_notify_chat_id: int = 0
+    daily_report_pos_lookback_days: int = 30
     daily_report_task_summary_enabled: bool = True
     daily_report_task_summary_max_items: int = 5
     daily_report_task_db_path: str = "storage/assistant_bot/tasks.db"
+    daily_report_task_snapshot_enabled: bool = True
+    daily_report_task_snapshot_url: str = ""
+    daily_report_task_snapshot_secret: str = ""
+    daily_report_task_snapshot_timeout_seconds: int = 8
     media_analytics_enabled: bool = False
     media_analytics_auto_enabled: bool = False
     media_analytics_notify_chat_id: int = 0
@@ -86,6 +100,8 @@ class Settings:
     reconcile_cod_sheet_oauth_client_secret: str = ""
     reconcile_cod_sheet_oauth_refresh_token: str = ""
     reconcile_cod_sheet_oauth_token_uri: str = "https://oauth2.googleapis.com/token"
+    reconcile_cod_product_sheet_enabled: bool = True
+    reconcile_cod_product_sheet_name: str = "Chi tiet SP COD"
     pancake_td_sync_enabled: bool = False
     pancake_td_sync_poll_seconds: int = 30
     pancake_td_sync_batch_limit: int = 50
@@ -97,14 +113,22 @@ class Settings:
     web_report_source_costs_path: str = "config/web_report_source_costs.json"
     web_report_host: str = "0.0.0.0"
     web_report_port: int = 8000
-    profile: str = "default"
+    profile: str = "main"
+    profile_name: str = "main"
     audiences_config_path_raw: str = "config/audiences.json"
     objective_config_path_raw: str = "config/objective.json"
     message_templates_path_raw: str = "config/message_templates.json"
+    pancake_td_sync_config_path_raw: str = "config/pancake_td_sync.json"
+    pancake_td_color_alias_config_path_raw: str = "config/pancake_td_color_alias.json"
+    thai_duong_order_payload_template_path_raw: str = "config/thai_duong_order_payload_template.json"
+    web_objective_config_path_raw: str = "config/web_objective.json"
+    web_cta_config_path_raw: str = "config/web_cta.json"
     sku_catalog_path_raw: str = ""
-    meta_creative_access_token: str = ""
-    meta_app_id: str = ""
-    meta_app_secret: str = ""
+    sku_catalog_spreadsheet_id: str = ""
+    sku_catalog_sheet_name: str = "Sản phẩm và giá"
+    sku_catalog_range: str = "J2:J1000"
+    web_media_max_bytes: int = 500 * 1024 * 1024
+    web_pending_ttl_minutes: int = 30
 
     @property
     def audiences_config_path(self) -> Path:
@@ -119,16 +143,19 @@ class Settings:
         return self._resolve_project_path(self.message_templates_path_raw, "config/message_templates.json")
 
     @property
+    def web_objective_config_path(self) -> Path:
+        return self._resolve_project_path(self.web_objective_config_path_raw, "config/web_objective.json")
+
+    @property
+    def web_cta_config_path(self) -> Path:
+        return self._resolve_project_path(self.web_cta_config_path_raw, "config/web_cta.json")
+
+    @property
     def sku_catalog_path(self) -> Path:
         return self._resolve_project_path(self.sku_catalog_path_raw, "config/sku_catalog.json")
 
-    @property
-    def profile_name(self) -> str:
-        return self.profile
-
     def _resolve_project_path(self, raw: str, default: str) -> Path:
-        text = str(raw or default).strip() or default
-        path = Path(text)
+        path = Path(str(raw or default).strip() or default)
         if path.is_absolute():
             return path
         return self.project_root / path
@@ -144,6 +171,10 @@ class Settings:
     @property
     def jobs_pending_dir(self) -> Path:
         return self.jobs_root / "pending"
+
+    @property
+    def jobs_publishing_dir(self) -> Path:
+        return self.jobs_root / "publishing"
 
     @property
     def jobs_published_dir(self) -> Path:
@@ -239,15 +270,24 @@ class Settings:
 
     @property
     def pancake_td_sync_config_path(self) -> Path:
-        return self.config_root / "pancake_td_sync.json"
+        return self._resolve_project_path(
+            self.pancake_td_sync_config_path_raw,
+            "config/pancake_td_sync.json",
+        )
 
     @property
     def pancake_td_color_alias_config_path(self) -> Path:
-        return self.config_root / "pancake_td_color_alias.json"
+        return self._resolve_project_path(
+            self.pancake_td_color_alias_config_path_raw,
+            "config/pancake_td_color_alias.json",
+        )
 
     @property
     def thai_duong_order_payload_template_path(self) -> Path:
-        return self.config_root / "thai_duong_order_payload_template.json"
+        return self._resolve_project_path(
+            self.thai_duong_order_payload_template_path_raw,
+            "config/thai_duong_order_payload_template.json",
+        )
 
     @property
     def web_report_status_map_config_path(self) -> Path:
@@ -282,53 +322,52 @@ def _require_env(key: str) -> str:
 
 
 def _normalize_profile(profile: str | None) -> str:
-    normalized = str(profile or "default").strip().lower()
-    return normalized or "default"
+    normalized = str(profile or os.getenv("ADS_PROFILE", "main")).strip().lower()
+    return normalized or "main"
 
 
-def _profile_env(
-    key: str,
-    profile: str,
-    *,
-    default: str = "",
-    required: bool = False,
-    allow_base_fallback: bool = True,
-) -> str:
-    normalized_profile = _normalize_profile(profile)
-    keys = [key] if normalized_profile == "default" else [f"{normalized_profile.upper()}_{key}"]
-    if allow_base_fallback and key not in keys:
-        keys.append(key)
-    for env_key in keys:
-        value = os.getenv(env_key, "").strip()
+def _profile_prefix(profile_name: str) -> str:
+    if profile_name in {"", "main", "default"}:
+        return ""
+    return profile_name.upper().replace("-", "_")
+
+
+def _profile_env(name: str, prefix: str, default: str = "", *, allow_fallback: bool = True) -> str:
+    if prefix:
+        value = os.getenv(f"{prefix}_{name}", "").strip()
         if value:
             return value
-    if required:
-        raise ConfigError(f"Bien moi truong bat buoc bi thieu: {keys[0]}")
-    return str(default or "").strip()
+        if not allow_fallback:
+            return str(default or "").strip()
+    return os.getenv(name, default).strip()
 
 
-def _profile_env_first(
-    keys: tuple[str, ...],
-    profile: str,
-    *,
-    default: str = "",
-    allow_base_fallback: bool = True,
-) -> str:
-    for key in keys:
-        value = _profile_env(
-            key,
-            profile,
-            default="",
-            allow_base_fallback=allow_base_fallback,
-        )
-        if value:
-            return value
-    return str(default or "").strip()
+def _require_profile_env(name: str, prefix: str, *, allow_fallback: bool = True) -> str:
+    value = _profile_env(name, prefix, allow_fallback=allow_fallback)
+    if not value:
+        key = f"{prefix}_{name}" if prefix else name
+        raise ConfigError(f"Bien moi truong bat buoc bi thieu: {key}")
+    return value
+
+
+def _profile_path_default(base: str, profile_name: str) -> str:
+    if profile_name in {"", "main", "default"}:
+        return base
+    return f"{base.rstrip('/')}/{profile_name}"
+
+
+def _profile_config_default(project_root: Path, profile_name: str, filename: str) -> str:
+    name = str(filename or "").strip().lstrip("/\\")
+    if profile_name in {"", "main", "default"}:
+        return f"config/{name}"
+    candidate = project_root / "config" / profile_name / name
+    if candidate.exists():
+        return f"config/{profile_name}/{name}"
+    return f"config/{name}"
 
 
 def _resolve_project_path(project_root: Path, raw: str, default: str) -> Path:
-    text = str(raw or default).strip() or default
-    path = Path(text)
+    path = Path(str(raw or default).strip() or default)
     if path.is_absolute():
         return path
     return project_root / path
@@ -420,104 +459,76 @@ def _parse_string_list(raw: str, *, default: tuple[str, ...] = ()) -> tuple[str,
     return tuple(values)
 
 
+def _derive_task_snapshot_url(raw_mark_url: str) -> str:
+    text = str(raw_mark_url or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = urlparse(text)
+    except ValueError:
+        return ""
+    path = (parsed.path or "").rstrip("/")
+    if not path.endswith("/schedule/mark"):
+        return ""
+    base_path = path[: -len("/schedule/mark")]
+    return urlunparse(parsed._replace(path=f"{base_path}/task-snapshot", query="", fragment=""))
+
+
 def load_settings(
     project_root: Path | None = None,
     profile: str | None = None,
     *,
     require_app_credentials: bool = True,
 ) -> Settings:
-    """Load settings for the bot or a focused integration worker.
-
-    The Pancake bridge only needs Pancake and Google Sheets credentials.  Keep
-    the existing strict defaults for the bot, while allowing focused workers
-    to avoid requiring unrelated Telegram/Meta credentials.
-    """
     if project_root is None:
         project_root = Path(__file__).resolve().parents[1]
-    profile_name = _normalize_profile(profile)
 
     env_file = project_root / ".env"
     if env_file.exists():
         load_dotenv(env_file, override=True)
 
-    is_default_profile = profile_name in {"default", "main"}
-    is_ads2_profile = profile_name == "ads2"
-    profile_suffix = "" if is_default_profile else f"/{profile_name}"
-    telegram_bot_token = _profile_env(
-        "TELEGRAM_BOT_TOKEN",
-        profile_name,
-        required=require_app_credentials,
-        allow_base_fallback=is_default_profile,
-    )
-    telegram_allowed_user_id = int(
-        _profile_env(
-            "TELEGRAM_ALLOWED_USER_ID",
-            profile_name,
-            default="0" if not require_app_credentials else "",
-            required=require_app_credentials,
-            allow_base_fallback=True,
-        )
-    )
-    meta_access_token = _profile_env(
-        "META_ACCESS_TOKEN",
-        profile_name,
-        required=require_app_credentials,
-        allow_base_fallback=True,
-    )
-    if is_default_profile:
-        meta_page_access_token = os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
+    profile_name = _normalize_profile(profile)
+    prefix = _profile_prefix(profile_name)
+
+    if require_app_credentials:
+        telegram_bot_token = _require_profile_env("TELEGRAM_BOT_TOKEN", prefix, allow_fallback=False)
+        telegram_allowed_user_id = int(_require_profile_env("TELEGRAM_ALLOWED_USER_ID", prefix))
+        meta_access_token = _require_profile_env("META_ACCESS_TOKEN", prefix)
+        meta_ad_account_id = _require_profile_env("META_AD_ACCOUNT_ID", prefix, allow_fallback=False)
+        meta_page_id = _require_profile_env("META_PAGE_ID", prefix, allow_fallback=False)
     else:
-        meta_page_access_token = _profile_env(
-            "META_PAGE_ACCESS_TOKEN",
-            profile_name,
-            required=require_app_credentials,
-            allow_base_fallback=False,
+        telegram_bot_token = _profile_env("TELEGRAM_BOT_TOKEN", prefix, "", allow_fallback=False)
+        telegram_allowed_user_id = _parse_optional_int(
+            _profile_env("TELEGRAM_ALLOWED_USER_ID", prefix, ""),
+            default=0,
         )
-    meta_ad_account_id = _profile_env(
-        "META_AD_ACCOUNT_ID",
-        profile_name,
-        required=require_app_credentials,
-        allow_base_fallback=is_default_profile,
+        meta_access_token = _profile_env("META_ACCESS_TOKEN", prefix, "")
+        meta_ad_account_id = _profile_env("META_AD_ACCOUNT_ID", prefix, "", allow_fallback=False)
+        meta_page_id = _profile_env("META_PAGE_ID", prefix, "", allow_fallback=False)
+    meta_page_access_token = _profile_env("META_PAGE_ACCESS_TOKEN", prefix, allow_fallback=False)
+    meta_creative_access_token = _profile_env(
+        "META_CREATIVE_ACCESS_TOKEN",
+        prefix,
+        _profile_env("META_INSTAGRAM_ACCESS_TOKEN", prefix, _profile_env("META_IG_ACCESS_TOKEN", prefix, "")),
     )
-    meta_page_id = _profile_env(
-        "META_PAGE_ID",
-        profile_name,
-        required=require_app_credentials,
-        allow_base_fallback=is_default_profile,
-    )
-    meta_api_version = _profile_env(
-        "META_API_VERSION",
-        profile_name,
-        default=os.getenv("META_API_VERSION", "v21.0"),
-        allow_base_fallback=True,
-    )
-    meta_creative_access_token = _profile_env_first(
-        (
-            "META_CREATIVE_ACCESS_TOKEN",
-            "META_INSTAGRAM_ACCESS_TOKEN",
-            "META_IG_ACCESS_TOKEN",
-        ),
-        profile_name,
-        default="",
-        allow_base_fallback=is_default_profile,
-    )
-    meta_app_id = _profile_env(
-        "META_APP_ID",
-        profile_name,
-        default="",
-        allow_base_fallback=is_default_profile,
-    )
-    meta_app_secret = _profile_env(
-        "META_APP_SECRET",
-        profile_name,
-        default="",
-        allow_base_fallback=is_default_profile,
-    )
+    meta_app_id = _profile_env("META_APP_ID", prefix, "")
+    meta_app_secret = _profile_env("META_APP_SECRET", prefix, "")
+    meta_pixel_id = _profile_env("META_PIXEL_ID", prefix, "", allow_fallback=False)
+    meta_instagram_user_id = _profile_env("META_INSTAGRAM_USER_ID", prefix, "", allow_fallback=False)
+    meta_api_version = _profile_env("META_API_VERSION", prefix, "v21.0")
 
     app_timezone = os.getenv("APP_TIMEZONE", "Asia/Ho_Chi_Minh").strip()
     app_currency = os.getenv("APP_CURRENCY", "VND").strip()
     retry_max = int(os.getenv("APP_RETRY_MAX", "3").strip())
     retry_backoff = _parse_retry_backoff(os.getenv("APP_RETRY_BACKOFF", "2,5,10"))
+    new_web_ads_enabled = _parse_bool(
+        _profile_env("NEW_WEB_ADS_ENABLED", prefix, "0", allow_fallback=False),
+        default=False,
+    )
+    new_messenger_media_ads_enabled = _parse_bool(
+        _profile_env("NEW_MESSENGER_MEDIA_ADS_ENABLED", prefix, "0", allow_fallback=False),
+        default=False,
+    )
     token_healthcheck_enabled = _parse_bool(
         os.getenv("TOKEN_HEALTHCHECK_ENABLED", "1"),
         default=True,
@@ -538,14 +549,16 @@ def load_settings(
         os.getenv("TOKEN_HEALTHCHECK_STARTUP_ALERT_ONLY_ON_FAILURE", "1"),
         default=True,
     )
+    profile_is_main = not bool(prefix)
+    profile_is_ads2 = profile_name == "ads2"
     daily_report_enabled = _parse_bool(
         _profile_env(
             "DAILY_REPORT_ENABLED",
-            profile_name,
-            default="1" if is_default_profile or is_ads2_profile else "0",
-            allow_base_fallback=is_default_profile,
+            prefix,
+            "1" if profile_is_main or profile_is_ads2 else "0",
+            allow_fallback=False,
         ),
-        default=is_default_profile or is_ads2_profile,
+        default=profile_is_main or profile_is_ads2,
     )
     daily_report_hour = _parse_int_with_range(
         os.getenv("DAILY_REPORT_HOUR", "8"),
@@ -572,12 +585,115 @@ def load_settings(
     daily_report_notify_chat_id = _parse_optional_int(
         _profile_env(
             "DAILY_REPORT_NOTIFY_CHAT_ID",
-            profile_name,
-            default="",
-            allow_base_fallback=True,
+            prefix,
+            "",
+            allow_fallback=profile_is_main or profile_is_ads2,
         ),
         default=0,
     )
+    media_analytics_enabled = _parse_bool(
+        _profile_env(
+            "MEDIA_ANALYTICS_ENABLED",
+            prefix,
+            "1" if profile_is_ads2 else "0",
+            allow_fallback=False,
+        ),
+        default=profile_is_ads2,
+    )
+    media_analytics_auto_enabled = _parse_bool(
+        _profile_env(
+            "MEDIA_ANALYTICS_AUTO_ENABLED",
+            prefix,
+            "1" if profile_is_ads2 else "0",
+            allow_fallback=False,
+        ),
+        default=profile_is_ads2,
+    )
+    media_analytics_notify_chat_id = _parse_optional_int(
+        _profile_env("MEDIA_ANALYTICS_NOTIFY_CHAT_ID", prefix, "", allow_fallback=profile_is_main),
+        default=0,
+    )
+    if media_analytics_notify_chat_id <= 0:
+        media_analytics_notify_chat_id = (
+            telegram_allowed_user_id
+            if profile_is_ads2
+            else daily_report_notify_chat_id or telegram_allowed_user_id
+        )
+    media_analytics_history_days = _parse_int_with_range(
+        _profile_env("MEDIA_ANALYTICS_HISTORY_DAYS", prefix, "7", allow_fallback=True),
+        default=7,
+        min_value=1,
+        max_value=90,
+    )
+    media_analytics_auto_hour = _parse_int_with_range(
+        _profile_env("MEDIA_ANALYTICS_AUTO_HOUR", prefix, "16", allow_fallback=True),
+        default=16,
+        min_value=0,
+        max_value=23,
+    )
+    media_analytics_auto_minute = _parse_int_with_range(
+        _profile_env("MEDIA_ANALYTICS_AUTO_MINUTE", prefix, "0", allow_fallback=True),
+        default=0,
+        min_value=0,
+        max_value=59,
+    )
+    media_analytics_min_spend_vnd = _parse_int_with_range(
+        _profile_env("MEDIA_ANALYTICS_MIN_SPEND_VND", prefix, "50000", allow_fallback=True),
+        default=50000,
+        min_value=0,
+        max_value=1_000_000_000,
+    )
+    media_analytics_sheet_enabled = _parse_bool(
+        _profile_env(
+            "MEDIA_ANALYTICS_SHEET_ENABLED",
+            prefix,
+            "1" if profile_is_ads2 else "0",
+            allow_fallback=False,
+        ),
+        default=profile_is_ads2,
+    )
+    media_analytics_sheet_spreadsheet_id = _profile_env(
+        "MEDIA_ANALYTICS_SHEET_SPREADSHEET_ID",
+        prefix,
+        "1-ywfhrjlnEAob2Cn3znpKhTA4buKyQZrI5XXjiRCAAo" if profile_is_ads2 else "",
+        allow_fallback=False,
+    )
+    media_analytics_sheet_gid = _parse_optional_int(
+        _profile_env(
+            "MEDIA_ANALYTICS_SHEET_GID",
+            prefix,
+            "424378234" if profile_is_ads2 else "",
+            allow_fallback=False,
+        ),
+        default=0,
+    )
+    media_analytics_sheet_oauth_client_id = _profile_env(
+        "MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_ID",
+        prefix,
+        os.getenv("BOT3_GOOGLE_OAUTH_CLIENT_ID", os.getenv("MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_ID", "")),
+        allow_fallback=True,
+    )
+    media_analytics_sheet_oauth_client_secret = _profile_env(
+        "MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_SECRET",
+        prefix,
+        os.getenv("BOT3_GOOGLE_OAUTH_CLIENT_SECRET", os.getenv("MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_SECRET", "")),
+        allow_fallback=True,
+    )
+    media_analytics_sheet_oauth_refresh_token = _profile_env(
+        "MEDIA_ANALYTICS_SHEET_OAUTH_REFRESH_TOKEN",
+        prefix,
+        os.getenv("BOT3_GOOGLE_OAUTH_REFRESH_TOKEN", os.getenv("MEDIA_RESEARCH_SHEET_OAUTH_REFRESH_TOKEN", "")),
+        allow_fallback=True,
+    )
+    media_analytics_sheet_oauth_token_uri = _profile_env(
+        "MEDIA_ANALYTICS_SHEET_OAUTH_TOKEN_URI",
+        prefix,
+        os.getenv(
+            "BOT3_GOOGLE_OAUTH_TOKEN_URI",
+            os.getenv("MEDIA_RESEARCH_SHEET_OAUTH_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+        ),
+        allow_fallback=True,
+    ) or "https://oauth2.googleapis.com/token"
     daily_report_task_summary_enabled = _parse_bool(
         os.getenv("DAILY_REPORT_TASK_SUMMARY_ENABLED", "1"),
         default=True,
@@ -592,160 +708,52 @@ def load_settings(
         "DAILY_REPORT_TASK_DB_PATH",
         os.getenv("BOT3_TASK_DB_PATH", "storage/assistant_bot/tasks.db"),
     ).strip()
-    media_analytics_enabled = _parse_bool(
-        _profile_env(
-            "MEDIA_ANALYTICS_ENABLED",
-            profile_name,
-            default="1" if is_ads2_profile else "0",
-            allow_base_fallback=False,
-        ),
-        default=is_ads2_profile,
+    daily_report_task_snapshot_enabled = _parse_bool(
+        os.getenv("DAILY_REPORT_TASK_SNAPSHOT_ENABLED", os.getenv("BOT3_TASK_SNAPSHOT_ENABLED", "1")),
+        default=True,
     )
-    media_analytics_auto_enabled = _parse_bool(
-        _profile_env(
-            "MEDIA_ANALYTICS_AUTO_ENABLED",
-            profile_name,
-            default="1" if is_ads2_profile else "0",
-            allow_base_fallback=False,
+    daily_report_task_snapshot_url = os.getenv(
+        "DAILY_REPORT_TASK_SNAPSHOT_URL",
+        os.getenv("BOT3_TASK_SNAPSHOT_URL", ""),
+    ).strip()
+    if not daily_report_task_snapshot_url:
+        daily_report_task_snapshot_url = _derive_task_snapshot_url(
+            os.getenv("CLOUD_SCHEDULE_GUARD_MARK_URL", "").strip(),
+        )
+    daily_report_task_snapshot_secret = os.getenv(
+        "DAILY_REPORT_TASK_SNAPSHOT_SECRET",
+        os.getenv(
+            "BOT3_TASK_SNAPSHOT_SECRET",
+            os.getenv("CLOUD_SCHEDULE_GUARD_SECRET", os.getenv("TELEGRAM_WEBHOOK_SECRET", "")),
         ),
-        default=is_ads2_profile,
-    )
-    media_analytics_notify_chat_id = _parse_optional_int(
-        _profile_env(
-            "MEDIA_ANALYTICS_NOTIFY_CHAT_ID",
-            profile_name,
-            default="",
-            allow_base_fallback=is_default_profile,
-        ),
-        default=0,
-    )
-    if media_analytics_notify_chat_id <= 0:
-        media_analytics_notify_chat_id = telegram_allowed_user_id
-    media_analytics_history_days = _parse_int_with_range(
-        _profile_env("MEDIA_ANALYTICS_HISTORY_DAYS", profile_name, default="7", allow_base_fallback=True),
-        default=7,
+    ).strip()
+    daily_report_task_snapshot_timeout_seconds = _parse_int_with_range(
+        os.getenv("DAILY_REPORT_TASK_SNAPSHOT_TIMEOUT_SECONDS", os.getenv("BOT3_TASK_SNAPSHOT_TIMEOUT_SECONDS", "8")),
+        default=8,
         min_value=1,
-        max_value=90,
-    )
-    media_analytics_auto_hour = _parse_int_with_range(
-        _profile_env("MEDIA_ANALYTICS_AUTO_HOUR", profile_name, default="16", allow_base_fallback=True),
-        default=16,
-        min_value=0,
-        max_value=23,
-    )
-    media_analytics_auto_minute = _parse_int_with_range(
-        _profile_env("MEDIA_ANALYTICS_AUTO_MINUTE", profile_name, default="0", allow_base_fallback=True),
-        default=0,
-        min_value=0,
-        max_value=59,
-    )
-    media_analytics_min_spend_vnd = _parse_int_with_range(
-        _profile_env("MEDIA_ANALYTICS_MIN_SPEND_VND", profile_name, default="50000", allow_base_fallback=True),
-        default=50000,
-        min_value=0,
-        max_value=1_000_000_000,
-    )
-    media_analytics_sheet_enabled = _parse_bool(
-        _profile_env(
-            "MEDIA_ANALYTICS_SHEET_ENABLED",
-            profile_name,
-            default="1" if is_ads2_profile else "0",
-            allow_base_fallback=False,
-        ),
-        default=is_ads2_profile,
-    )
-    media_analytics_sheet_spreadsheet_id = _profile_env(
-        "MEDIA_ANALYTICS_SHEET_SPREADSHEET_ID",
-        profile_name,
-        default="1-ywfhrjlnEAob2Cn3znpKhTA4buKyQZrI5XXjiRCAAo" if is_ads2_profile else "",
-        allow_base_fallback=False,
-    )
-    media_analytics_sheet_gid = _parse_optional_int(
-        _profile_env(
-            "MEDIA_ANALYTICS_SHEET_GID",
-            profile_name,
-            default="424378234" if is_ads2_profile else "",
-            allow_base_fallback=False,
-        ),
-        default=0,
-    )
-    media_analytics_sheet_oauth_client_id = _profile_env_first(
-        ("MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_ID", "BOT3_GOOGLE_OAUTH_CLIENT_ID", "MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_ID"),
-        profile_name,
-        default="",
-        allow_base_fallback=True,
-    )
-    media_analytics_sheet_oauth_client_secret = _profile_env_first(
-        (
-            "MEDIA_ANALYTICS_SHEET_OAUTH_CLIENT_SECRET",
-            "BOT3_GOOGLE_OAUTH_CLIENT_SECRET",
-            "MEDIA_RESEARCH_SHEET_OAUTH_CLIENT_SECRET",
-        ),
-        profile_name,
-        default="",
-        allow_base_fallback=True,
-    )
-    media_analytics_sheet_oauth_refresh_token = _profile_env_first(
-        (
-            "MEDIA_ANALYTICS_SHEET_OAUTH_REFRESH_TOKEN",
-            "BOT3_GOOGLE_OAUTH_REFRESH_TOKEN",
-            "MEDIA_RESEARCH_SHEET_OAUTH_REFRESH_TOKEN",
-        ),
-        profile_name,
-        default="",
-        allow_base_fallback=True,
-    )
-    media_analytics_sheet_oauth_token_uri = _profile_env_first(
-        (
-            "MEDIA_ANALYTICS_SHEET_OAUTH_TOKEN_URI",
-            "BOT3_GOOGLE_OAUTH_TOKEN_URI",
-            "MEDIA_RESEARCH_SHEET_OAUTH_TOKEN_URI",
-        ),
-        profile_name,
-        default="https://oauth2.googleapis.com/token",
-        allow_base_fallback=True,
+        max_value=60,
     )
     pancake_api_base_url = _profile_env(
         "PANCAKE_API_BASE_URL",
-        profile_name,
-        default="https://pos.pancake.vn/api/v1",
-        allow_base_fallback=True,
+        prefix,
+        "https://pos.pancake.vn/api/v1",
+        allow_fallback=True,
     ).rstrip("/")
-    pancake_api_key = _profile_env(
-        "PANCAKE_API_KEY",
-        profile_name,
-        default="",
-        allow_base_fallback=True,
-    )
-    pancake_access_token = _profile_env(
-        "PANCAKE_ACCESS_TOKEN",
-        profile_name,
-        default="",
-        allow_base_fallback=True,
-    )
+    pancake_api_key = _profile_env("PANCAKE_API_KEY", prefix, "", allow_fallback=True)
+    pancake_access_token = _profile_env("PANCAKE_ACCESS_TOKEN", prefix, "", allow_fallback=True)
     pancake_shop_id = _parse_optional_int(
-        _profile_env(
-            "PANCAKE_SHOP_ID",
-            profile_name,
-            default="",
-            allow_base_fallback=is_default_profile,
-        ),
+        _profile_env("PANCAKE_SHOP_ID", prefix, "", allow_fallback=profile_is_main),
         default=0,
     )
     pancake_page_size = _parse_int_with_range(
-        _profile_env(
-            "PANCAKE_PAGE_SIZE",
-            profile_name,
-            default="200",
-            allow_base_fallback=True,
-        ),
+        _profile_env("PANCAKE_PAGE_SIZE", prefix, "200", allow_fallback=True),
         default=200,
         min_value=1,
         max_value=500,
     )
     report_thb_to_vnd_rate = _parse_optional_float(
-        os.getenv("REPORT_THB_TO_VND_RATE", "770"),
-        default=770.0,
+        os.getenv("REPORT_THB_TO_VND_RATE", "810"),
+        default=810.0,
     )
     report_thb_minor_unit_factor = _parse_int_with_range(
         os.getenv("REPORT_THB_MINOR_UNIT_FACTOR", "100"),
@@ -753,17 +761,19 @@ def load_settings(
         min_value=1,
         max_value=10000,
     )
+    report_pos_default_currency = os.getenv("REPORT_POS_DEFAULT_CURRENCY", "THB").strip().upper() or "THB"
+    daily_report_pos_lookback_days = _parse_int_with_range(
+        os.getenv("DAILY_REPORT_POS_LOOKBACK_DAYS", "30"),
+        default=30,
+        min_value=0,
+        max_value=365,
+    )
     reconcile_cod_enabled = _parse_bool(
-        _profile_env(
-            "RECONCILE_COD_ENABLED",
-            profile_name,
-            default="0",
-            allow_base_fallback=is_default_profile,
-        ),
+        _profile_env("RECONCILE_COD_ENABLED", prefix, "0", allow_fallback=False),
         default=False,
     )
     reconcile_cod_auto_enabled = _parse_bool(
-        os.getenv("RECONCILE_COD_AUTO_ENABLED", "0"),
+        _profile_env("RECONCILE_COD_AUTO_ENABLED", prefix, "0", allow_fallback=False),
         default=False,
     )
     reconcile_cod_hour = _parse_int_with_range(
@@ -793,7 +803,7 @@ def load_settings(
         max_value=6,
     )
     reconcile_cod_notify_chat_id = _parse_optional_int(
-        os.getenv("RECONCILE_COD_NOTIFY_CHAT_ID", ""),
+        _profile_env("RECONCILE_COD_NOTIFY_CHAT_ID", prefix, "", allow_fallback=profile_is_main),
         default=0,
     )
     reconcile_cod_batch_limit = _parse_int_with_range(
@@ -817,7 +827,7 @@ def load_settings(
         max_value=36500,
     )
     reconcile_cod_extra_pancake_profiles = _parse_string_list(
-        os.getenv("RECONCILE_COD_EXTRA_PANCAKE_PROFILES", "ads2" if is_default_profile else ""),
+        os.getenv("RECONCILE_COD_EXTRA_PANCAKE_PROFILES", "ads2" if profile_is_main else ""),
     )
     reconcile_cod_sheet_enabled = _parse_bool(
         os.getenv("RECONCILE_COD_SHEET_ENABLED", "0"),
@@ -871,46 +881,70 @@ def load_settings(
         "RECONCILE_COD_SHEET_OAUTH_TOKEN_URI",
         "https://oauth2.googleapis.com/token",
     ).strip() or "https://oauth2.googleapis.com/token"
+    reconcile_cod_product_sheet_enabled = _parse_bool(
+        os.getenv("RECONCILE_COD_PRODUCT_SHEET_ENABLED", "1"),
+        default=True,
+    )
+    reconcile_cod_product_sheet_name = os.getenv(
+        "RECONCILE_COD_PRODUCT_SHEET_NAME",
+        "Chi tiet SP COD",
+    ).strip() or "Chi tiet SP COD"
     pancake_td_sync_enabled = _parse_bool(
-        _profile_env(
-            "PANCAKE_TD_SYNC_ENABLED",
-            profile_name,
-            default="0",
-            allow_base_fallback=is_default_profile,
-        ),
+        _profile_env("PANCAKE_TD_SYNC_ENABLED", prefix, "0", allow_fallback=False),
         default=False,
     )
     pancake_td_sync_poll_seconds = _parse_int_with_range(
-        os.getenv("PANCAKE_TD_SYNC_POLL_SECONDS", "30"),
+        _profile_env("PANCAKE_TD_SYNC_POLL_SECONDS", prefix, "30", allow_fallback=True),
         default=30,
         min_value=5,
         max_value=3600,
     )
     pancake_td_sync_batch_limit = _parse_int_with_range(
-        os.getenv("PANCAKE_TD_SYNC_BATCH_LIMIT", "50"),
+        _profile_env("PANCAKE_TD_SYNC_BATCH_LIMIT", prefix, "50", allow_fallback=True),
         default=50,
         min_value=1,
         max_value=500,
     )
     pancake_td_sync_notify_chat_id = _parse_optional_int(
-        os.getenv("PANCAKE_TD_SYNC_NOTIFY_CHAT_ID", ""),
+        _profile_env("PANCAKE_TD_SYNC_NOTIFY_CHAT_ID", prefix, "", allow_fallback=profile_is_main),
         default=0,
     )
     pancake_td_sync_product_refresh_minutes = _parse_int_with_range(
-        os.getenv("PANCAKE_TD_SYNC_PRODUCT_REFRESH_MINUTES", "30"),
+        _profile_env("PANCAKE_TD_SYNC_PRODUCT_REFRESH_MINUTES", prefix, "30", allow_fallback=True),
         default=30,
         min_value=1,
         max_value=1440,
     )
-    pancake_td_sync_state_path = _profile_env(
-        "PANCAKE_TD_SYNC_STATE_PATH",
-        profile_name,
-        default=f"storage{profile_suffix}/pancake_td_sync/state.json",
-        allow_base_fallback=is_default_profile,
+    pancake_td_sync_state_path = os.getenv(
+        f"{prefix}_PANCAKE_TD_SYNC_STATE_PATH",
+        "",
     ).strip()
-    if pancake_td_sync_enabled and pancake_shop_id <= 0:
-        required_shop_key = "PANCAKE_SHOP_ID" if is_default_profile else f"{profile_name.upper()}_PANCAKE_SHOP_ID"
-        raise ConfigError(f"Thiếu {required_shop_key} khi PANCAKE_TD_SYNC_ENABLED bật.")
+    if not pancake_td_sync_state_path:
+        pancake_td_sync_state_path = (
+            f"storage/{profile_name}/pancake_td_sync/state.json"
+            if prefix
+            else os.getenv("PANCAKE_TD_SYNC_STATE_PATH", "storage/pancake_td_sync/state.json").strip()
+        )
+    if prefix and pancake_td_sync_enabled and pancake_shop_id <= 0:
+        raise ConfigError(f"Bien moi truong bat buoc bi thieu: {prefix}_PANCAKE_SHOP_ID")
+    pancake_td_sync_config_path_raw = _profile_env(
+        "PANCAKE_TD_SYNC_CONFIG_PATH",
+        prefix,
+        _profile_config_default(project_root, profile_name, "pancake_td_sync.json"),
+        allow_fallback=False,
+    )
+    pancake_td_color_alias_config_path_raw = _profile_env(
+        "PANCAKE_TD_COLOR_ALIAS_CONFIG_PATH",
+        prefix,
+        _profile_config_default(project_root, profile_name, "pancake_td_color_alias.json"),
+        allow_fallback=False,
+    )
+    thai_duong_order_payload_template_path_raw = _profile_env(
+        "THAI_DUONG_ORDER_PAYLOAD_TEMPLATE_PATH",
+        prefix,
+        _profile_config_default(project_root, profile_name, "thai_duong_order_payload_template.json"),
+        allow_fallback=False,
+    )
     web_report_refresh_seconds = _parse_int_with_range(
         os.getenv("WEB_REPORT_REFRESH_SECONDS", "600"),
         default=600,
@@ -933,53 +967,104 @@ def load_settings(
         max_value=65535,
     )
 
-    profile_suffix = "" if is_default_profile else f"/{profile_name}"
+    default_config_dir = f"config/{profile_name}" if prefix else "config"
     audiences_config_path_raw = _profile_env(
         "AUDIENCES_CONFIG_PATH",
-        profile_name,
-        default=f"config{profile_suffix}/audiences.json",
-        allow_base_fallback=False,
+        prefix,
+        f"{default_config_dir}/audiences.json",
+        allow_fallback=False,
     )
     objective_config_path_raw = _profile_env(
         "OBJECTIVE_CONFIG_PATH",
-        profile_name,
-        default=f"config{profile_suffix}/objective.json",
-        allow_base_fallback=False,
+        prefix,
+        f"{default_config_dir}/objective.json",
+        allow_fallback=False,
     )
     message_templates_path_raw = _profile_env(
         "MESSAGE_TEMPLATES_PATH",
-        profile_name,
-        default=f"config{profile_suffix}/message_templates.json",
-        allow_base_fallback=False,
+        prefix,
+        f"{default_config_dir}/message_templates.json",
+        allow_fallback=False,
+    )
+    web_objective_config_path_raw = _profile_env(
+        "WEB_OBJECTIVE_CONFIG_PATH",
+        prefix,
+        f"{default_config_dir}/web_objective.json",
+        allow_fallback=False,
+    )
+    web_cta_config_path_raw = _profile_env(
+        "WEB_CTA_CONFIG_PATH",
+        prefix,
+        f"{default_config_dir}/web_cta.json",
+        allow_fallback=False,
     )
     sku_catalog_path_raw = _profile_env(
         "SKU_CATALOG_PATH",
-        profile_name,
-        default=f"config{profile_suffix}/sku_catalog.json",
-        allow_base_fallback=False,
+        prefix,
+        f"{default_config_dir}/sku_catalog.json" if profile_is_ads2 else "",
+        allow_fallback=False,
     )
-    storage_root_raw = _profile_env(
-        "STORAGE_ROOT",
-        profile_name,
-        default=f"storage{profile_suffix}",
-        allow_base_fallback=False,
+    sku_catalog_spreadsheet_id = _profile_env(
+        "SKU_CATALOG_SPREADSHEET_ID",
+        prefix,
+        "12s9p2o11HOPp83AX3mLEXmphHxEMWSxNJGkgkXGbrVQ" if profile_is_ads2 else "",
+        allow_fallback=False,
     )
-    logs_root_raw = _profile_env(
-        "LOGS_ROOT",
-        profile_name,
-        default=f"logs{profile_suffix}",
-        allow_base_fallback=False,
+    sku_catalog_sheet_name = _profile_env(
+        "SKU_CATALOG_SHEET_NAME",
+        prefix,
+        "Sản phẩm và giá",
+        allow_fallback=False,
     )
-    state_root_raw = _profile_env(
-        "STATE_ROOT",
-        profile_name,
-        default=f"state{profile_suffix}",
-        allow_base_fallback=False,
+    sku_catalog_range = _profile_env(
+        "SKU_CATALOG_RANGE",
+        prefix,
+        "J2:J1000",
+        allow_fallback=False,
+    )
+    web_media_max_bytes = _parse_int_with_range(
+        _profile_env("WEB_MEDIA_MAX_BYTES", prefix, str(500 * 1024 * 1024), allow_fallback=False),
+        default=500 * 1024 * 1024,
+        min_value=1 * 1024 * 1024,
+        max_value=2 * 1024 * 1024 * 1024,
+    )
+    web_pending_ttl_minutes = _parse_int_with_range(
+        _profile_env("WEB_PENDING_TTL_MINUTES", prefix, "30", allow_fallback=False),
+        default=30,
+        min_value=1,
+        max_value=1440,
     )
 
-    storage_root = _resolve_project_path(project_root, storage_root_raw, "storage")
-    logs_root = _resolve_project_path(project_root, logs_root_raw, "logs")
-    state_root = _resolve_project_path(project_root, state_root_raw, "state")
+    storage_root = _resolve_project_path(
+        project_root,
+        _profile_env(
+            "STORAGE_ROOT",
+            prefix,
+            _profile_path_default("storage", profile_name),
+            allow_fallback=False,
+        ),
+        "storage",
+    )
+    logs_root = _resolve_project_path(
+        project_root,
+        _profile_env(
+            "LOGS_ROOT",
+            prefix,
+            _profile_path_default("logs", profile_name),
+            allow_fallback=False,
+        ),
+        "logs",
+    )
+    state_root = _resolve_project_path(
+        project_root,
+        _profile_env(
+            "STATE_ROOT",
+            prefix,
+            _profile_path_default("state", profile_name),
+            allow_fallback=False,
+        ),
+        "state",
+    )
     config_root = project_root / "config"
 
     for required in (
@@ -989,6 +1074,13 @@ def load_settings(
     ):
         if not required.exists():
             raise ConfigError(f"Khong tim thay file cau hinh: {required}")
+    if new_web_ads_enabled:
+        for required in (
+            _resolve_project_path(project_root, web_objective_config_path_raw, "config/web_objective.json"),
+            _resolve_project_path(project_root, web_cta_config_path_raw, "config/web_cta.json"),
+        ):
+            if not required.exists():
+                raise ConfigError(f"Khong tim thay file cau hinh Web: {required}")
 
     return Settings(
         project_root=project_root,
@@ -996,25 +1088,24 @@ def load_settings(
         logs_root=logs_root,
         state_root=state_root,
         config_root=config_root,
-        profile=profile_name,
-        audiences_config_path_raw=audiences_config_path_raw,
-        objective_config_path_raw=objective_config_path_raw,
-          message_templates_path_raw=message_templates_path_raw,
-          sku_catalog_path_raw=sku_catalog_path_raw,
         telegram_bot_token=telegram_bot_token,
         telegram_allowed_user_id=telegram_allowed_user_id,
         meta_access_token=meta_access_token,
         meta_page_access_token=meta_page_access_token,
         meta_ad_account_id=meta_ad_account_id,
         meta_page_id=meta_page_id,
-        meta_api_version=meta_api_version,
         meta_creative_access_token=meta_creative_access_token,
         meta_app_id=meta_app_id,
         meta_app_secret=meta_app_secret,
+        meta_pixel_id=meta_pixel_id,
+        meta_instagram_user_id=meta_instagram_user_id,
+        meta_api_version=meta_api_version,
         app_timezone=app_timezone,
         app_currency=app_currency,
         retry_max=retry_max,
         retry_backoff_seconds=retry_backoff,
+        new_web_ads_enabled=new_web_ads_enabled,
+        new_messenger_media_ads_enabled=new_messenger_media_ads_enabled,
         token_healthcheck_enabled=token_healthcheck_enabled,
         token_healthcheck_hour=token_healthcheck_hour,
         token_healthcheck_minute=token_healthcheck_minute,
@@ -1031,10 +1122,16 @@ def load_settings(
         pancake_page_size=pancake_page_size,
         report_thb_to_vnd_rate=report_thb_to_vnd_rate,
         report_thb_minor_unit_factor=report_thb_minor_unit_factor,
+        report_pos_default_currency=report_pos_default_currency,
         daily_report_notify_chat_id=daily_report_notify_chat_id,
+        daily_report_pos_lookback_days=daily_report_pos_lookback_days,
         daily_report_task_summary_enabled=daily_report_task_summary_enabled,
         daily_report_task_summary_max_items=daily_report_task_summary_max_items,
         daily_report_task_db_path=daily_report_task_db_path,
+        daily_report_task_snapshot_enabled=daily_report_task_snapshot_enabled,
+        daily_report_task_snapshot_url=daily_report_task_snapshot_url,
+        daily_report_task_snapshot_secret=daily_report_task_snapshot_secret,
+        daily_report_task_snapshot_timeout_seconds=daily_report_task_snapshot_timeout_seconds,
         media_analytics_enabled=media_analytics_enabled,
         media_analytics_auto_enabled=media_analytics_auto_enabled,
         media_analytics_notify_chat_id=media_analytics_notify_chat_id,
@@ -1074,6 +1171,8 @@ def load_settings(
         reconcile_cod_sheet_oauth_client_secret=reconcile_cod_sheet_oauth_client_secret,
         reconcile_cod_sheet_oauth_refresh_token=reconcile_cod_sheet_oauth_refresh_token,
         reconcile_cod_sheet_oauth_token_uri=reconcile_cod_sheet_oauth_token_uri,
+        reconcile_cod_product_sheet_enabled=reconcile_cod_product_sheet_enabled,
+        reconcile_cod_product_sheet_name=reconcile_cod_product_sheet_name,
         pancake_td_sync_enabled=pancake_td_sync_enabled,
         pancake_td_sync_poll_seconds=pancake_td_sync_poll_seconds,
         pancake_td_sync_batch_limit=pancake_td_sync_batch_limit,
@@ -1085,4 +1184,20 @@ def load_settings(
         web_report_source_costs_path=web_report_source_costs_path,
         web_report_host=web_report_host,
         web_report_port=web_report_port,
+        profile=profile_name,
+        profile_name=profile_name,
+        audiences_config_path_raw=audiences_config_path_raw,
+        objective_config_path_raw=objective_config_path_raw,
+        message_templates_path_raw=message_templates_path_raw,
+        pancake_td_sync_config_path_raw=pancake_td_sync_config_path_raw,
+        pancake_td_color_alias_config_path_raw=pancake_td_color_alias_config_path_raw,
+        thai_duong_order_payload_template_path_raw=thai_duong_order_payload_template_path_raw,
+        web_objective_config_path_raw=web_objective_config_path_raw,
+        web_cta_config_path_raw=web_cta_config_path_raw,
+        sku_catalog_path_raw=sku_catalog_path_raw,
+        sku_catalog_spreadsheet_id=sku_catalog_spreadsheet_id,
+        sku_catalog_sheet_name=sku_catalog_sheet_name,
+        sku_catalog_range=sku_catalog_range,
+        web_media_max_bytes=web_media_max_bytes,
+        web_pending_ttl_minutes=web_pending_ttl_minutes,
     )
