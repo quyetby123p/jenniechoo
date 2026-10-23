@@ -2826,11 +2826,15 @@ class TelegramAdsBot:
     ) -> None:
         request = await asyncio.to_thread(self.storage.get_pending_request, request_id)
         if not request or str(request.get("request_type", "")).strip() != "media_intake":
-            await query.answer("Yêu cầu media đã hết hạn hoặc đã được xử lý.", show_alert=True)
+            await self._answer_callback_safely(
+                query,
+                "Yêu cầu media đã hết hạn hoặc đã được xử lý.",
+                show_alert=True,
+            )
             return
         normalized_target = str(target or "").strip().lower()
         if normalized_target == "web" and not self.settings.new_web_ads_enabled:
-            await query.answer("Luồng Web đang tắt.", show_alert=True)
+            await self._answer_callback_safely(query, "Luồng Web đang tắt.", show_alert=True)
             if query.message:
                 await query.message.answer(
                     "Luồng Web đang tắt. Anh bật NEW_WEB_ADS_ENABLED=1 rồi khởi động lại bot, "
@@ -2838,7 +2842,7 @@ class TelegramAdsBot:
                 )
             return
         if normalized_target == "messenger" and not self.settings.new_messenger_media_ads_enabled:
-            await query.answer("Luồng Messenger đang tắt.", show_alert=True)
+            await self._answer_callback_safely(query, "Luồng Messenger đang tắt.", show_alert=True)
             if query.message:
                 await query.message.answer(
                     "Luồng Messenger media đang tắt. Anh bật NEW_MESSENGER_MEDIA_ADS_ENABLED=1 "
@@ -2846,7 +2850,7 @@ class TelegramAdsBot:
                 )
             return
         if normalized_target not in {"web", "messenger"}:
-            await query.answer("Luồng media không hợp lệ.", show_alert=True)
+            await self._answer_callback_safely(query, "Luồng media không hợp lệ.", show_alert=True)
             return
 
         next_request_type = "web_media" if normalized_target == "web" else "messenger_media"
@@ -2861,9 +2865,9 @@ class TelegramAdsBot:
             },
         )
         if not updated:
-            await query.answer("Phiên media đã hết hạn.", show_alert=True)
+            await self._answer_callback_safely(query, "Phiên media đã hết hạn.", show_alert=True)
             return
-        await query.answer("Đã chọn luồng media.")
+        await self._answer_callback_safely(query, "Đã chọn luồng media.")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
             label = "Web Sales" if normalized_target == "web" else "Messenger Purchase"
@@ -2880,7 +2884,7 @@ class TelegramAdsBot:
         request = await asyncio.to_thread(self.storage.get_pending_request, request_id)
         if request and str(request.get("request_type", "")).strip() == "media_intake":
             await asyncio.to_thread(self.storage.delete_pending_request, request_id)
-        await query.answer("Đã hủy nhận media.")
+        await self._answer_callback_safely(query, "Đã hủy nhận media.")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
             await query.message.answer("Đã hủy phiên nhận media.")
@@ -2893,7 +2897,11 @@ class TelegramAdsBot:
     ) -> None:
         request = await asyncio.to_thread(self.storage.get_pending_request, request_id)
         if not request or str(request.get("request_type", "")).strip() != "web_lifecycle_select":
-            await query.answer("Yêu cầu đã hết hạn hoặc đã được xử lý.", show_alert=True)
+            await self._answer_callback_safely(
+                query,
+                "Yêu cầu đã hết hạn hoặc đã được xử lý.",
+                show_alert=True,
+            )
             return
 
         try:
@@ -2905,11 +2913,12 @@ class TelegramAdsBot:
                 }
             )
         except (TypeError, ValueError) as exc:
-            await query.answer(str(exc), show_alert=True)
+            await self._answer_callback_safely(query, str(exc), show_alert=True)
             return
 
         if normalized_strategy == "NEW_CUSTOMERS_ONLY":
-            await query.answer(
+            await self._answer_callback_safely(
+                query,
                 "Meta API chưa hỗ trợ chế độ khách hàng mới cho cấu trúc này.",
                 show_alert=True,
             )
@@ -2925,17 +2934,17 @@ class TelegramAdsBot:
 
         callback_message = query.message
         if callback_message is None:
-            await query.answer("Không xác định được cuộc trò chuyện.", show_alert=True)
+            await self._answer_callback_safely(query, "Không xác định được cuộc trò chuyện.", show_alert=True)
             return
 
         try:
             media_content, web_input = await self._download_web_input_media(callback_message, web_input)
         except Exception as exc:  # noqa: BLE001
-            await query.answer("Không tải lại được media.", show_alert=True)
+            await self._answer_callback_safely(query, "Không tải lại được media.", show_alert=True)
             await callback_message.answer(f"Tạo nháp Web thất bại vì không tải lại được media: {exc}")
             return
 
-        await query.answer("Đã chọn tất cả đối tượng, đang tạo nháp Web...")
+        await self._answer_callback_safely(query, "Đã chọn tất cả đối tượng, đang tạo nháp Web...")
         await callback_message.edit_reply_markup(reply_markup=None)
         await self._create_web_draft_and_send_review(
             chat_id=callback_message.chat.id,
@@ -2955,7 +2964,7 @@ class TelegramAdsBot:
             media_request_id = str(request.get("media_request_id", "")).strip()
             if media_request_id:
                 await asyncio.to_thread(self.storage.delete_pending_request, media_request_id)
-        await query.answer("Đã hủy yêu cầu tạo campaign Web.")
+        await self._answer_callback_safely(query, "Đã hủy yêu cầu tạo campaign Web.")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
             await query.message.answer("Đã hủy yêu cầu tạo campaign Web.")
@@ -3000,7 +3009,11 @@ class TelegramAdsBot:
     ) -> None:
         request = await asyncio.to_thread(self.storage.get_pending_request, request_id)
         if not request or str(request.get("request_type", "")).strip() != "messenger_media_lifecycle_select":
-            await query.answer("Yêu cầu đã hết hạn hoặc đã được xử lý.", show_alert=True)
+            await self._answer_callback_safely(
+                query,
+                "Yêu cầu đã hết hạn hoặc đã được xử lý.",
+                show_alert=True,
+            )
             return
         try:
             normalized_strategy = normalize_web_lifecycle_strategy(strategy)
@@ -3011,11 +3024,15 @@ class TelegramAdsBot:
                 }
             )
         except (TypeError, ValueError) as exc:
-            await query.answer(str(exc), show_alert=True)
+            await self._answer_callback_safely(query, str(exc), show_alert=True)
             return
 
         if normalized_strategy == "NEW_CUSTOMERS_ONLY":
-            await query.answer("Meta API chưa hỗ trợ chế độ khách hàng mới cho camp này.", show_alert=True)
+            await self._answer_callback_safely(
+                query,
+                "Meta API chưa hỗ trợ chế độ khách hàng mới cho camp này.",
+                show_alert=True,
+            )
             if query.message:
                 await query.message.answer(
                     "Anh đã chọn 'Chinh phục khách hàng mới'. Meta hiện chưa cho truyền lựa chọn này "
@@ -3026,7 +3043,7 @@ class TelegramAdsBot:
 
         callback_message = query.message
         if callback_message is None:
-            await query.answer("Không xác định được cuộc trò chuyện.", show_alert=True)
+            await self._answer_callback_safely(query, "Không xác định được cuộc trò chuyện.", show_alert=True)
             return
         try:
             media_content, media_input = await self._download_messenger_media_input_media(
@@ -3034,11 +3051,11 @@ class TelegramAdsBot:
                 media_input,
             )
         except Exception as exc:  # noqa: BLE001
-            await query.answer("Không tải lại được media.", show_alert=True)
+            await self._answer_callback_safely(query, "Không tải lại được media.", show_alert=True)
             await callback_message.answer(f"Tạo nháp Messenger thất bại vì không tải lại được media: {exc}")
             return
 
-        await query.answer("Đã chọn tất cả đối tượng, đang tạo nháp Messenger...")
+        await self._answer_callback_safely(query, "Đã chọn tất cả đối tượng, đang tạo nháp Messenger...")
         await callback_message.edit_reply_markup(reply_markup=None)
         await self._create_messenger_media_draft_and_send_review(
             chat_id=callback_message.chat.id,
@@ -3058,7 +3075,7 @@ class TelegramAdsBot:
             media_request_id = str(request.get("media_request_id", "")).strip()
             if media_request_id:
                 await asyncio.to_thread(self.storage.delete_pending_request, media_request_id)
-        await query.answer("Đã hủy yêu cầu tạo campaign Messenger.")
+        await self._answer_callback_safely(query, "Đã hủy yêu cầu tạo campaign Messenger.")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
             await query.message.answer("Đã hủy yêu cầu tạo campaign Messenger.")
