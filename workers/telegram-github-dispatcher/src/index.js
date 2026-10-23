@@ -125,6 +125,12 @@ function shouldDispatch(update, env, botName = "main") {
     if (isBot3 || isMedia) {
       return true;
     }
+    // Pending caption/headline/budget steps may contain no command keyword.
+    // The allowed private user is already authenticated above, so let the
+    // Python bot route the message according to its persisted conversation state.
+    if (allowedUserId && actorId === allowedUserId) {
+      return true;
+    }
     return looksRelevantDirectText(text);
   }
 
