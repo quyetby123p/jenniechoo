@@ -38,7 +38,20 @@ def _ruza_audiences() -> dict:
 
 
 def _ruza_templates() -> dict:
-    return {"templates": {"Chào Ruza": {"creative_patch": {}, "ad_patch": {}, "adset_patch": {}}}}
+    return {
+        "templates": {
+            "Chào Ruza": {
+                "creative_patch": {
+                    "page_welcome_message": {
+                        "template_id": "1789046865760268",
+                        "template_version": 0,
+                    }
+                },
+                "ad_patch": {},
+                "adset_patch": {},
+            }
+        }
+    }
 
 
 def test_ruza_catalog_normalizes_suffix_and_deduplicates() -> None:
@@ -94,6 +107,10 @@ def test_ruza_campaign_has_two_audiences_and_expected_names() -> None:
         slot.ad_name == "ADS:QUYET|MK:Thailand|SKU:KVF273_QLF191|MED:Video"
         for slot in plan.audiences
     )
+    assert plan.raw["creative_payload_overrides"]["page_welcome_message"] == {
+        "template_id": "1789046865760268",
+        "template_version": 0,
+    }
 
 
 def test_ruza_campaign_uses_all_when_caption_has_no_known_sku() -> None:
