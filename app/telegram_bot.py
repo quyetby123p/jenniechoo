@@ -2825,14 +2825,16 @@ class TelegramAdsBot:
         target: str,
     ) -> None:
         request = await asyncio.to_thread(self.storage.get_pending_request, request_id)
-        if not request or str(request.get("request_type", "")).strip() != "media_intake":
+        normalized_target = str(target or "").strip().lower()
+        next_request_type = "web_media" if normalized_target == "web" else "messenger_media"
+        current_request_type = str(request.get("request_type", "")).strip() if request else ""
+        if not request or current_request_type not in {"media_intake", next_request_type}:
             await self._answer_callback_safely(
                 query,
                 "Yêu cầu media đã hết hạn hoặc đã được xử lý.",
                 show_alert=True,
             )
             return
-        normalized_target = str(target or "").strip().lower()
         if normalized_target == "web" and not self.settings.new_web_ads_enabled:
             await self._answer_callback_safely(query, "Luồng Web đang tắt.", show_alert=True)
             if query.message:
@@ -2853,17 +2855,18 @@ class TelegramAdsBot:
             await self._answer_callback_safely(query, "Luồng media không hợp lệ.", show_alert=True)
             return
 
-        next_request_type = "web_media" if normalized_target == "web" else "messenger_media"
         caption = str(request.get("caption", "")).strip()
         stage = "awaiting_headline" if caption else "awaiting_caption"
-        updated = await asyncio.to_thread(
-            self.storage.update_pending_request,
-            request_id,
-            {
-                "request_type": next_request_type,
-                "stage": stage,
-            },
-        )
+        updated = True
+        if current_request_type == "media_intake":
+            updated = await asyncio.to_thread(
+                self.storage.update_pending_request,
+                request_id,
+                {
+                    "request_type": next_request_type,
+                    "stage": stage,
+                },
+            )
         if not updated:
             await self._answer_callback_safely(query, "Phiên media đã hết hạn.", show_alert=True)
             return
