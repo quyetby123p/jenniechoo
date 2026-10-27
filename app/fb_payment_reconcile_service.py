@@ -18,7 +18,9 @@ from app.utils import load_json, now_utc_iso
 
 
 INPUT_SHEET_NAME = "ADS"
-INPUT_HEADER_ROW = 8
+INPUT_HEADER_ROW = 9
+LEGACY_INPUT_SHEET_NAME = "Tiền trừ thẻ"
+LEGACY_INPUT_HEADER_ROW = 1
 INVOICE_SHEET_NAME = "FB Hóa đơn"
 DETAIL_SHEET_NAME = "FB Chi tiết"
 SUMMARY_SHEET_NAME = "FB Tổng hợp"
@@ -300,42 +302,84 @@ class FbPaymentReconcileService:
         payload = load_json(path)
         if not isinstance(payload, dict):
             raise ValueError(f"Không tìm thấy run đối soát: {run_id}")
-        self.ensure_sheet_layout()
-        written = {}
-        for sheet_name, headers, rows in (
-            (INVOICE_SHEET_NAME, INVOICE_HEADERS, payload.get("invoice_rows", [])),
-            (DETAIL_SHEET_NAME, DETAIL_HEADERS, payload.get("detail_rows", [])),
-            (SUMMARY_SHEET_NAME, SUMMARY_HEADERS, payload.get("summary_rows", [])),
-            (EXCEPTION_SHEET_NAME, EXCEPTION_HEADERS, payload.get("exception_rows", [])),
-        ):
-            normalized_rows = [row for row in rows if isinstance(row, list)]
-            existing = self.google.fetch_sheet_values(
-                spreadsheet_id=self.settings.fb_reconcile_sheet_id,
-                sheet_name=sheet_name,
-                cell_range="A1:A10000",
-            )
-            existing_keys = {
-                str(row[0]).strip()
-                for row in (existing.get("values", []) if isinstance(existing.get("values"), list) else [])
-                if isinstance(row, list) and row and str(row[0]).strip()
-            }
-            if normalized_rows:
-                normalized_rows = [row for row in normalized_rows if not row or str(row[0]).strip() not in existing_keys]
-            if normalized_rows:
-                written[sheet_name] = self.google.append_sheet_values(
-                    spreadsheet_id=self.settings.fb_reconcile_sheet_id,
+        written: dict[str, Any] = {}
+        for spreadsheet_id, target_name, input_sheet_name, input_header_row in self._reconcile_targets():
+            self.ensure_sheet_layout(spreadsheet_id=spreadsheet_id)
+            target_written: dict[str, Any] = {}
+            for sheet_name, headers, rows in (
+                (INVOICE_SHEET_NAME, INVOICE_HEADERS, payload.get("invoice_rows", [])),
+                (DETAIL_SHEET_NAME, DETAIL_HEADERS, payload.get("detail_rows", [])),
+                (SUMMARY_SHEET_NAME, SUMMARY_HEADERS, payload.get("summary_rows", [])),
+                (EXCEPTION_SHEET_NAME, EXCEPTION_HEADERS, payload.get("exception_rows", [])),
+            ):
+                normalized_rows = [row for row in rows if isinstance(row, list)]
+                existing = self.google.fetch_sheet_values(
+                    spreadsheet_id=spreadsheet_id,
                     sheet_name=sheet_name,
-                    values=normalized_rows,
+                    cell_range="A1:A10000",
                 )
-            else:
-                written[sheet_name] = {"ok": True, "updated_rows": 0}
-        written[INPUT_SHEET_NAME] = self._write_payment_labels(payload)
+                existing_keys = {
+                    str(row[0]).strip()
+                    for row in (existing.get("values", []) if isinstance(existing.get("values"), list) else [])
+                    if isinstance(row, list) and row and str(row[0]).strip()
+                }
+                if normalized_rows:
+                    normalized_rows = [
+                        row for row in normalized_rows
+                        if not row or str(row[0]).strip() not in existing_keys
+                    ]
+                if normalized_rows:
+                    target_written[sheet_name] = self.google.append_sheet_values(
+                        spreadsheet_id=spreadsheet_id,
+                        sheet_name=sheet_name,
+                        values=normalized_rows,
+                    )
+                else:
+                    target_written[sheet_name] = {"ok": True, "updated_rows": 0}
+            target_written[input_sheet_name] = self._write_payment_labels(
+                payload,
+                spreadsheet_id=spreadsheet_id,
+                sheet_name=input_sheet_name,
+                header_row=input_header_row,
+            )
+            written[target_name] = target_written
         payload["written_at"] = now_utc_iso()
         payload["sheet_write"] = written
         self.storage.save_run_payload(payload)
         return {"ok": True, "run_id": run_id, "written": written}
 
-    def _write_payment_labels(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _reconcile_targets(self) -> list[tuple[str, str, str, int]]:
+        """Return the primary ADS workbook and the legacy audit workbook once each."""
+        targets = [
+            (
+                str(self.settings.fb_reconcile_sheet_id or "").strip(),
+                "THONG-DATA-THAILAN-VI",
+                INPUT_SHEET_NAME,
+                INPUT_HEADER_ROW,
+            ),
+            (
+                str(getattr(self.settings, "fb_reconcile_legacy_sheet_id", "") or "").strip(),
+                "Đối soát JC",
+                LEGACY_INPUT_SHEET_NAME,
+                LEGACY_INPUT_HEADER_ROW,
+            ),
+        ]
+        unique: list[tuple[str, str, str, int]] = []
+        seen: set[str] = set()
+        for target in targets:
+            if target[0] and target[0] not in seen:
+                unique.append(target)
+                seen.add(target[0])
+        return unique
+
+    def _write_payment_labels(
+        self,
+        payload: dict[str, Any],
+        *,
+        spreadsheet_id: str | None = None,
+        sheet_name: str = INPUT_SHEET_NAME,
+        header_row: int = INPUT_HEADER_ROW,
+    ) -> dict[str, Any]:
         detail_rows = payload.get("detail_rows", []) if isinstance(payload.get("detail_rows"), list) else []
         labels_by_payment: dict[str, set[str]] = {}
         for row in detail_rows:
@@ -350,17 +394,18 @@ class FbPaymentReconcileService:
             return {"ok": True, "updated_rows": 0, "labels": {}}
 
         response = self.google.fetch_sheet_values(
-            spreadsheet_id=self.settings.fb_reconcile_sheet_id,
-            sheet_name=INPUT_SHEET_NAME,
+            spreadsheet_id=spreadsheet_id or self.settings.fb_reconcile_sheet_id,
+            sheet_name=sheet_name,
             cell_range="A1:Z1000",
         )
         values = response.get("values", []) if isinstance(response.get("values"), list) else []
-        header_index_row = INPUT_HEADER_ROW - 1
+        header_index_row = header_row - 1
         if len(values) <= header_index_row:
-            return {"ok": False, "updated_rows": 0, "error": "Không đọc được header tab ADS để ghi nhãn."}
+            return {"ok": False, "updated_rows": 0, "error": f"Không đọc được header tab {sheet_name} để ghi nhãn."}
         headers = [_normalize_header(value) for value in values[header_index_row]]
         header_index = {name: idx for idx, name in enumerate(headers) if name}
         canonical = "payment_id" in header_index and "account_hint" in header_index
+        legacy_layout = _looks_like_legacy_payment_layout(headers)
         label_column = header_index.get("fb_label", FB_LABEL_COLUMN_INDEX)
         ad_account_column = header_index.get("nhan")
         updates = 0
@@ -369,21 +414,59 @@ class FbPaymentReconcileService:
         if not _cell(values[header_index_row], label_column):
             batch_data.append(
                 {
-                    "range": f"'{INPUT_SHEET_NAME}'!{_column_letter(label_column + 1)}{INPUT_HEADER_ROW}",
+                    "range": f"'{sheet_name}'!{_column_letter(label_column + 1)}{header_row}",
                     "majorDimension": "ROWS",
                     "values": [[LEGACY_LABEL_HEADER]],
                 }
             )
         row_lookup: dict[str, tuple[int, list[Any]]] = {}
         data_start = header_index_row + 1
-        for offset, row in enumerate(values[data_start:], start=INPUT_HEADER_ROW + 1):
+        for offset, row in enumerate(values[data_start:], start=header_row + 1):
             if not isinstance(row, list):
                 continue
             payment_id = _cell(row, header_index.get("payment_id")) if canonical else f"legacy_row_{offset}"
             if payment_id:
                 row_lookup[payment_id] = (offset, row)
+        # The primary ADS source uses row-based IDs for its legacy layout. The
+        # two workbooks can have different header rows, so also index legacy
+        # rows by their date/amount/currency for a safe best-effort mirror.
+        row_lookup_by_values: dict[tuple[str, str, str], list[tuple[int, list[Any]]]] = {}
+        for offset, row in enumerate(values[data_start:], start=header_row + 1):
+            if not isinstance(row, list):
+                continue
+            row_date = parse_date_value(_cell(row, header_index.get("transaction_date", header_index.get("ngay", 0))))
+            amount_index = header_index.get("amount")
+            currency_index = header_index.get("currency")
+            if legacy_layout:
+                amount_index = header_index.get("vnd", 2)
+                currency_index = amount_index + 1 if amount_index is not None else None
+                if parse_decimal(_cell(row, amount_index)) is None:
+                    amount_index = header_index.get("usd", 8)
+                    currency_index = amount_index + 1 if amount_index is not None else None
+            amount = parse_decimal(_cell(row, amount_index))
+            currency = normalize_currency(_cell(row, currency_index))
+            if row_date and amount is not None and currency:
+                key = (row_date.isoformat(), str(abs(amount)), currency)
+                row_lookup_by_values.setdefault(key, []).append((offset, row))
         for payment_id, accounts in labels_by_payment.items():
             located = row_lookup.get(payment_id)
+            if not located and payment_id.startswith("legacy_row_"):
+                detail = next(
+                    (row for row in detail_rows if isinstance(row, list) and len(row) >= 11 and str(row[7] or "").strip() == payment_id),
+                    None,
+                )
+                if detail:
+                    detail_date = _parse_iso_date(detail[8])
+                    detail_amount = parse_decimal(detail[10])
+                    detail_currency = normalize_currency(detail[9])
+                    candidates = row_lookup_by_values.get(
+                        (detail_date.isoformat(), str(abs(detail_amount)), detail_currency)
+                        if detail_date and detail_amount is not None and detail_currency
+                        else (),
+                        [],
+                    )
+                    if len(candidates) == 1:
+                        located = candidates[0]
             if not located:
                 continue
             row_number, row = located
@@ -405,7 +488,7 @@ class FbPaymentReconcileService:
             if _cell(row, label_column) != label:
                 batch_data.append(
                     {
-                        "range": f"'{INPUT_SHEET_NAME}'!{_column_letter(label_column + 1)}{row_number}",
+                        "range": f"'{sheet_name}'!{_column_letter(label_column + 1)}{row_number}",
                         "majorDimension": "ROWS",
                         "values": [[label]],
                     }
@@ -414,20 +497,20 @@ class FbPaymentReconcileService:
             if ad_account_column is not None and ad_account_label and _cell(row, ad_account_column) != ad_account_label:
                 batch_data.append(
                     {
-                        "range": f"'{INPUT_SHEET_NAME}'!{_column_letter(ad_account_column + 1)}{row_number}",
+                        "range": f"'{sheet_name}'!{_column_letter(ad_account_column + 1)}{row_number}",
                         "majorDimension": "ROWS",
                         "values": [[ad_account_label]],
                     }
                 )
         if batch_data:
             self.google.batch_update_sheet_values(
-                spreadsheet_id=self.settings.fb_reconcile_sheet_id,
+                spreadsheet_id=spreadsheet_id or self.settings.fb_reconcile_sheet_id,
                 data=batch_data,
             )
         return {"ok": True, "updated_rows": updates, "labels": labels_written}
 
-    def ensure_sheet_layout(self) -> dict[str, Any]:
-        spreadsheet_id = self.settings.fb_reconcile_sheet_id
+    def ensure_sheet_layout(self, *, spreadsheet_id: str | None = None) -> dict[str, Any]:
+        spreadsheet_id = spreadsheet_id or self.settings.fb_reconcile_sheet_id
         if not spreadsheet_id:
             raise ValueError("Thiếu FB_RECONCILE_SHEET_ID.")
         metadata = self.google.fetch_spreadsheet_metadata(spreadsheet_id=spreadsheet_id)
@@ -437,18 +520,20 @@ class FbPaymentReconcileService:
             for item in sheets
             if isinstance(item, dict) and isinstance(item.get("properties"), dict)
         }
-        required = [INPUT_SHEET_NAME, INVOICE_SHEET_NAME, DETAIL_SHEET_NAME, SUMMARY_SHEET_NAME, EXCEPTION_SHEET_NAME]
+        input_sheet_name = INPUT_SHEET_NAME if spreadsheet_id == self.settings.fb_reconcile_sheet_id else LEGACY_INPUT_SHEET_NAME
+        input_header_row = INPUT_HEADER_ROW if input_sheet_name == INPUT_SHEET_NAME else LEGACY_INPUT_HEADER_ROW
+        required = [input_sheet_name, INVOICE_SHEET_NAME, DETAIL_SHEET_NAME, SUMMARY_SHEET_NAME, EXCEPTION_SHEET_NAME]
         missing = [title for title in required if title not in titles]
         if missing:
             self.google.add_sheet_tabs(spreadsheet_id=spreadsheet_id, sheet_names=missing)
         for sheet_name, headers in (
-            (INPUT_SHEET_NAME, PAYMENT_HEADERS),
+            (input_sheet_name, PAYMENT_HEADERS),
             (INVOICE_SHEET_NAME, INVOICE_HEADERS),
             (DETAIL_SHEET_NAME, DETAIL_HEADERS),
             (SUMMARY_SHEET_NAME, SUMMARY_HEADERS),
             (EXCEPTION_SHEET_NAME, EXCEPTION_HEADERS),
         ):
-            header_row = INPUT_HEADER_ROW if sheet_name == INPUT_SHEET_NAME else 1
+            header_row = input_header_row if sheet_name == input_sheet_name else 1
             current = self.google.fetch_sheet_values(
                 spreadsheet_id=spreadsheet_id,
                 sheet_name=sheet_name,
@@ -480,7 +565,7 @@ class FbPaymentReconcileService:
         values = response.get("values", []) if isinstance(response.get("values"), list) else []
         header_index_row = INPUT_HEADER_ROW - 1
         if len(values) <= header_index_row:
-            return [], ["Tab ADS chưa có header ở dòng 8."]
+            return [], [f"Tab ADS chưa có header ở dòng {INPUT_HEADER_ROW}."]
         headers = [_normalize_header(value) for value in values[header_index_row]]
         header_index = {name: idx for idx, name in enumerate(headers) if name}
         legacy_layout = _looks_like_legacy_payment_layout(headers)
