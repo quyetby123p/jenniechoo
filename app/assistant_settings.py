@@ -45,7 +45,7 @@ class AssistantSettings:
     sheets_gid: int
     internal_qa_enabled: bool = True
     fb_reconcile_enabled: bool = False
-    fb_reconcile_sheet_id: str = "11CFuyMjJixR-rMQk0haoFqec8R6j45z5LG74pVX47dE"
+    fb_reconcile_sheet_id: str = "1fpXeSkAtC1otiHVp-ziAfqIn2b7DDQbN57DxWr-AGRY"
     fb_reconcile_jc_ad_account_id: str = ""
     fb_reconcile_vayxa_ad_account_id: str = ""
     fb_reconcile_card_last4: str = "3036"
@@ -291,10 +291,11 @@ def load_assistant_settings(project_root: Path | None = None) -> AssistantSettin
         max_value=2_147_483_647,
     )
     fb_reconcile_enabled = _parse_bool(os.getenv("FB_RECONCILE_ENABLED", "0"), default=False)
-    fb_reconcile_sheet_id = (
-        os.getenv("FB_RECONCILE_SHEET_ID", "11CFuyMjJixR-rMQk0haoFqec8R6j45z5LG74pVX47dE").strip()
-        or "11CFuyMjJixR-rMQk0haoFqec8R6j45z5LG74pVX47dE"
-    )
+    fb_reconcile_sheet_id = os.getenv("FB_RECONCILE_SHEET_ID", "").strip()
+    # Migrate the old auxiliary workbook even when a production secret still
+    # contains its ID; the source of truth is the ADS tab in the main workbook.
+    if fb_reconcile_sheet_id in {"", "11CFuyMjJixR-rMQk0haoFqec8R6j45z5LG74pVX47dE"}:
+        fb_reconcile_sheet_id = "1fpXeSkAtC1otiHVp-ziAfqIn2b7DDQbN57DxWr-AGRY"
     fb_reconcile_jc_ad_account_id = os.getenv("FB_RECONCILE_JC_AD_ACCOUNT_ID", "").strip()
     fb_reconcile_vayxa_ad_account_id = os.getenv("FB_RECONCILE_VAYXA_AD_ACCOUNT_ID", "").strip()
     fb_reconcile_card_last4 = re.sub(r"\D", "", os.getenv("FB_RECONCILE_CARD_LAST4", "3036"))[-4:]

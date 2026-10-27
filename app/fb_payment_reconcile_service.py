@@ -17,7 +17,8 @@ from app.assistant_storage_service import AssistantStorageService
 from app.utils import load_json, now_utc_iso
 
 
-INPUT_SHEET_NAME = "Tiền trừ thẻ"
+INPUT_SHEET_NAME = "ADS"
+INPUT_HEADER_ROW = 8
 INVOICE_SHEET_NAME = "FB Hóa đơn"
 DETAIL_SHEET_NAME = "FB Chi tiết"
 SUMMARY_SHEET_NAME = "FB Tổng hợp"
@@ -345,29 +346,30 @@ class FbPaymentReconcileService:
         response = self.google.fetch_sheet_values(
             spreadsheet_id=self.settings.fb_reconcile_sheet_id,
             sheet_name=INPUT_SHEET_NAME,
-            cell_range="A1:M1000",
+            cell_range="A1:Z1000",
         )
         values = response.get("values", []) if isinstance(response.get("values"), list) else []
-        if not values:
-            return {"ok": False, "updated_rows": 0, "error": "Không đọc được tab Tiền trừ thẻ để ghi nhãn."}
-        headers = [_normalize_header(value) for value in values[0]]
+        header_index_row = INPUT_HEADER_ROW - 1
+        if len(values) <= header_index_row:
+            return {"ok": False, "updated_rows": 0, "error": "Không đọc được header tab ADS để ghi nhãn."}
+        headers = [_normalize_header(value) for value in values[header_index_row]]
         header_index = {name: idx for idx, name in enumerate(headers) if name}
         canonical = "payment_id" in header_index and "account_hint" in header_index
-        label_column = FB_LABEL_COLUMN_INDEX
+        label_column = header_index.get("fb_label", FB_LABEL_COLUMN_INDEX)
         updates = 0
         labels_written: dict[str, str] = {}
         batch_data: list[dict[str, Any]] = []
-        if len(values[0]) <= label_column or not _cell(values[0], label_column):
+        if not _cell(values[header_index_row], label_column):
             batch_data.append(
                 {
-                    "range": f"'{INPUT_SHEET_NAME}'!M1",
+                    "range": f"'{INPUT_SHEET_NAME}'!{_column_letter(label_column + 1)}{INPUT_HEADER_ROW}",
                     "majorDimension": "ROWS",
                     "values": [[LEGACY_LABEL_HEADER]],
                 }
             )
         row_lookup: dict[str, tuple[int, list[Any]]] = {}
-        data_start = 1
-        for offset, row in enumerate(values[data_start:], start=data_start + 1):
+        data_start = header_index_row + 1
+        for offset, row in enumerate(values[data_start:], start=INPUT_HEADER_ROW + 1):
             if not isinstance(row, list):
                 continue
             payment_id = _cell(row, header_index.get("payment_id")) if canonical else f"legacy_row_{offset}"
@@ -425,17 +427,19 @@ class FbPaymentReconcileService:
             (SUMMARY_SHEET_NAME, SUMMARY_HEADERS),
             (EXCEPTION_SHEET_NAME, EXCEPTION_HEADERS),
         ):
+            header_row = INPUT_HEADER_ROW if sheet_name == INPUT_SHEET_NAME else 1
             current = self.google.fetch_sheet_values(
                 spreadsheet_id=spreadsheet_id,
                 sheet_name=sheet_name,
-                cell_range="A1:Z2",
+                cell_range=f"A1:Z{max(2, header_row)}",
             )
             values = current.get("values", []) if isinstance(current.get("values"), list) else []
-            if not values or not any(str(value).strip() for value in (values[0] if values else [])):
+            header_values = values[header_row - 1] if len(values) >= header_row else []
+            if not header_values or not any(str(value).strip() for value in header_values):
                 self.google.update_sheet_values(
                     spreadsheet_id=spreadsheet_id,
                     sheet_name=sheet_name,
-                    cell_range=f"A1:{_column_letter(len(headers))}1",
+                    cell_range=f"A{header_row}:{_column_letter(len(headers))}{header_row}",
                     values=[headers],
                 )
         return {"ok": True, "created_tabs": missing, "tabs": required}
@@ -453,12 +457,13 @@ class FbPaymentReconcileService:
             cell_range="A1:Z1000",
         )
         values = response.get("values", []) if isinstance(response.get("values"), list) else []
-        if not values:
-            return [], ["Tab Tiền trừ thẻ chưa có header."]
-        headers = [_normalize_header(value) for value in values[0]]
+        header_index_row = INPUT_HEADER_ROW - 1
+        if len(values) <= header_index_row:
+            return [], ["Tab ADS chưa có header ở dòng 8."]
+        headers = [_normalize_header(value) for value in values[header_index_row]]
         header_index = {name: idx for idx, name in enumerate(headers) if name}
         legacy_layout = _looks_like_legacy_payment_layout(headers)
-        data_rows = values[1:]
+        data_rows = values[header_index_row + 1:]
         aliases = {
             "payment_id": ["payment_id", "ma_giao_dich", "transaction_id", "id"],
             "transaction_date": ["transaction_date", "ngay_giao_dich", "transactiondate"],
@@ -476,21 +481,23 @@ class FbPaymentReconcileService:
         indexes = {key: _first_index(header_index, names) for key, names in aliases.items()}
         if legacy_layout:
             indexes.update({
-                "transaction_date": 0,
-                "amount": 2,
-                "currency": 3,
-                "description": 1,
-                "reference": 10,
+                "transaction_date": header_index.get("ngay", 0),
+                "amount": header_index.get("vnd", 2),
+                "currency": header_index.get("vnd", 2) + 1,
+                "description": header_index.get("merchant_name", 1),
+                "merchant_name": header_index.get("merchant_name"),
+                "reference": header_index.get("card", 10),
             })
-        elif indexes["amount"] is None and indexes["currency"] is None and _looks_like_legacy_payment_row(values[0]):
+        elif indexes["amount"] is None and indexes["currency"] is None and data_rows and _looks_like_legacy_payment_row(data_rows[0]):
             legacy_layout = True
             data_rows = values
             indexes.update({
-                "transaction_date": 0,
-                "amount": 2,
-                "currency": 3,
-                "description": 1,
-                "reference": 10,
+                "transaction_date": header_index.get("ngay", 0),
+                "amount": header_index.get("vnd", 2),
+                "currency": header_index.get("vnd", 2) + 1,
+                "description": header_index.get("merchant_name", 1),
+                "merchant_name": header_index.get("merchant_name"),
+                "reference": header_index.get("card", 10),
             })
         errors: list[str] = []
         required_fields = ("amount", "currency") if legacy_layout else ("payment_id", "amount", "currency")
@@ -501,15 +508,15 @@ class FbPaymentReconcileService:
             return [], errors
 
         rows: list[PaymentRow] = []
-        for row_number, row in enumerate(data_rows, start=2 if data_rows is not values else 1):
+        for row_number, row in enumerate(data_rows, start=INPUT_HEADER_ROW + 1):
             if not any(str(value).strip() for value in row):
                 continue
             payment_id = _cell(row, indexes["payment_id"]) or (f"legacy_row_{row_number}" if legacy_layout else "")
             amount = parse_decimal(_cell(row, indexes["amount"]))
             currency = normalize_currency(_cell(row, indexes["currency"]))
             if legacy_layout and (amount is None or not currency):
-                fallback_amount = parse_decimal(_cell(row, 8))
-                fallback_currency = normalize_currency(_cell(row, 9))
+                fallback_amount = parse_decimal(_cell(row, header_index.get("usd", 8)))
+                fallback_currency = normalize_currency(_cell(row, header_index.get("usd", 8) + 1))
                 if amount is None or not currency:
                     amount, currency = fallback_amount, fallback_currency
             tx_date = parse_date_value(_cell(row, indexes["transaction_date"]))
@@ -529,8 +536,8 @@ class FbPaymentReconcileService:
                 continue
             fx_rate = parse_decimal(_cell(row, indexes["fx_rate"]))
             if legacy_layout and fx_rate is None and currency == "VND":
-                usd_amount = parse_decimal(_cell(row, 8))
-                usd_currency = normalize_currency(_cell(row, 9))
+                usd_amount = parse_decimal(_cell(row, header_index.get("usd", 8)))
+                usd_currency = normalize_currency(_cell(row, header_index.get("usd", 8) + 1))
                 if usd_amount and usd_currency == "USD":
                     fx_rate = amount / usd_amount
             rows.append(
@@ -973,8 +980,10 @@ def summary_to_rows(*, run_id: str, invoices: list[dict[str, Any]], payments: li
             status,
         ])
     all_statuses = {str(item.get("status", "")) for item in details}
+    account_names = [account for account in ("JC", "JC Singapore", "B2B", "VAYXA") if account in accounts]
+    total_account_label = "TỔNG " + " + ".join(account_names) if account_names else "TỔNG"
     rows.append([
-        f"{run_id}|TỔNG JC + VAYXA", run_id, period_start.isoformat() if period_start else "", period_end.isoformat() if period_end else "", "TỔNG JC + VAYXA",
+        f"{run_id}|{total_account_label}", run_id, period_start.isoformat() if period_start else "", period_end.isoformat() if period_end else "", total_account_label,
         len(invoices), sum(1 for item in details if item.get("status") in {"KHỚP", "KHỚP CÓ LỆCH PHÍ/TỶ GIÁ"}),
         totals_text(invoices, amount_key="invoice_total", currency_key="currency"),
         totals_by_currency_text(payments),

@@ -116,14 +116,17 @@ def test_payment_reader_keeps_merchant_name_and_reads_sheet_beyond_column_k() ->
             return {"sheets": []}
 
         def fetch_sheet_values(self, **kwargs):  # noqa: ANN003
-            if kwargs["sheet_name"] == "Tiền trừ thẻ":
-                return {"values": [[
+            if kwargs["sheet_name"] == "ADS":
+                return {"values": [
+                    [], [], [], [], [], [], [],
+                    [
                     "payment_id", "transaction_date", "posting_date", "amount", "currency",
                     "bank_fee", "fx_rate", "description", "merchant_name", "account_hint", "reference", "note",
-                ], [
+                    ], [
                     "P3036", "2026-08-10", "", "100", "USD", "", "", "clear",
                     "FACEBK *FEGZYHM2", "", "532959***3036", "",
-                ]]}
+                    ],
+                ]}
             return {"values": []}
 
         def update_sheet_values(self, **_kwargs):  # noqa: ANN003
@@ -149,10 +152,14 @@ def test_payment_labels_are_written_to_column_m_only() -> None:
         def __init__(self) -> None:
             self.updates: list[dict] = []
 
+        def fetch_spreadsheet_metadata(self, **_kwargs):  # noqa: ANN003
+            return {"sheets": [{"properties": {"title": title}} for title in ("ADS", "FB Hóa đơn", "FB Chi tiết", "FB Tổng hợp", "FB Ngoại lệ")]}
+
         def fetch_sheet_values(self, **kwargs):  # noqa: ANN003
-            assert kwargs["cell_range"] == "A1:M1000"
+            assert kwargs["cell_range"] == "A1:Z1000"
             return {
                 "values": [
+                    [], [], [], [], [], [], [],
                     [
                         "payment_id", "transaction_date", "posting_date", "amount", "currency",
                         "bank_fee", "fx_rate", "description", "merchant_name", "account_hint",
@@ -183,8 +190,8 @@ def test_payment_labels_are_written_to_column_m_only() -> None:
     assert result["labels"] == {"P3036": "JC"}
     assert len(fake_google.updates) == 1
     assert fake_google.updates[0]["data"] == [
-        {"range": "'Tiền trừ thẻ'!M1", "majorDimension": "ROWS", "values": [["FB_label"]]},
-        {"range": "'Tiền trừ thẻ'!M2", "majorDimension": "ROWS", "values": [["JC"]]},
+        {"range": "'ADS'!M8", "majorDimension": "ROWS", "values": [["FB_label"]]},
+        {"range": "'ADS'!M9", "majorDimension": "ROWS", "values": [["JC"]]},
     ]
 
 
@@ -200,6 +207,7 @@ def test_payment_labels_write_jc_singapore_to_column_m() -> None:
         def fetch_sheet_values(self, **_kwargs):  # noqa: ANN003
             return {
                 "values": [
+                    [], [], [], [], [], [], [],
                     [
                         "payment_id", "transaction_date", "posting_date", "amount", "currency",
                         "bank_fee", "fx_rate", "description", "merchant_name", "account_hint",
@@ -225,8 +233,60 @@ def test_payment_labels_write_jc_singapore_to_column_m() -> None:
 
     assert result["labels"] == {"P3036-SG": "JC Singapore"}
     assert fake_google.updates[0]["data"][-1] == {
-        "range": "'Tiền trừ thẻ'!M2", "majorDimension": "ROWS", "values": [["JC Singapore"]]
+        "range": "'ADS'!M9", "majorDimension": "ROWS", "values": [["JC Singapore"]]
     }
+
+
+def test_ads_legacy_layout_uses_header_row_8_and_fb_label_column() -> None:
+    class Settings:
+        fb_reconcile_sheet_id = "sheet"
+        fb_reconcile_card_last4 = "3036"
+
+    class FakeGoogle:
+        def __init__(self) -> None:
+            self.updates: list[dict] = []
+
+        def fetch_spreadsheet_metadata(self, **_kwargs):  # noqa: ANN003
+            return {"sheets": [{"properties": {"title": title}} for title in ("ADS", "FB Hóa đơn", "FB Chi tiết", "FB Tổng hợp", "FB Ngoại lệ")]}
+
+        def fetch_sheet_values(self, **kwargs):  # noqa: ANN003
+            if kwargs["sheet_name"] == "ADS":
+                return {
+                    "values": [
+                        [], [], [], [], [], [], [],
+                        ["Tháng", "Ngày", "", "VNĐ", "", "", "", "", "", "USD", "", "Card", "Merchant Name", "FB_label"],
+                        [10, "10/26/2026 14:20", "clear", "259.351", "VND", "", "", "", "", "10.04", "USD", "532959***3036", "FACEBK *CHWARBJYD4", ""],
+                    ]
+                }
+            return {"values": []}
+
+        def batch_update_sheet_values(self, **kwargs):  # noqa: ANN003
+            self.updates.append(kwargs)
+            return {"ok": True}
+
+        def update_sheet_values(self, **_kwargs):  # noqa: ANN003
+            return {"ok": True}
+
+    fake_google = FakeGoogle()
+    service = FbPaymentReconcileService(
+        settings=Settings(), google=fake_google, storage=None, logger=logging.getLogger("test")
+    )
+    rows, errors = service.read_payments(period_start=date(2026, 9, 26), period_end=date(2026, 10, 26))
+
+    assert errors == []
+    assert len(rows) == 1
+    assert rows[0].payment_id == "legacy_row_9"
+    assert rows[0].amount == Decimal("259351")
+    assert rows[0].merchant_name == "FACEBK *CHWARBJYD4"
+
+    result = service._write_payment_labels(
+        {"detail_rows": [["run", "file", "B2B", "", "", "", "", "legacy_row_9", "", "", "", "", "", "", "", "", "KHỚP", ""]]}
+    )
+
+    assert result["labels"] == {"legacy_row_9": "B2B"}
+    assert fake_google.updates[0]["data"] == [
+        {"range": "'ADS'!N9", "majorDimension": "ROWS", "values": [["B2B"]]},
+    ]
 
 
 def test_parser_reads_meta_billing_report_as_transactions_and_filters_card(monkeypatch) -> None:  # noqa: ANN001
