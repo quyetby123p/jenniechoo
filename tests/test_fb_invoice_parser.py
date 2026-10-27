@@ -254,8 +254,8 @@ def test_ads_legacy_layout_uses_header_row_8_and_fb_label_column() -> None:
                 return {
                     "values": [
                         [], [], [], [], [], [], [],
-                        ["Tháng", "Ngày", "", "VNĐ", "", "", "", "", "", "USD", "", "Card", "Merchant Name", "FB_label"],
-                        [10, "10/26/2026 14:20", "clear", "259.351", "VND", "", "", "", "", "10.04", "USD", "532959***3036", "FACEBK *CHWARBJYD4", ""],
+                        ["Tháng", "Ngày", "", "VNĐ", "", "", "", "", "", "USD", "", "Card", "Merchant Name", "FB_label", "Nhan"],
+                        [10, "10/26/2026 14:20", "clear", "259.351", "VND", "", "", "", "", "10.04", "USD", "532959***3036", "FACEBK *CHWARBJYD4", "", ""],
                     ]
                 }
             return {"values": []}
@@ -286,6 +286,7 @@ def test_ads_legacy_layout_uses_header_row_8_and_fb_label_column() -> None:
     assert result["labels"] == {"legacy_row_9": "B2B"}
     assert fake_google.updates[0]["data"] == [
         {"range": "'ADS'!N9", "majorDimension": "ROWS", "values": [["B2B"]]},
+        {"range": "'ADS'!O9", "majorDimension": "ROWS", "values": [["Vayxa"]]},
     ]
 
 

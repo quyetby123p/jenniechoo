@@ -25,6 +25,12 @@ SUMMARY_SHEET_NAME = "FB Tổng hợp"
 EXCEPTION_SHEET_NAME = "FB Ngoại lệ"
 LEGACY_LABEL_HEADER = "FB_label"
 FB_LABEL_COLUMN_INDEX = 12  # Column M: keep the reconciliation label separate from payment fields.
+AD_ACCOUNT_LABEL_BY_INVOICE_ACCOUNT = {
+    "JC": "JC",
+    "VAYXA": "Vayxa",
+    "B2B": "Vayxa",
+    "JC Singapore": "Vayxa",
+}
 
 # Account-label changes are intentionally applied at parse time only. Existing
 # rows already written to Google Sheets keep their historical label.
@@ -356,6 +362,7 @@ class FbPaymentReconcileService:
         header_index = {name: idx for idx, name in enumerate(headers) if name}
         canonical = "payment_id" in header_index and "account_hint" in header_index
         label_column = header_index.get("fb_label", FB_LABEL_COLUMN_INDEX)
+        ad_account_column = header_index.get("nhan")
         updates = 0
         labels_written: dict[str, str] = {}
         batch_data: list[dict[str, Any]] = []
@@ -388,8 +395,14 @@ class FbPaymentReconcileService:
             if not label:
                 continue
             labels_written[payment_id] = label
-            existing = _cell(row, label_column)
-            if existing != label:
+            ad_account_label = "+".join(
+                dict.fromkeys(
+                    AD_ACCOUNT_LABEL_BY_INVOICE_ACCOUNT.get(account, "")
+                    for account in accounts
+                    if AD_ACCOUNT_LABEL_BY_INVOICE_ACCOUNT.get(account, "")
+                )
+            )
+            if _cell(row, label_column) != label:
                 batch_data.append(
                     {
                         "range": f"'{INPUT_SHEET_NAME}'!{_column_letter(label_column + 1)}{row_number}",
@@ -398,6 +411,14 @@ class FbPaymentReconcileService:
                     }
                 )
                 updates += 1
+            if ad_account_column is not None and ad_account_label and _cell(row, ad_account_column) != ad_account_label:
+                batch_data.append(
+                    {
+                        "range": f"'{INPUT_SHEET_NAME}'!{_column_letter(ad_account_column + 1)}{row_number}",
+                        "majorDimension": "ROWS",
+                        "values": [[ad_account_label]],
+                    }
+                )
         if batch_data:
             self.google.batch_update_sheet_values(
                 spreadsheet_id=self.settings.fb_reconcile_sheet_id,
