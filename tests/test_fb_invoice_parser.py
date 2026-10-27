@@ -11,6 +11,37 @@ def test_account_labels_keep_jc_singapore_separate() -> None:
     assert normalize_account("hoá đơn JC Singapore") == "JC Singapore"
     assert normalize_account("JC SG") == "JC Singapore"
     assert normalize_account("Vayxa") == "VAYXA"
+    assert normalize_account("B2B") == "B2B"
+
+
+def test_ad_account_override_labels_new_invoice_as_b2b(monkeypatch) -> None:  # noqa: ANN001
+    class FakePage:
+        @staticmethod
+        def extract_text() -> str:
+            return (
+                "Ad account ID\nact_894644562928775\n"
+                "Receipt ID\nB2B-20261027-001\n"
+                "Date\nOctober 27, 2026\n"
+                "Amount paid\nUSD\n123.45"
+            )
+
+    class FakeReader:
+        pages = [FakePage()]
+
+        def __init__(self, _stream) -> None:  # noqa: ANN001
+            pass
+
+    monkeypatch.setattr(reconcile, "PdfReader", FakeReader)
+    parsed = parse_invoice_pdf(
+        b"pdf",
+        file_name="JC_Singapore_2026-10.pdf",
+        source_sha256="hash-b2b",
+        account_hint="JC Singapore",
+        jc_ad_account_id="123456789",
+        vayxa_ad_account_id="987654321",
+    )
+    assert parsed.account == "B2B"
+    assert parsed.ad_account_id == "894644562928775"
 
 
 def test_parser_reads_facebook_fields_when_values_are_on_following_lines(monkeypatch) -> None:  # noqa: ANN001

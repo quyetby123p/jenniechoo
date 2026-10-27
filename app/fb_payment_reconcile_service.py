@@ -25,6 +25,12 @@ EXCEPTION_SHEET_NAME = "FB Ngoại lệ"
 LEGACY_LABEL_HEADER = "FB_label"
 FB_LABEL_COLUMN_INDEX = 12  # Column M: keep the reconciliation label separate from payment fields.
 
+# Account-label changes are intentionally applied at parse time only. Existing
+# rows already written to Google Sheets keep their historical label.
+AD_ACCOUNT_LABEL_OVERRIDES = {
+    "894644562928775": "B2B",
+}
+
 PAYMENT_HEADERS = [
     "payment_id",
     "transaction_date",
@@ -375,7 +381,7 @@ class FbPaymentReconcileService:
             # Keep the invoice source distinct: JC Singapore must not be folded
             # into the domestic JC label when both are reconciled to the card.
             label = " + ".join(
-                account for account in ("JC", "JC Singapore", "VAYXA") if account in accounts
+                account for account in ("JC", "JC Singapore", "B2B", "VAYXA") if account in accounts
             )
             if not label:
                 continue
@@ -623,7 +629,11 @@ def parse_invoice_pdf(
         return ParsedInvoice(file_name, source_sha256, normalize_account(account_hint), "", "", "", "", None, "PDF không có lớp text; cần kiểm tra/OCR thủ công.", "")
 
     ad_account_id = _extract_account_id(text)
-    account = normalize_account(account_hint) or account_from_ad_account(ad_account_id, jc_ad_account_id, vayxa_ad_account_id)
+    account = (
+        ad_account_label_override(ad_account_id)
+        or normalize_account(account_hint)
+        or account_from_ad_account(ad_account_id, jc_ad_account_id, vayxa_ad_account_id)
+    )
     if not account:
         upper_name = file_name.upper()
         if "VAYXA" in upper_name or "ADS2" in upper_name:
@@ -1026,6 +1036,8 @@ def normalize_account(value: Any) -> str:
     text = _fold(str(value or "")).upper()
     if "VAYXA" in text or text in {"ADS2", "VX"}:
         return "VAYXA"
+    if text == "B2B" or re.search(r"(^|[^A-Z0-9])B2B([^A-Z0-9]|$)", text):
+        return "B2B"
     has_jc = bool(re.search(r"(^|[^A-Z])JC([^A-Z]|$)", text))
     has_singapore = bool(re.search(r"(^|[^A-Z])SINGAPORE([^A-Z]|$)", text))
     has_sg = bool(re.search(r"(^|[^A-Z])SG([^A-Z]|$)", text))
@@ -1038,11 +1050,18 @@ def normalize_account(value: Any) -> str:
 
 def account_from_ad_account(ad_account_id: str, jc_id: str, vayxa_id: str) -> str:
     normalized = re.sub(r"\D", "", str(ad_account_id or ""))
+    if normalized in AD_ACCOUNT_LABEL_OVERRIDES:
+        return AD_ACCOUNT_LABEL_OVERRIDES[normalized]
     if normalized and normalized == re.sub(r"\D", "", str(jc_id or "")):
         return "JC"
     if normalized and normalized == re.sub(r"\D", "", str(vayxa_id or "")):
         return "VAYXA"
     return ""
+
+
+def ad_account_label_override(ad_account_id: str) -> str:
+    normalized = re.sub(r"\D", "", str(ad_account_id or ""))
+    return AD_ACCOUNT_LABEL_OVERRIDES.get(normalized, "")
 
 
 def _extract_account_id(text: str) -> str:
