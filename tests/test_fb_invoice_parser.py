@@ -125,6 +125,9 @@ def test_payment_reader_keeps_merchant_name_and_reads_sheet_beyond_column_k() ->
                     ], [
                     "P3036", "2026-08-10", "", "100", "USD", "", "", "clear",
                     "FACEBK *FEGZYHM2", "", "532959***3036", "",
+                    ], [
+                    "", "2026-08-10", "", "", "", "", "", "clear",
+                    "FACEBK *OTHER", "", "532959***4472", "",
                     ],
                 ]}
             return {"values": []}

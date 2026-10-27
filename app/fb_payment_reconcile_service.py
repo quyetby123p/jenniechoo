@@ -617,6 +617,13 @@ class FbPaymentReconcileService:
         for row_number, row in enumerate(data_rows, start=INPUT_HEADER_ROW + 1):
             if not any(str(value).strip() for value in row):
                 continue
+            # Filter by the configured card before validating row contents.
+            # Other cards (for example 4472) are outside this reconciliation
+            # job and may legitimately use a different/incomplete layout.
+            card_last4 = str(self.settings.fb_reconcile_card_last4 or "").strip()
+            reference = _cell(row, indexes["reference"])
+            if card_last4 and not re.sub(r"\D", "", reference).endswith(card_last4):
+                continue
             payment_id = _cell(row, indexes["payment_id"]) or (f"legacy_row_{row_number}" if legacy_layout else "")
             amount = parse_decimal(_cell(row, indexes["amount"]))
             currency = normalize_currency(_cell(row, indexes["currency"]))
@@ -629,10 +636,6 @@ class FbPaymentReconcileService:
             posting_date = parse_date_value(_cell(row, indexes["posting_date"]))
             if not payment_id or amount is None or not currency:
                 errors.append(f"Dòng {row_number}: cần payment_id, amount và currency.")
-                continue
-            card_last4 = str(self.settings.fb_reconcile_card_last4 or "").strip()
-            reference = _cell(row, indexes["reference"])
-            if card_last4 and not re.sub(r"\D", "", reference).endswith(card_last4):
                 continue
             effective_date = posting_date or tx_date
             if period_start and period_end and effective_date and not (period_start <= effective_date <= period_end):
