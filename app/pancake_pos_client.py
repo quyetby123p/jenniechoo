@@ -332,7 +332,10 @@ class PancakePosClient:
                 "endDateTime": end_ts,
             }
             normalized_update_status = str(update_status or "").strip()
-            if normalized_update_status:
+            # Pancake defaults to inserted_at. Omitting the default keeps the
+            # request compatible with the live orders endpoint; only the
+            # status-change view needs an explicit updateStatus filter.
+            if normalized_update_status and normalized_update_status != "inserted_at":
                 params["updateStatus"] = normalized_update_status
 
             payload = self._request(

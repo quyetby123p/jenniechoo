@@ -325,6 +325,27 @@ def test_fetch_orders_snapshot_for_range_can_use_updated_status_time(tmp_path: P
     assert captured[0]["updateStatus"] == "updated_at"
 
 
+def test_fetch_orders_snapshot_for_range_omits_default_inserted_status_filter(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))
+    captured: list[dict[str, object]] = []
+
+    def fake_request(method: str, path: str, *, params=None, data=None):  # noqa: ANN001
+        del method, path, data
+        captured.append(dict(params or {}))
+        return {"success": True, "total_pages": 1, "data": []}
+
+    client._request = fake_request  # type: ignore[method-assign]
+    client.fetch_orders_snapshot_for_range(
+        date(2026, 11, 3),
+        date(2026, 11, 3),
+        "Asia/Ho_Chi_Minh",
+    )
+
+    assert captured
+    assert "updateStatus" not in captured[0]
+
+
 def test_update_order_note_print_uses_default_endpoint(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))
