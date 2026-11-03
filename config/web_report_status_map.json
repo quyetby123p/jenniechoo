@@ -136,6 +136,11 @@
       "pattern": "^(SA|S-)",
       "brand_name": "Say Studios",
       "brand_slug": "say-studios"
+    },
+    {
+      "pattern": "^(RUZA|RZ)",
+      "brand_name": "Ruza",
+      "brand_slug": "ruza"
     }
   ]
 }

@@ -39,6 +39,26 @@ services:
         sync: false
       - key: PANCAKE_PAGE_SIZE
         sync: false
+      - key: ADS2_META_ACCESS_TOKEN
+        sync: false
+      - key: ADS2_META_PAGE_ACCESS_TOKEN
+        sync: false
+      - key: ADS2_META_AD_ACCOUNT_ID
+        sync: false
+      - key: ADS2_META_PAGE_ID
+        sync: false
+      - key: ADS2_META_API_VERSION
+        sync: false
+      - key: ADS2_PANCAKE_API_BASE_URL
+        sync: false
+      - key: ADS2_PANCAKE_API_KEY
+        sync: false
+      - key: ADS2_PANCAKE_ACCESS_TOKEN
+        sync: false
+      - key: ADS2_PANCAKE_SHOP_ID
+        sync: false
+      - key: ADS2_PANCAKE_PAGE_SIZE
+        sync: false
       - key: REPORT_THB_TO_VND_RATE
         sync: false
       - key: REPORT_THB_MINOR_UNIT_FACTOR

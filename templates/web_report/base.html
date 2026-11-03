@@ -143,8 +143,12 @@
 <div class="container py-4">
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
     <div>
-      <h1 class="h3 mb-1">Báo cáo vận hành đơn hàng</h1>
+      <h1 class="h3 mb-1">{{ report_label }} · Báo cáo vận hành đơn hàng</h1>
       <p class="text-muted mb-2">Timezone: {{ timezone_name }} · Tỷ giá: 1 THB = {{ "{:,.0f}".format(thb_to_vnd_rate) }} VNĐ · Refresh cache: 10 phút</p>
+    </div>
+    <div class="report-switcher d-flex gap-2" aria-label="Chuyển báo cáo">
+      <a class="btn btn-sm {% if report_prefix == '' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="{{ jc_dashboard_path }}?{{ query_string }}">JC</a>
+      {% if ruza_enabled %}<a class="btn btn-sm {% if report_prefix == '/ruza' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/ruza?{{ query_string }}">Ruza</a>{% endif %}
     </div>
   </div>
   {% block pre_filter %}{% endblock %}
@@ -166,13 +170,13 @@
     <button class="btn btn-primary" type="submit">Xem</button>
   </form>
   <div class="mb-3 report-tabs">
-    <a class="btn btn-sm {% if active_path == '/' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="{{ dashboard_path }}?{{ query_string }}">Dashboard</a>
-    <a class="btn btn-sm {% if active_path == '/status/shipping' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/shipping?{{ query_string }}">Đơn đang gửi</a>
-    <a class="btn btn-sm {% if active_path == '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/waiting?{{ query_string }}">Đơn chờ hàng</a>
-    <a class="btn btn-sm {% if active_path == '/status/reconcile-received' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/reconcile-received?{{ query_string }}">Đối soát đã nhận</a>
-    <a class="btn btn-sm {% if active_path == '/status/returning' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/returning?{{ query_string }}">Đơn hoàn/đang hoàn</a>
-    <a class="btn btn-sm {% if active_path == '/status/pending-reconcile' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="/status/pending-reconcile?{{ query_string }}">Đơn chờ đối soát</a>
-    <a class="btn btn-sm btn-outline-secondary" href="/api/v1/snapshot?{{ query_string }}" target="_blank">API Snapshot</a>
+    <a class="btn btn-sm {% if active_path == (report_prefix or '/') %}btn-dark{% else %}btn-outline-dark{% endif %}" href="{{ dashboard_path }}?{{ query_string }}">Dashboard</a>
+    <a class="btn btn-sm {% if active_path == report_prefix + '/status/shipping' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="{{ report_prefix }}/status/shipping?{{ query_string }}">Đơn đang gửi</a>
+    <a class="btn btn-sm {% if active_path == report_prefix + '/status/waiting' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="{{ report_prefix }}/status/waiting?{{ query_string }}">Đơn chờ hàng</a>
+    <a class="btn btn-sm {% if active_path == report_prefix + '/status/reconcile-received' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="{{ report_prefix }}/status/reconcile-received?{{ query_string }}">Đối soát đã nhận</a>
+    <a class="btn btn-sm {% if active_path == report_prefix + '/status/returning' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="{{ report_prefix }}/status/returning?{{ query_string }}">Đơn hoàn/đang hoàn</a>
+    <a class="btn btn-sm {% if active_path == report_prefix + '/status/pending-reconcile' %}btn-dark{% else %}btn-outline-dark{% endif %}" href="{{ report_prefix }}/status/pending-reconcile?{{ query_string }}">Đơn chờ đối soát</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ report_prefix }}/api/v1/snapshot?{{ query_string }}" target="_blank">API Snapshot</a>
   </div>
   <nav class="report-links" aria-label="Liên kết vận hành">
     <a href="https://pos.pancake.vn/" target="_blank" rel="noopener">Mở Pancake POS</a>

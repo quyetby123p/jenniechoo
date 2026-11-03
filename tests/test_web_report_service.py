@@ -677,6 +677,50 @@ def test_snapshot_splits_meta_cost_by_campaign_name(tmp_path: Path) -> None:
     assert meta.calls == [(date(2026, 6, 1), date(2026, 6, 1), "Asia/Ho_Chi_Minh", 5000)]
 
 
+def test_ruza_boston_matrix_uses_ads2_campaign_codes_without_reconcile(tmp_path: Path) -> None:
+    pancake = _FakePancakeClient([])
+    meta = _FakeMetaInsightsClient(
+        [
+            {
+                "campaign_name": "ADS:QUYET|RUZA001_RUZA002|Codex",
+                "spend": "100000",
+                "actions": [{"action_type": "omni_purchase", "value": "2"}],
+                "action_values": [{"action_type": "omni_purchase", "value": "300000"}],
+            },
+            {
+                "campaign_name": "ADS:QUYET|RUZA003|Codex",
+                "spend": "50000",
+                "actions": [{"action_type": "omni_purchase", "value": "1"}],
+                "action_values": [{"action_type": "omni_purchase", "value": "25000"}],
+            },
+        ]
+    )
+    thai_duong = _FakeThaiDuongClient([])
+    service = WebReportService(
+        settings=_dummy_settings(tmp_path),
+        logger=logging.getLogger("test-ruza"),
+        pancake_client=pancake,
+        meta_client=meta,
+        thai_duong_client=thai_duong,
+        use_reconcile_data=False,
+        include_boston_matrix=True,
+    )
+
+    snapshot = service.get_snapshot(date(2026, 9, 1), date(2026, 9, 3))
+    matrix = snapshot["boston_matrix"]
+    codes = {
+        code["code"]
+        for bucket in matrix["buckets"]
+        for code in bucket["codes"]
+    }
+
+    assert codes == {"RUZA001", "RUZA002", "RUZA003"}
+    assert matrix["total_codes"] == 3
+    assert snapshot["metrics"]["pending_reconcile_orders"] == 0
+    assert snapshot["metrics"]["reconcile_received_orders"] == 0
+    assert thai_duong.calls == []
+
+
 def test_snapshot_falls_back_to_legacy_pancake_orders_method(tmp_path: Path) -> None:
     class SnapshotFailurePancake:
         def fetch_orders_snapshot_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001

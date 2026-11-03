@@ -171,6 +171,24 @@ foreach ($optionalKey in @("META_PAGE_ACCESS_TOKEN", "PANCAKE_ACCESS_TOKEN", "PA
     }
 }
 
+foreach ($ads2Key in @(
+    "ADS2_META_ACCESS_TOKEN",
+    "ADS2_META_PAGE_ACCESS_TOKEN",
+    "ADS2_META_AD_ACCOUNT_ID",
+    "ADS2_META_PAGE_ID",
+    "ADS2_META_API_VERSION",
+    "ADS2_PANCAKE_API_BASE_URL",
+    "ADS2_PANCAKE_API_KEY",
+    "ADS2_PANCAKE_ACCESS_TOKEN",
+    "ADS2_PANCAKE_SHOP_ID",
+    "ADS2_PANCAKE_PAGE_SIZE"
+)) {
+    $value = Get-EnvValue -EnvMap $envMap -Key $ads2Key
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+        $envVars += @{ key = $ads2Key; value = $value }
+    }
+}
+
 $envVars += @{ key = "APP_TIMEZONE"; value = (Get-EnvValue -EnvMap $envMap -Key "APP_TIMEZONE" -Default "Asia/Ho_Chi_Minh") }
 $envVars += @{ key = "WEB_REPORT_REFRESH_SECONDS"; value = (Get-EnvValue -EnvMap $envMap -Key "WEB_REPORT_REFRESH_SECONDS" -Default "600") }
 $envVars += @{ key = "WEB_REPORT_HOST"; value = (Get-EnvValue -EnvMap $envMap -Key "WEB_REPORT_HOST" -Default "0.0.0.0") }

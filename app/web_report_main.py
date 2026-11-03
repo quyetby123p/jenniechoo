@@ -5,7 +5,8 @@ from app.web_report_app import create_app
 
 
 settings = load_settings()
-app = create_app(settings=settings)
+ruza_settings = load_settings(profile="ads2", require_app_credentials=False)
+app = create_app(settings=settings, ruza_settings=ruza_settings)
 
 
 def main() -> int:

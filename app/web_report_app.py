@@ -25,17 +25,29 @@ def create_app(
     settings: Settings | None = None,
     logger: logging.Logger | None = None,
     report_service: WebReportService | None = None,
+    ruza_settings: Settings | None = None,
+    ruza_report_service: WebReportService | None = None,
 ) -> Flask:
     current_settings = settings or load_settings(project_root=Path(__file__).resolve().parents[1])
+    logger_secrets = [
+        current_settings.telegram_bot_token,
+        current_settings.meta_access_token,
+        current_settings.meta_page_access_token,
+        current_settings.pancake_api_key,
+        current_settings.pancake_access_token,
+    ]
+    if ruza_settings is not None:
+        logger_secrets.extend(
+            [
+                ruza_settings.meta_access_token,
+                ruza_settings.meta_page_access_token,
+                ruza_settings.pancake_api_key,
+                ruza_settings.pancake_access_token,
+            ]
+        )
     current_logger = logger or configure_logger(
         current_settings.app_logs_dir,
-        secrets=[
-            current_settings.telegram_bot_token,
-            current_settings.meta_access_token,
-            current_settings.meta_page_access_token,
-            current_settings.pancake_api_key,
-            current_settings.pancake_access_token,
-        ],
+        secrets=logger_secrets,
     )
     current_report_service = report_service or WebReportService(
         settings=current_settings,
@@ -44,6 +56,17 @@ def create_app(
         meta_client=MetaAdsClient(settings=current_settings, logger=current_logger),
         thai_duong_client=ThaiDuongCodClient(settings=current_settings, logger=current_logger),
     )
+    current_ruza_report_service = ruza_report_service
+    if current_ruza_report_service is None and ruza_settings is not None:
+        current_ruza_report_service = WebReportService(
+            settings=ruza_settings,
+            logger=current_logger,
+            pancake_client=PancakePosClient(settings=ruza_settings, logger=current_logger),
+            meta_client=MetaAdsClient(settings=ruza_settings, logger=current_logger),
+            thai_duong_client=None,
+            use_reconcile_data=False,
+            include_boston_matrix=True,
+        )
 
     app = Flask(
         __name__,
@@ -52,34 +75,58 @@ def create_app(
     app.config["JSON_AS_ASCII"] = False
     app.config["REPORT_SETTINGS"] = current_settings
     app.config["REPORT_SERVICE"] = current_report_service
+    app.config["RUZA_REPORT_SETTINGS"] = ruza_settings
+    app.config["RUZA_REPORT_SERVICE"] = current_ruza_report_service
     app.config["REPORT_LOGGER"] = current_logger
 
     @app.get("/healthz")
     def healthz() -> tuple[dict[str, str], int]:
         return {"status": "ok"}, 200
 
+    @app.get("/ruza/api/v1/snapshot")
     @app.get("/api/v1/snapshot")
     def snapshot_api():  # type: ignore[no-untyped-def]
-        period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
+        report = _report_for_path(
+            request.path,
+            default_settings=current_settings,
+            default_service=current_report_service,
+            ruza_settings=ruza_settings,
+            ruza_service=current_ruza_report_service,
+        )
+        if report is None:
+            abort(404)
+        report_settings, report_service_for_request, _report_meta = report
+        period = _parse_query_period(request.args, timezone_name=report_settings.app_timezone)
         try:
-            snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
+            snapshot = report_service_for_request.get_snapshot(period["start_date"], period["end_date"])
         except Exception as exc:  # noqa: BLE001
             current_logger.exception("Web report snapshot API failed: %s", exc)
             return jsonify({"ok": False, "error": "Không tải được dữ liệu báo cáo lúc này."}), 503
         return jsonify(snapshot)
 
+    @app.get("/ruza")
     @app.get("/baocaofb")
     @app.get("/baocao")
     @app.get("/")
     def dashboard():  # type: ignore[no-untyped-def]
-        period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
-        snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
+        report = _report_for_path(
+            request.path,
+            default_settings=current_settings,
+            default_service=current_report_service,
+            ruza_settings=ruza_settings,
+            ruza_service=current_ruza_report_service,
+        )
+        if report is None:
+            abort(404)
+        report_settings, report_service_for_request, report_meta = report
+        period = _parse_query_period(request.args, timezone_name=report_settings.app_timezone)
+        snapshot = report_service_for_request.get_snapshot(period["start_date"], period["end_date"])
         missing_overview = _build_missing_overview(snapshot)
-        today = datetime.now(_resolve_timezone(current_settings.app_timezone)).date()
+        today = datetime.now(_resolve_timezone(report_settings.app_timezone)).date()
         if period["start_date"] == today and period["end_date"] == today:
             today_snapshot = snapshot
         else:
-            today_snapshot = current_report_service.get_snapshot(today, today)
+            today_snapshot = report_service_for_request.get_snapshot(today, today)
         overall_start = min(REPORT_BASELINE_DATE, today)
         overall_query_string = urlencode(
             {
@@ -99,7 +146,7 @@ def create_app(
             "waiting_total": int(snapshot_metrics.get("waiting_orders") or 0),
             "shipping_total": int(snapshot_metrics.get("shipping_orders") or 0),
             "pending_reconcile_total": int(snapshot_metrics.get("pending_reconcile_orders") or 0),
-            "overall_api_url": f"/api/v1/snapshot?{overall_query_string}",
+            "overall_api_url": f"{report_meta['prefix']}/api/v1/snapshot?{overall_query_string}",
             "overall_start_label": overall_start.strftime("%d-%m-%Y"),
             "overall_end_label": today.strftime("%d-%m-%Y"),
         }
@@ -108,7 +155,10 @@ def create_app(
             snapshot=snapshot,
             missing_overview=missing_overview,
             summary_cards=summary_cards,
-            active_path="/",
+            active_path=report_meta["prefix"] or "/",
+            report_prefix=report_meta["prefix"],
+            report_label=report_meta["label"],
+            report_brand_name=report_meta["brand_name"],
             selected_mode=period["mode"],
             selected_date=period["date_text"],
             selected_start_date=period["start_text"],
@@ -116,10 +166,21 @@ def create_app(
             query_string=period["query_string"],
         )
 
+    @app.get("/ruza/brand/<brand_slug>")
     @app.get("/brand/<brand_slug>")
     def brand_detail(brand_slug: str):  # type: ignore[no-untyped-def]
-        period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
-        snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
+        report = _report_for_path(
+            request.path,
+            default_settings=current_settings,
+            default_service=current_report_service,
+            ruza_settings=ruza_settings,
+            ruza_service=current_ruza_report_service,
+        )
+        if report is None:
+            abort(404)
+        report_settings, report_service_for_request, report_meta = report
+        period = _parse_query_period(request.args, timezone_name=report_settings.app_timezone)
+        snapshot = report_service_for_request.get_snapshot(period["start_date"], period["end_date"])
         brand = snapshot.get("brand_detail", {}).get(brand_slug)
         if not isinstance(brand, dict):
             abort(404)
@@ -127,7 +188,10 @@ def create_app(
             "web_report/brand_detail.html",
             snapshot=snapshot,
             brand=brand,
-            active_path=f"/brand/{brand_slug}",
+            active_path=f"{report_meta['prefix']}/brand/{brand_slug}",
+            report_prefix=report_meta["prefix"],
+            report_label=report_meta["label"],
+            report_brand_name=report_meta["brand_name"],
             selected_mode=period["mode"],
             selected_date=period["date_text"],
             selected_start_date=period["start_text"],
@@ -135,10 +199,21 @@ def create_app(
             query_string=period["query_string"],
         )
 
+    @app.get("/ruza/status/<status_key>")
     @app.get("/status/<status_key>")
     def status_detail(status_key: str):  # type: ignore[no-untyped-def]
-        period = _parse_query_period(request.args, timezone_name=current_settings.app_timezone)
-        snapshot = current_report_service.get_snapshot(period["start_date"], period["end_date"])
+        report = _report_for_path(
+            request.path,
+            default_settings=current_settings,
+            default_service=current_report_service,
+            ruza_settings=ruza_settings,
+            ruza_service=current_ruza_report_service,
+        )
+        if report is None:
+            abort(404)
+        report_settings, report_service_for_request, report_meta = report
+        period = _parse_query_period(request.args, timezone_name=report_settings.app_timezone)
+        snapshot = report_service_for_request.get_snapshot(period["start_date"], period["end_date"])
         status_map = snapshot.get("status_lists", {})
         if not isinstance(status_map, dict):
             abort(404)
@@ -197,7 +272,10 @@ def create_app(
             status_title=title_map.get(status_key, status_key),
             status_summary=status_summary,
             rows=rows,
-            active_path=f"/status/{status_key}",
+            active_path=f"{report_meta['prefix']}/status/{status_key}",
+            report_prefix=report_meta["prefix"],
+            report_label=report_meta["label"],
+            report_brand_name=report_meta["brand_name"],
             selected_mode=period["mode"],
             selected_date=period["date_text"],
             selected_start_date=period["start_text"],
@@ -207,13 +285,59 @@ def create_app(
 
     @app.context_processor
     def inject_common() -> dict[str, Any]:
+        report = _report_for_path(
+            request.path,
+            default_settings=current_settings,
+            default_service=current_report_service,
+            ruza_settings=ruza_settings,
+            ruza_service=current_ruza_report_service,
+        )
+        report_settings = report[0] if report is not None else current_settings
+        report_meta = report[2] if report is not None else _report_meta(False, request.path)
         return {
-            "timezone_name": current_settings.app_timezone,
-            "thb_to_vnd_rate": current_settings.report_thb_to_vnd_rate,
-            "dashboard_path": request.path if request.path in {"/baocao", "/baocaofb"} else "/",
+            "timezone_name": report_settings.app_timezone,
+            "thb_to_vnd_rate": report_settings.report_thb_to_vnd_rate,
+            "dashboard_path": report_meta["dashboard_path"],
+            "jc_dashboard_path": "/baocaofb",
+            "report_prefix": report_meta["prefix"],
+            "report_label": report_meta["label"],
+            "report_brand_name": report_meta["brand_name"],
+            "ruza_enabled": ruza_settings is not None and current_ruza_report_service is not None,
         }
 
     return app
+
+
+def _report_meta(is_ruza: bool, request_path: str = "") -> dict[str, str]:
+    prefix = "/ruza" if is_ruza else ""
+    if is_ruza:
+        dashboard_path = "/ruza"
+    elif request_path in {"/baocao", "/baocaofb"}:
+        dashboard_path = request_path
+    else:
+        dashboard_path = "/"
+    return {
+        "prefix": prefix,
+        "label": "Ruza Thái" if is_ruza else "JC",
+        "brand_name": "Ruza Thái" if is_ruza else "Jennie Choo Thái",
+        "dashboard_path": dashboard_path,
+    }
+
+
+def _report_for_path(
+    request_path: str,
+    *,
+    default_settings: Settings,
+    default_service: WebReportService,
+    ruza_settings: Settings | None,
+    ruza_service: WebReportService | None,
+) -> tuple[Settings, WebReportService, dict[str, str]] | None:
+    is_ruza = request_path == "/ruza" or request_path.startswith("/ruza/")
+    if is_ruza:
+        if ruza_settings is None or ruza_service is None:
+            return None
+        return ruza_settings, ruza_service, _report_meta(True, request_path)
+    return default_settings, default_service, _report_meta(False, request_path)
 
 
 def _parse_query_period(args: Any, *, timezone_name: str) -> dict[str, Any]:

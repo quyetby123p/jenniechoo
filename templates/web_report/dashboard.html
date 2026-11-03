@@ -1,5 +1,5 @@
 {% extends "web_report/base.html" %}
-{% block title %}Dashboard đơn hàng{% endblock %}
+{% block title %}{{ report_label }} · Dashboard đơn hàng{% endblock %}
 {% block pre_filter %}
 <div class="brand-card p-3 mb-3">
   <h2 class="h6 mb-3">Báo cáo ngày</h2>
@@ -58,7 +58,7 @@
   <div class="text-muted small">Kỳ dữ liệu: <strong>{{ snapshot.period.label }}</strong></div>
 </div>
 <div class="brand-card p-3 mb-3">
-  <h2 class="h6 mb-0">Tổng quan Jennie Choo Thái</h2>
+  <h2 class="h6 mb-0">Tổng quan {{ report_brand_name }}</h2>
 </div>
 <div class="kpi-grid kpi-grid-main mb-3">
   <div class="metric-card p-3">
@@ -230,7 +230,7 @@
               <span class="size-pill">{{ size.size }} {{ "{:,}".format(size.quantity) }}</span>
             {% endfor %}
           </td>
-          <td data-label=""><a href="/brand/{{ brand.brand_slug }}?{{ query_string }}">Chi tiết</a></td>
+          <td data-label=""><a href="{{ report_prefix }}/brand/{{ brand.brand_slug }}?{{ query_string }}">Chi tiết</a></td>
         </tr>
       {% else %}
         <tr><td colspan="7" class="text-muted" data-label="">Không có dữ liệu brand.</td></tr>
@@ -239,6 +239,45 @@
     </table>
   </div>
 </div>
+
+{% if snapshot.boston_matrix and snapshot.boston_matrix.buckets is defined %}
+<div class="brand-card p-3 mb-3">
+  <div class="d-flex justify-content-between align-items-baseline gap-2 flex-wrap mb-2">
+    <h2 class="h5 mb-0">{{ snapshot.boston_matrix.title }}</h2>
+    <span class="text-muted small">{{ "{:,}".format(snapshot.boston_matrix.total_codes) }} mã đang chạy</span>
+  </div>
+  <div class="text-muted small mb-3">
+    {{ snapshot.boston_matrix.source_note }} {{ snapshot.boston_matrix.criteria_note }}
+  </div>
+  {% if snapshot.boston_matrix.buckets %}
+    <div class="source-grid">
+      {% for bucket in snapshot.boston_matrix.buckets %}
+        <section class="source-card">
+          <div class="source-card-heading">
+            <h3 class="h6 mb-0">{{ bucket.label }}</h3>
+            <span class="size-pill">{{ "{:,}".format(bucket.codes|length) }} mã</span>
+          </div>
+          <small class="text-muted d-block mb-2">{{ bucket.description }}</small>
+          {% for code in bucket.codes %}
+            <div class="border-top py-2">
+              <div class="d-flex justify-content-between gap-2">
+                <strong>{{ code.code }}</strong>
+                <span class="text-success">{{ "{:,.2f}".format(code.roas) }}x</span>
+              </div>
+              <small class="text-muted d-block">Chi phí: {{ "{:,}".format(code.spend_vnd) }} VNĐ · Đơn: {{ "{:,}".format(code.order_count) }}</small>
+              <small class="text-muted d-block text-truncate" title="{{ code.campaigns|join(', ') }}">{{ code.campaigns|join(', ') }}</small>
+            </div>
+          {% else %}
+            <div class="text-muted small">Chưa có mã trong nhóm này.</div>
+          {% endfor %}
+        </section>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-muted small">{{ snapshot.boston_matrix.criteria_note }}</div>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>

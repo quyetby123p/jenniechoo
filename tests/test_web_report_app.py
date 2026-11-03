@@ -308,3 +308,34 @@ def test_dashboard_css_wraps_mobile_metric_values(tmp_path: Path) -> None:
     assert "overflow-wrap: anywhere" in html
     assert "@media (max-width: 575.98px)" in html
     assert ".kpi-grid-quick { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in html
+
+
+def test_ruza_routes_use_separate_report_namespace(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    service = _StubReportService(_snapshot_payload())
+    ruza_service = _StubReportService(_snapshot_payload())
+    app = create_app(
+        settings=settings,
+        report_service=service,
+        ruza_settings=settings,
+        ruza_report_service=ruza_service,
+    )
+    app.testing = True
+    client = app.test_client()
+
+    response = client.get("/ruza?date=2026-06-01")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Ruza Thái · Báo cáo vận hành đơn hàng" in html
+    assert "Tổng quan Ruza Thái" in html
+    assert 'href="/baocaofb?' in html
+    assert 'href="/ruza?' in html
+    assert "/ruza/status/shipping?" in html
+    assert "/ruza/api/v1/snapshot?" in html
+    assert ruza_service.calls
+    assert not service.calls
+
+    assert client.get("/ruza/status/waiting?date=2026-06-01").status_code == 200
+    assert client.get("/ruza/brand/jennie-choo?date=2026-06-01").status_code == 200
+    assert client.get("/ruza/api/v1/snapshot?date=2026-06-01").status_code == 200

@@ -31,16 +31,22 @@ class WebReportService:
         pancake_client: PancakePosClient,
         meta_client: MetaAdsClient | None = None,
         thai_duong_client: ThaiDuongCodClient | None = None,
+        *,
+        use_reconcile_data: bool = True,
+        include_boston_matrix: bool = False,
     ) -> None:
         self.settings = settings
         self.logger = logger
         self.pancake = pancake_client
         self.meta = meta_client
         self.thai_duong = thai_duong_client
+        self.use_reconcile_data = bool(use_reconcile_data)
+        self.include_boston_matrix = bool(include_boston_matrix)
         self._cache_lock = Lock()
         self._snapshot_build_lock = Lock()
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._cashflow_refs_cache: tuple[float, set[str]] | None = None
+        self._last_ads_insight_rows: list[dict[str, Any]] | None = None
 
     def get_snapshot(self, start_date: date, end_date: date | None = None) -> dict[str, Any]:
         period_start, period_end = self._normalize_period(start_date, end_date)
@@ -344,35 +350,40 @@ class WebReportService:
         waiting_orders.sort(key=lambda item: self._to_int(item.get("created_ts")), reverse=True)
         returning_orders.sort(key=lambda item: self._to_int(item.get("created_ts")), reverse=True)
         shipping_orders.sort(key=lambda item: self._to_int(item.get("created_ts")), reverse=True)
-        reconcile_summary = self._load_reconcile_period_summary(
-            start_date=start_date,
-            end_date=end_date,
-            status_cfg=status_cfg,
-            pancake_status_code_by_ref=pancake_status_code_by_ref,
-        )
-        thai_duong_order_pending_reconcile = self._load_thai_duong_order_pending_reconcile_rows(
-            start_date=start_date,
-            end_date=end_date,
-            status_cfg=status_cfg,
-            pancake_status_code_by_ref=pancake_status_code_by_ref,
-            order_value_minor_by_ref=order_value_minor_by_ref,
-            tz=tz,
-        )
-        if thai_duong_order_pending_reconcile is None:
-            pending_reconcile = reconcile_summary.get("pending_rows", [])
+        if self.use_reconcile_data:
+            reconcile_summary = self._load_reconcile_period_summary(
+                start_date=start_date,
+                end_date=end_date,
+                status_cfg=status_cfg,
+                pancake_status_code_by_ref=pancake_status_code_by_ref,
+            )
+            thai_duong_order_pending_reconcile = self._load_thai_duong_order_pending_reconcile_rows(
+                start_date=start_date,
+                end_date=end_date,
+                status_cfg=status_cfg,
+                pancake_status_code_by_ref=pancake_status_code_by_ref,
+                order_value_minor_by_ref=order_value_minor_by_ref,
+                tz=tz,
+            )
+            if thai_duong_order_pending_reconcile is None:
+                pending_reconcile = reconcile_summary.get("pending_rows", [])
+            else:
+                pending_reconcile = thai_duong_order_pending_reconcile
+            thai_duong_order_reconcile_received = self._load_thai_duong_order_reconcile_received_rows(
+                start_date=start_date,
+                end_date=end_date,
+                status_cfg=status_cfg,
+                order_value_minor_by_ref=order_value_minor_by_ref,
+                tz=tz,
+            )
+            if thai_duong_order_reconcile_received is None:
+                reconcile_received = reconcile_summary.get("received_rows", [])
+            else:
+                reconcile_received = thai_duong_order_reconcile_received
         else:
-            pending_reconcile = thai_duong_order_pending_reconcile
-        thai_duong_order_reconcile_received = self._load_thai_duong_order_reconcile_received_rows(
-            start_date=start_date,
-            end_date=end_date,
-            status_cfg=status_cfg,
-            order_value_minor_by_ref=order_value_minor_by_ref,
-            tz=tz,
-        )
-        if thai_duong_order_reconcile_received is None:
-            reconcile_received = reconcile_summary.get("received_rows", [])
-        else:
-            reconcile_received = thai_duong_order_reconcile_received
+            # Ruza is a separate Pancake/Meta profile and does not flow through Thai Duong.
+            pending_reconcile = []
+            reconcile_received = []
         pending_reconcile_orders = self._count_unique_reconcile_order_refs(pending_reconcile)
         reconcile_received_orders = self._count_unique_reconcile_order_refs(reconcile_received)
         pending_reconcile_value_minor = self._sum_reconcile_rows_value_minor(
@@ -394,6 +405,11 @@ class WebReportService:
                 end_date=end_date,
                 status_cfg=status_cfg,
             )
+        )
+        boston_matrix = (
+            self._build_boston_matrix(self._last_ads_insight_rows or [])
+            if self.include_boston_matrix
+            else []
         )
         roas = self._calculate_roas(revenue_total_vnd, ads_spend_vnd)
         ads_cost_percent = self._calculate_cost_percent(revenue_total_vnd, ads_spend_vnd)
@@ -533,6 +549,7 @@ class WebReportService:
                 "waiting_value_vnd_text": self._fmt_vnd_amount(self._thb_to_vnd(self._minor_to_thb_major(waiting_value_minor))),
             },
             "source_breakdown": source_breakdown,
+            "boston_matrix": boston_matrix,
             "size_summary": self._serialize_size_totals(size_totals),
             "brands": brand_overview,
             "brand_detail": brand_detail,
@@ -619,48 +636,39 @@ class WebReportService:
         status_cfg: dict[str, Any],
     ) -> tuple[int, int, int, bool]:
         """Return total, FB/IG, Dropo spend and whether the split is authoritative."""
+        self._last_ads_insight_rows = None
         if self.meta is None:
             return 0, 0, 0, False
 
         dropo_markers = self._to_text_set(
             status_cfg.get("dropo_campaign_name_markers", ["web"])
         ) or {"web"}
-        if hasattr(self.meta, "get_ad_insights_for_range"):
-            try:
-                rows = self.meta.get_ad_insights_for_range(  # type: ignore[attr-defined]
-                    start_date,
-                    end_date,
-                    self.settings.app_timezone,
-                    max_rows=5000,
+        rows = self._fetch_ads_insight_rows(start_date=start_date, end_date=end_date)
+        if rows is not None:
+            self._last_ads_insight_rows = rows
+            fb_ig_spend_vnd = 0
+            dropo_spend_vnd = 0
+            for row in rows:
+                campaign = row.get("campaign")
+                campaign_name = (
+                    str(campaign.get("name", "")).strip()
+                    if isinstance(campaign, dict)
+                    else str(row.get("campaign_name", "")).strip()
                 )
-                if isinstance(rows, list):
-                    fb_ig_spend_vnd = 0
-                    dropo_spend_vnd = 0
-                    for row in rows:
-                        if not isinstance(row, dict):
-                            continue
-                        campaign = row.get("campaign")
-                        campaign_name = (
-                            str(campaign.get("name", "")).strip()
-                            if isinstance(campaign, dict)
-                            else str(row.get("campaign_name", "")).strip()
-                        )
-                        spend_vnd = max(0, self._to_int(row.get("spend")))
-                        if any(
-                            marker in self._normalize_text(campaign_name)
-                            for marker in dropo_markers
-                        ):
-                            dropo_spend_vnd += spend_vnd
-                        else:
-                            fb_ig_spend_vnd += spend_vnd
-                    return (
-                        fb_ig_spend_vnd + dropo_spend_vnd,
-                        fb_ig_spend_vnd,
-                        dropo_spend_vnd,
-                        True,
-                    )
-            except Exception as exc:  # noqa: BLE001
-                self.logger.warning("Khong tach duoc chi phi Ads theo campaign: %s", exc)
+                spend_vnd = max(0, self._to_int(row.get("spend")))
+                if any(
+                    marker in self._normalize_text(campaign_name)
+                    for marker in dropo_markers
+                ):
+                    dropo_spend_vnd += spend_vnd
+                else:
+                    fb_ig_spend_vnd += spend_vnd
+            return (
+                fb_ig_spend_vnd + dropo_spend_vnd,
+                fb_ig_spend_vnd,
+                dropo_spend_vnd,
+                True,
+            )
 
         account_spend_vnd = self._fetch_ads_spend_vnd(start_date=start_date, end_date=end_date)
         dropo_spend_vnd, dropo_spend_configured = self._fetch_configured_source_spend_vnd(
@@ -674,6 +682,201 @@ class WebReportService:
             dropo_spend_vnd,
             dropo_spend_configured,
         )
+
+    def _fetch_ads_insight_rows(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> list[dict[str, Any]] | None:
+        if self.meta is None or not hasattr(self.meta, "get_ad_insights_for_range"):
+            return None
+        try:
+            rows = self.meta.get_ad_insights_for_range(  # type: ignore[attr-defined]
+                start_date,
+                end_date,
+                self.settings.app_timezone,
+                max_rows=5000,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Khong lay duoc chi tiet campaign Ads cho web report: %s", exc)
+            return None
+        if not isinstance(rows, list):
+            return None
+        return [row for row in rows if isinstance(row, dict)]
+
+    def _build_boston_matrix(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """Group active ADS2 campaign codes into a practical Boston matrix.
+
+        Meta does not expose market-growth/share dimensions for these product
+        codes, so spend is used as the scale proxy and ROAS as the performance
+        proxy. Campaign names remain the source of truth for which codes are
+        currently running.
+        """
+        code_totals: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            campaign_name = self._campaign_name_from_row(row)
+            spend_vnd = max(0, self._to_int(row.get("spend")))
+            if spend_vnd <= 0:
+                continue
+            codes = self._extract_campaign_product_codes(campaign_name)
+            if not codes:
+                continue
+            order_count = self._action_count_by_types(
+                row.get("actions"),
+                (
+                    "omni_purchase",
+                    "onsite_conversion.purchase",
+                    "onsite_web_purchase",
+                    "onsite_app_purchase",
+                    "onsite_web_app_purchase",
+                    "onsite_conversion.messaging_order_created_v2",
+                ),
+            )
+            revenue_vnd = self._action_money_by_types(
+                row.get("action_values"),
+                (
+                    "omni_purchase",
+                    "onsite_conversion.purchase",
+                    "onsite_web_purchase",
+                    "onsite_app_purchase",
+                    "onsite_web_app_purchase",
+                ),
+            )
+            allocation = 1.0 / float(len(codes))
+            for code in codes:
+                bucket = code_totals.setdefault(
+                    code,
+                    {
+                        "code": code,
+                        "spend_vnd": 0.0,
+                        "revenue_vnd": 0.0,
+                        "order_count": 0.0,
+                        "campaigns": set(),
+                    },
+                )
+                bucket["spend_vnd"] += spend_vnd * allocation
+                bucket["revenue_vnd"] += revenue_vnd * allocation
+                bucket["order_count"] += order_count * allocation
+                bucket["campaigns"].add(campaign_name)
+
+        if not code_totals:
+            return {
+                "title": "Ma trận Boston",
+                "source_note": "Lấy mã từ tên campaign ADS2 đang có chi phí.",
+                "criteria_note": "Chưa có campaign ADS2 chứa mã sản phẩm trong kỳ lọc.",
+                "buckets": [],
+                "total_codes": 0,
+            }
+
+        spend_values = sorted(float(item["spend_vnd"]) for item in code_totals.values())
+        median_spend = spend_values[len(spend_values) // 2]
+        for item in code_totals.values():
+            spend = float(item["spend_vnd"])
+            revenue = float(item["revenue_vnd"])
+            roas = revenue / spend if spend > 0 else 0.0
+            item["roas"] = round(roas, 2)
+            item["spend_vnd"] = int(round(spend))
+            item["revenue_vnd"] = int(round(revenue))
+            item["order_count"] = int(round(float(item["order_count"])))
+            item["campaigns"] = sorted(item["campaigns"])
+            high_scale = spend >= median_spend
+            high_performance = roas >= 1.0
+            if high_scale and high_performance:
+                item["bucket"] = "stars"
+            elif high_scale:
+                item["bucket"] = "cash_cows"
+            elif high_performance:
+                item["bucket"] = "question_marks"
+            else:
+                item["bucket"] = "dogs"
+
+        bucket_specs = (
+            ("stars", "Stars", "Chi phí cao, ROAS từ 1.00x trở lên."),
+            ("cash_cows", "Cash Cows", "Chi phí cao, ROAS dưới 1.00x."),
+            ("question_marks", "Question Marks", "Chi phí thấp, ROAS từ 1.00x trở lên."),
+            ("dogs", "Dogs", "Chi phí thấp, ROAS dưới 1.00x."),
+        )
+        buckets = []
+        for key, label, description in bucket_specs:
+            codes = [item for item in code_totals.values() if item.get("bucket") == key]
+            codes.sort(key=lambda item: (int(item.get("spend_vnd") or 0), float(item.get("roas") or 0)), reverse=True)
+            buckets.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "description": description,
+                    "codes": codes,
+                }
+            )
+        return {
+            "title": "Ma trận Boston",
+            "source_note": "Mã lấy trực tiếp từ tên campaign Meta ADS2 đang chạy.",
+            "criteria_note": f"Phân nhóm theo median chi phí mã ({self._fmt_vnd_amount(int(round(median_spend)))} VNĐ) và ROAS.",
+            "buckets": buckets,
+            "total_codes": len(code_totals),
+        }
+
+    @staticmethod
+    def _campaign_name_from_row(row: dict[str, Any]) -> str:
+        campaign = row.get("campaign")
+        if isinstance(campaign, dict):
+            name = str(campaign.get("name", "")).strip()
+            if name:
+                return name
+        return str(row.get("campaign_name", "")).strip()
+
+    @classmethod
+    def _extract_campaign_product_codes(cls, campaign_name: str) -> list[str]:
+        stopwords = {
+            "ADS", "AD", "MK", "QUYET", "THAILAN", "CODEX", "CAMP", "WEB",
+            "FB", "IG", "META", "VIDEO", "ALL", "SKU", "RUZA", "CATALOG",
+        }
+        codes: list[str] = []
+        seen: set[str] = set()
+        for segment in re.split(r"[|;,/+]+", str(campaign_name or "").upper()):
+            for token in re.findall(r"(?<![A-Z0-9])([A-Z][A-Z0-9-]*\d[A-Z0-9-]*)(?![A-Z0-9])", segment):
+                normalized = token.strip("-")
+                if normalized in stopwords or len(normalized) < 3 or normalized in seen:
+                    continue
+                seen.add(normalized)
+                codes.append(normalized)
+        return codes
+
+    @classmethod
+    def _action_count_by_types(cls, actions: Any, action_types: tuple[str, ...]) -> int:
+        if not isinstance(actions, list):
+            return 0
+        values = cls._action_values_by_type(actions)
+        for action_type in action_types:
+            value = cls._to_int(values.get(action_type))
+            if value:
+                return value
+        return 0
+
+    @classmethod
+    def _action_money_by_types(cls, action_values: Any, action_types: tuple[str, ...]) -> int:
+        if not isinstance(action_values, list):
+            return 0
+        values = cls._action_values_by_type(action_values)
+        for action_type in action_types:
+            value = cls._to_int(values.get(action_type))
+            if value:
+                return value
+        return 0
+
+    @classmethod
+    def _action_values_by_type(cls, values: Any) -> dict[str, Any]:
+        if not isinstance(values, list):
+            return {}
+        result: dict[str, Any] = {}
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            action_type = str(item.get("action_type", "")).strip().lower()
+            if action_type:
+                result[action_type] = item.get("value")
+        return result
 
     def _load_thai_duong_order_pending_reconcile_rows(
         self,

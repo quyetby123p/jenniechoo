@@ -358,6 +358,7 @@ $profiles = @(
         )
         prefixKeys = @(
             "TELEGRAM_",
+            "ADS2_",
             "META_",
             "PANCAKE_",
             "RECONCILE_COD_",
