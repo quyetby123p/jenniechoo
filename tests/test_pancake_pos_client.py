@@ -303,6 +303,28 @@ def test_fetch_orders_by_timestamp_range_uses_internal_fetch(tmp_path: Path) -> 
     assert captured == [(100, 200)]
 
 
+def test_fetch_orders_snapshot_for_range_can_use_updated_status_time(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))
+    captured: list[dict[str, object]] = []
+
+    def fake_request(method: str, path: str, *, params=None, data=None):  # noqa: ANN001
+        del method, path, data
+        captured.append(dict(params or {}))
+        return {"success": True, "data": [], "total_pages": 1}
+
+    client._request = fake_request  # type: ignore[method-assign]
+    snapshot = client.fetch_orders_snapshot_for_range(
+        date(2026, 11, 3),
+        date(2026, 11, 3),
+        "Asia/Ho_Chi_Minh",
+        update_status="updated_at",
+    )
+
+    assert snapshot == {"orders": [], "aggs": {}}
+    assert captured[0]["updateStatus"] == "updated_at"
+
+
 def test_update_order_note_print_uses_default_endpoint(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))

@@ -86,8 +86,6 @@ class WebReportService:
         status_cfg = self._load_status_map_config()
         waiting_codes = self._to_int_set(status_cfg.get("waiting_status_codes", []))
         waiting_labels = self._to_text_set(status_cfg.get("waiting_status_labels", ["chờ hàng", "cho hang"]))
-        closed_codes = self._to_int_set(status_cfg.get("closed_status_codes", []))
-        closed_labels = self._to_text_set(status_cfg.get("closed_status_labels", []))
         returning_codes = self._to_int_set(status_cfg.get("returning_status_codes", []))
         returning_labels = self._to_text_set(status_cfg.get("returning_status_labels", ["đang hoàn", "hoàn"]))
         shipping_codes = self._to_int_set(status_cfg.get("shipping_status_codes", [2]))
@@ -103,7 +101,7 @@ class WebReportService:
         orders = [item for item in orders if isinstance(item, dict)]
 
         total_orders = 0
-        closed_orders = 0
+        confirmed_order_count = 0
         waiting_orders_count = 0
         returning_orders_count = 0
         shipping_orders_count = 0
@@ -117,6 +115,7 @@ class WebReportService:
         missing_products: set[str] = set()
         order_value_minor_by_ref: dict[str, int] = {}
         pancake_status_code_by_ref: dict[str, int] = {}
+        revenue_order_keys: set[str] = set()
 
         waiting_orders: list[dict[str, Any]] = []
         returning_orders: list[dict[str, Any]] = []
@@ -127,7 +126,7 @@ class WebReportService:
             "dropo": {"order_count": 0, "revenue_total_minor": 0},
             "other": {"order_count": 0, "revenue_total_minor": 0},
         }
-        for order in orders:
+        for order_index, order in enumerate(orders):
             order_ref = self._extract_order_ref(order)
             order_created_dt = self._extract_order_datetime(order, tz=tz)
             is_order_in_period = self._is_order_created_in_period(
@@ -158,6 +157,10 @@ class WebReportService:
             )
             if is_revenue_eligible and order_confirmation_dt is not None:
                 is_revenue_eligible = start_date <= order_confirmation_dt.date() <= end_date
+            elif is_revenue_eligible:
+                # Live Pancake rows can omit status history. In that case the
+                # order creation date is the only safe period fallback.
+                is_revenue_eligible = is_order_in_period
             if is_order_in_period and order_status_code is not None:
                 for ref in self._extract_order_identity_refs(order, fallback_ref=order_ref):
                     normalized_ref_key = self._normalize_text(ref)
@@ -166,7 +169,15 @@ class WebReportService:
             order_total_minor = self._extract_order_total_minor(order)
             source_key = self._classify_order_source(order)
             source_bucket = source_totals[source_key]
-            if is_revenue_eligible:
+            revenue_order_key = self._order_dedupe_key(
+                order,
+                fallback_ref=order_ref,
+                fallback_index=order_index,
+            )
+            is_new_revenue_order = is_revenue_eligible and revenue_order_key not in revenue_order_keys
+            if is_new_revenue_order:
+                revenue_order_keys.add(revenue_order_key)
+                confirmed_order_count += 1
                 order_value_total_minor += order_total_minor
                 source_bucket["order_count"] += 1
                 source_bucket["revenue_total_minor"] += order_total_minor
@@ -194,16 +205,6 @@ class WebReportService:
                 shipping_codes=shipping_codes,
                 shipping_labels=shipping_labels,
             )
-            is_closed = self._is_closed_status(
-                code=order_status_code,
-                label=order_status_label,
-                closed_codes=closed_codes,
-                closed_labels=closed_labels,
-                is_waiting=is_waiting,
-                is_returning=is_returning,
-            )
-            if is_order_in_period and is_closed:
-                closed_orders += 1
             if is_order_in_period and is_returning:
                 returning_orders_count += 1
                 returning_value_minor += order_total_minor
@@ -257,9 +258,9 @@ class WebReportService:
             )
             if is_order_in_period:
                 brand_bucket["total_orders"] = self._to_int(brand_bucket.get("total_orders")) + 1
-            if is_revenue_eligible:
+            if is_new_revenue_order:
                 brand_bucket["total_value_minor"] = self._to_int(brand_bucket.get("total_value_minor")) + order_total_minor
-            if is_order_in_period and is_closed:
+            if is_new_revenue_order:
                 brand_bucket["closed_orders"] = self._to_int(brand_bucket.get("closed_orders")) + 1
             if not is_order_in_period or not is_waiting:
                 continue
@@ -497,7 +498,7 @@ class WebReportService:
             },
             "metrics": {
                 "total_orders": total_orders,
-                "closed_orders": closed_orders,
+                "closed_orders": confirmed_order_count,
                 "revenue_total_minor": revenue_total_minor,
                 "revenue_total_text": self._fmt_currency(revenue_total_minor),
                 "revenue_total_thb": revenue_total_thb,
@@ -566,23 +567,32 @@ class WebReportService:
     def _fetch_orders_and_aggs(self, *, start_date: date, end_date: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         query_start_date = start_date - timedelta(days=self.REVENUE_LOOKBACK_DAYS)
         if hasattr(self.pancake, "fetch_orders_snapshot_for_range"):
-            try:
-                payload = self.pancake.fetch_orders_snapshot_for_range(  # type: ignore[attr-defined]
-                    query_start_date,
-                    end_date,
-                    self.settings.app_timezone,
-                )
-            except Exception as exc:  # noqa: BLE001
-                self.logger.warning("Khong lay duoc snapshot don Pancake cho web report: %s", exc)
-                payload = None
-            if isinstance(payload, dict):
-                orders = payload.get("orders", [])
-                aggs = payload.get("aggs", {})
-                if not isinstance(orders, list):
-                    orders = []
-                if not isinstance(aggs, dict):
-                    aggs = {}
-                return [item for item in orders if isinstance(item, dict)], aggs
+            created_orders, aggs = self._fetch_order_snapshot_for_range(
+                query_start_date,
+                end_date,
+                update_status="inserted_at",
+            )
+            # Pancake's daily "Tổng hàng chốt" is based on the status-change
+            # day, not the order creation day. Fetch that second view so an old
+            # order confirmed today is included in revenue and closed-order KPIs.
+            confirmed_orders, confirmed_aggs = self._fetch_order_snapshot_for_range(
+                start_date,
+                end_date,
+                update_status="updated_at",
+            )
+            if not created_orders and not confirmed_orders and hasattr(self.pancake, "fetch_all_orders_for_range"):
+                try:
+                    fallback_orders = self.pancake.fetch_all_orders_for_range(  # type: ignore[attr-defined]
+                        query_start_date,
+                        end_date,
+                        self.settings.app_timezone,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self.logger.warning("Khong lay duoc don Pancake fallback cho web report: %s", exc)
+                    fallback_orders = []
+                if isinstance(fallback_orders, list):
+                    created_orders = [item for item in fallback_orders if isinstance(item, dict)]
+            return self._merge_order_snapshots(created_orders, confirmed_orders), aggs or confirmed_aggs
 
         try:
             orders = self.pancake.fetch_all_orders_for_range(
@@ -596,6 +606,70 @@ class WebReportService:
         if not isinstance(orders, list):
             orders = []
         return [item for item in orders if isinstance(item, dict)], {}
+
+    def _fetch_order_snapshot_for_range(
+        self,
+        start_date: date,
+        end_date: date,
+        *,
+        update_status: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        try:
+            try:
+                payload = self.pancake.fetch_orders_snapshot_for_range(  # type: ignore[attr-defined]
+                    start_date,
+                    end_date,
+                    self.settings.app_timezone,
+                    update_status=update_status,
+                )
+            except TypeError:
+                # Keep compatibility with older test doubles and clients that
+                # have not adopted Pancake's updateStatus query yet.
+                payload = self.pancake.fetch_orders_snapshot_for_range(  # type: ignore[attr-defined]
+                    start_date,
+                    end_date,
+                    self.settings.app_timezone,
+                )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning(
+                "Khong lay duoc snapshot don Pancake (%s) cho web report: %s",
+                update_status,
+                exc,
+            )
+            return [], {}
+
+        if not isinstance(payload, dict):
+            return [], {}
+        orders = payload.get("orders", [])
+        aggs = payload.get("aggs", {})
+        if not isinstance(orders, list):
+            orders = []
+        if not isinstance(aggs, dict):
+            aggs = {}
+        return [item for item in orders if isinstance(item, dict)], aggs
+
+    def _merge_order_snapshots(
+        self,
+        *snapshots: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        index_by_ref: dict[str, int] = {}
+        for snapshot in snapshots:
+            for order in snapshot:
+                refs = self._extract_order_identity_refs(order, fallback_ref=self._extract_order_ref(order))
+                normalized_refs = [self._normalize_text(ref) for ref in refs if self._normalize_text(ref)]
+                existing_index = next(
+                    (index_by_ref[ref] for ref in normalized_refs if ref in index_by_ref),
+                    None,
+                )
+                if existing_index is None:
+                    existing_index = len(merged)
+                    merged.append(dict(order))
+                else:
+                    merged[existing_index] = {**merged[existing_index], **order}
+                for ref in normalized_refs:
+                    index_by_ref[ref] = existing_index
+        return merged
 
     @staticmethod
     def _is_order_created_in_period(
@@ -2005,6 +2079,18 @@ class WebReportService:
                 return text
         return ""
 
+    def _order_dedupe_key(
+        self,
+        order: dict[str, Any],
+        *,
+        fallback_ref: str = "",
+        fallback_index: int = 0,
+    ) -> str:
+        refs = self._extract_order_identity_refs(order, fallback_ref=fallback_ref)
+        if refs:
+            return self._normalize_text(refs[0])
+        return f"row-{fallback_index}"
+
     def _extract_order_identity_refs(self, order: dict[str, Any], *, fallback_ref: str = "") -> list[str]:
         return self._dedupe_text_refs(
             [
@@ -2306,32 +2392,46 @@ class WebReportService:
         revenue_codes: set[int],
         revenue_labels: set[str],
     ) -> datetime | None:
-        history = order.get("status_history")
-        if isinstance(history, list):
-            for event in history:
-                if not isinstance(event, dict):
-                    continue
-                event_code = self._extract_status_code(event)
-                event_label = str(
-                    event.get("status_name")
-                    or event.get("status_text")
-                    or event.get("status_label")
-                    or ""
-                ).strip()
-                if not self._is_revenue_eligible_status(
-                    code=event_code,
-                    label=event_label,
-                    revenue_codes=revenue_codes,
-                    revenue_labels=revenue_labels,
-                ):
-                    continue
-                for key in ("updated_at", "created_at", "createdAt", "timestamp"):
-                    dt = self._parse_datetime(event.get(key))
-                    if dt is not None:
-                        return dt.astimezone(tz)
-                    dt = self._parse_unix_datetime(event.get(key))
-                    if dt is not None:
-                        return dt.astimezone(tz)
+        history: list[Any] = []
+        for key in ("histories", "status_histories", "status_history"):
+            candidate = order.get(key)
+            if isinstance(candidate, list):
+                history = candidate
+                break
+        confirmation_dates: list[datetime] = []
+        for event in history:
+            if not isinstance(event, dict):
+                continue
+            event_code = self._extract_status_code(event)
+            event_label = str(
+                event.get("status_name")
+                or event.get("status_text")
+                or event.get("status_label")
+                or ""
+            ).strip()
+            if not self._is_revenue_eligible_status(
+                code=event_code,
+                label=event_label,
+                revenue_codes=revenue_codes,
+                revenue_labels=revenue_labels,
+            ):
+                continue
+            for key in (
+                "updated_at",
+                "updatedAt",
+                "inserted_at",
+                "created_at",
+                "createdAt",
+                "update_at",
+                "updateAt",
+                "timestamp",
+            ):
+                dt = self._parse_datetime(event.get(key)) or self._parse_unix_datetime(event.get(key))
+                if dt is not None:
+                    confirmation_dates.append(dt.astimezone(tz))
+                    break
+        if confirmation_dates:
+            return min(confirmation_dates)
 
         for key in (
             "confirmed_at",
@@ -2344,6 +2444,8 @@ class WebReportService:
             "confirm_time",
             "last_update_status_at",
             "lastUpdateStatusAt",
+            "updated_at",
+            "updatedAt",
         ):
             dt = self._parse_datetime(order.get(key))
             if dt is not None:

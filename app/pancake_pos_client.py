@@ -260,6 +260,8 @@ class PancakePosClient:
         start_date: date,
         end_date: date,
         timezone_name: str,
+        *,
+        update_status: str = "inserted_at",
     ) -> dict[str, Any]:
         if self.settings.pancake_shop_id <= 0:
             raise ValidationError("Chưa có PANCAKE_SHOP_ID hợp lệ.")
@@ -267,27 +269,54 @@ class PancakePosClient:
             raise ValidationError("Khoảng ngày Pancake không hợp lệ.")
         start_ts, _ = self._to_unix_day_range(start_date, timezone_name)
         _, end_ts = self._to_unix_day_range(end_date, timezone_name)
-        orders, aggs = self._fetch_orders_by_timestamp_range_with_aggs(start_ts, end_ts)
+        orders, aggs = self._fetch_orders_by_timestamp_range_with_aggs(
+            start_ts,
+            end_ts,
+            update_status=update_status,
+        )
         return {
             "orders": orders,
             "aggs": aggs if isinstance(aggs, dict) else {},
         }
 
-    def fetch_orders_by_timestamp_range(self, start_ts: int, end_ts: int) -> list[dict[str, Any]]:
+    def fetch_orders_by_timestamp_range(
+        self,
+        start_ts: int,
+        end_ts: int,
+        *,
+        update_status: str = "inserted_at",
+    ) -> list[dict[str, Any]]:
         if self.settings.pancake_shop_id <= 0:
             raise ValidationError("Chưa có PANCAKE_SHOP_ID hợp lệ.")
         if end_ts < start_ts:
             raise ValidationError("Khoảng thời gian Pancake không hợp lệ.")
-        return self._fetch_orders_by_timestamp_range(start_ts, end_ts)
+        try:
+            return self._fetch_orders_by_timestamp_range(start_ts, end_ts, update_status=update_status)
+        except TypeError:
+            # Keep compatibility with callers/tests monkeypatching the legacy
+            # two-argument internal method.
+            return self._fetch_orders_by_timestamp_range(start_ts, end_ts)
 
-    def _fetch_orders_by_timestamp_range(self, start_ts: int, end_ts: int) -> list[dict[str, Any]]:
-        orders, _ = self._fetch_orders_by_timestamp_range_with_aggs(start_ts, end_ts)
+    def _fetch_orders_by_timestamp_range(
+        self,
+        start_ts: int,
+        end_ts: int,
+        *,
+        update_status: str = "inserted_at",
+    ) -> list[dict[str, Any]]:
+        orders, _ = self._fetch_orders_by_timestamp_range_with_aggs(
+            start_ts,
+            end_ts,
+            update_status=update_status,
+        )
         return orders
 
     def _fetch_orders_by_timestamp_range_with_aggs(
         self,
         start_ts: int,
         end_ts: int,
+        *,
+        update_status: str = "inserted_at",
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         shop_id = self.settings.pancake_shop_id
         page_number = 1
@@ -296,15 +325,20 @@ class PancakePosClient:
         aggs: dict[str, Any] = {}
 
         while page_number <= max(total_pages, 1):
+            params: dict[str, Any] = {
+                "page_size": self.settings.pancake_page_size,
+                "page_number": page_number,
+                "startDateTime": start_ts,
+                "endDateTime": end_ts,
+            }
+            normalized_update_status = str(update_status or "").strip()
+            if normalized_update_status:
+                params["updateStatus"] = normalized_update_status
+
             payload = self._request(
                 "GET",
                 f"/shops/{shop_id}/orders",
-                params={
-                    "page_size": self.settings.pancake_page_size,
-                    "page_number": page_number,
-                    "startDateTime": start_ts,
-                    "endDateTime": end_ts,
-                },
+                params=params,
             )
             data = payload.get("data", [])
             if isinstance(data, list):

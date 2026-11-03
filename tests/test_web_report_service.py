@@ -19,7 +19,15 @@ class _FakePancakeClient:
         self.fetch_count += 1
         return self._orders
 
-    def fetch_orders_snapshot_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
+    def fetch_orders_snapshot_for_range(
+        self,
+        start_date: date,
+        end_date: date,
+        timezone_name: str,
+        *,
+        update_status: str = "inserted_at",
+    ):  # noqa: ANN001
+        del start_date, end_date, timezone_name, update_status
         self.fetch_count += 1
         return {
             "orders": self._orders,
@@ -204,7 +212,7 @@ def test_snapshot_aggregates_orders_waiting_and_pending_reconcile(tmp_path: Path
     snapshot = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot["metrics"]["total_orders"] == 3
-    assert snapshot["metrics"]["closed_orders"] == 1
+    assert snapshot["metrics"]["closed_orders"] == 3
     assert snapshot["metrics"]["waiting_orders"] == 2
     assert snapshot["metrics"]["shipping_orders"] == 0
     assert snapshot["metrics"]["returning_orders"] == 0
@@ -340,7 +348,7 @@ def test_snapshot_cache_uses_ttl(tmp_path: Path) -> None:
     snapshot2 = service.get_snapshot(date(2026, 6, 1))
 
     assert snapshot1 == snapshot2
-    assert fake.fetch_count == 1
+    assert fake.fetch_count == 2
 
 
 def test_waiting_status_code_mapping_from_config(tmp_path: Path) -> None:
@@ -553,6 +561,49 @@ def test_revenue_lookback_includes_order_confirmed_today_after_creation(tmp_path
 
     assert snapshot["metrics"]["total_orders"] == 1
     assert snapshot["metrics"]["revenue_total_minor"] == 470_000
+
+
+def test_revenue_uses_pancake_histories_and_updated_status_query(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    order = {
+        "display_id": "JC-CONFIRMED-TODAY",
+        "status": 1,
+        "total_price": 340_000,
+        "inserted_at": "2026-11-02T09:07:00+07:00",
+        "updated_at": "2026-11-03T09:07:00+07:00",
+        "histories": [
+            {
+                "old_status": 0,
+                "status": 1,
+                "updated_at": "2026-11-03T09:07:00+07:00",
+            }
+        ],
+        "items": [],
+    }
+
+    class _UpdatedAwarePancakeClient:
+        def fetch_orders_snapshot_for_range(
+            self,
+            start_date: date,
+            end_date: date,
+            timezone_name: str,
+            *,
+            update_status: str = "inserted_at",
+        ):  # noqa: ANN001
+            del start_date, end_date, timezone_name
+            return {"orders": [order] if update_status == "updated_at" else [], "aggs": {}}
+
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_UpdatedAwarePancakeClient(),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 11, 3))
+
+    assert snapshot["metrics"]["total_orders"] == 0
+    assert snapshot["metrics"]["closed_orders"] == 1
+    assert snapshot["metrics"]["revenue_total_minor"] == 340_000
 
 
 def test_snapshot_includes_ads_spend_for_selected_range(tmp_path: Path) -> None:
