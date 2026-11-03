@@ -2393,16 +2393,20 @@ class WebReportService:
         revenue_labels: set[str],
     ) -> datetime | None:
         history: list[Any] = []
-        for key in ("histories", "status_histories", "status_history"):
+        # Pancake exposes two different histories: `histories` contains every
+        # order edit, while `status_history` contains the actual status timeline.
+        # Prefer the latter so a later shipping/edit timestamp cannot move an
+        # order's revenue into the wrong report day.
+        for key in ("status_history", "status_histories", "histories"):
             candidate = order.get(key)
-            if isinstance(candidate, list):
+            if isinstance(candidate, list) and candidate:
                 history = candidate
                 break
         confirmation_dates: list[datetime] = []
         for event in history:
             if not isinstance(event, dict):
                 continue
-            event_code = self._extract_status_code(event)
+            event_code = self._extract_history_status_code(event)
             event_label = str(
                 event.get("status_name")
                 or event.get("status_text")
@@ -2453,6 +2457,25 @@ class WebReportService:
             dt = self._parse_unix_datetime(order.get(key))
             if dt is not None:
                 return dt.astimezone(tz)
+        return None
+
+    def _extract_history_status_code(self, event: dict[str, Any]) -> int | None:
+        """Extract a new status from either Pancake history shape."""
+        direct_code = self._extract_status_code(event)
+        if direct_code is not None:
+            return direct_code
+
+        raw_status = event.get("status")
+        if isinstance(raw_status, dict):
+            for key in ("new", "status", "code", "value"):
+                code = self._to_optional_int(raw_status.get(key))
+                if code is not None:
+                    return code
+
+        for key in ("new_status", "status_code", "new", "code"):
+            code = self._to_optional_int(event.get(key))
+            if code is not None:
+                return code
         return None
 
     def _load_status_map_config(self) -> dict[str, Any]:

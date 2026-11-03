@@ -606,6 +606,46 @@ def test_revenue_uses_pancake_histories_and_updated_status_query(tmp_path: Path)
     assert snapshot["metrics"]["revenue_total_minor"] == 340_000
 
 
+def test_revenue_uses_first_eligible_status_date_not_latest_order_update(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    order = {
+        "display_id": "JC-SHIPPED-OLD",
+        "status": 2,
+        "total_price": 340_000,
+        "inserted_at": "2026-10-28T09:20:00+07:00",
+        "updated_at": "2026-11-03T14:35:55+07:00",
+        "status_history": [
+            {"status": 11, "updated_at": "2026-10-28T10:08:08+07:00"},
+            {"status": 13, "updated_at": "2026-10-31T09:34:05+07:00"},
+            {"status": 2, "updated_at": "2026-11-03T14:35:55+07:00"},
+        ],
+        "items": [],
+    }
+
+    class _UpdatedAwarePancakeClient:
+        def fetch_orders_snapshot_for_range(
+            self,
+            start_date: date,
+            end_date: date,
+            timezone_name: str,
+            *,
+            update_status: str = "inserted_at",
+        ):  # noqa: ANN001
+            del start_date, end_date, timezone_name
+            return {"orders": [order] if update_status == "updated_at" else [], "aggs": {}}
+
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_UpdatedAwarePancakeClient(),
+    )
+
+    snapshot = service.get_snapshot(date(2026, 11, 3))
+
+    assert snapshot["metrics"]["closed_orders"] == 0
+    assert snapshot["metrics"]["revenue_total_minor"] == 0
+
+
 def test_snapshot_includes_ads_spend_for_selected_range(tmp_path: Path) -> None:
     settings = _dummy_settings(tmp_path)
     meta = _FakeMetaClient(spend_vnd=1_630_000)
