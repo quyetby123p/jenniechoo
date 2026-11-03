@@ -220,6 +220,13 @@ def test_is_instagram_media_requirement_error_detects_en_message() -> None:
     )
 
 
+def test_is_instagram_media_requirement_error_detects_two_to_twenty_media_message() -> None:
+    assert MetaAdsClient.is_instagram_media_requirement_error(
+        "Meta API loi (400): Quảng cáo của bạn sẽ không chạy trên Instagram do bài viết đã chọn "
+        "không chứa từ 2-20 hình ảnh hoặc video."
+    )
+
+
 def test_is_post_not_advertisable_error_detects_vi_message() -> None:
     assert MetaAdsClient.is_post_not_advertisable_error(
         "Meta API loi (400): Bạn đang sử dụng Post ID: 122134418307048007, bài viết này không thể đưa vào quảng cáo được."

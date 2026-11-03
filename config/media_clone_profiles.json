@@ -1,0 +1,20 @@
+{
+  "default_profile": "ruza_th",
+  "profiles": {
+    "ruza_th": {
+      "name": "RUZA Thailand",
+      "facebook_page": "RUZA Thailand",
+      "facebook_url": "https://www.facebook.com/ruza.th",
+      "source_facebook_page_url": "https://www.facebook.com/ruza.vn",
+      "instagram_username": "ruza.thailand",
+      "instagram_url": "https://www.instagram.com/ruza.thailand/",
+      "instagram_carousel_max": 10,
+      "caption_part_template": "\n\nPart {part}/{total}",
+      "caption_remove_lines": [
+        "Nhắn tin ngay cho RUZA Nàng nhé!"
+      ],
+      "caption_footer_template": "ข้อมูลสินค้า: {product_codes}\n\n— Instagram: {instagram_url}\n— Facebook: {facebook_url}\n— Order online via inbox"
+    }
+  }
+}
+

@@ -477,16 +477,20 @@ class DropoPancakeBridge:
                 else {}
             )
             summary_occurrences[code] = occurrence + 1
+            # Tóm tắt đơn là snapshot lựa chọn theo từng sản phẩm tại lúc
+            # checkout. Ưu tiên nó trước các cột Màu/Size dùng chung của dòng
+            # chính; các cột dùng chung có thể còn giữ lựa chọn của sản phẩm
+            # đầu tiên và làm sản phẩm màu Đen bị map nhầm sang Kem.
             color = str(
-                get(f"mau{index}", f"color{index}", f"Màu {index}")
+                summary_option.get("color")
+                or get(f"mau{index}", f"color{index}", f"Màu {index}")
                 or detail_get("Màu", "mau", "color")
-                or summary_option.get("color")
                 or shared_color
             ).strip()
             size = str(
-                get(f"size{index}", f"Size {index}")
+                summary_option.get("size")
+                or get(f"size{index}", f"Size {index}")
                 or detail_get("Size", "size")
-                or summary_option.get("size")
                 or shared_size
             ).strip()
             quantity_raw = get(f"sl{index}", f"qty{index}", f"Quantity {index}")
@@ -851,12 +855,101 @@ class DropoPancakeBridge:
             "total_discount": total_discount,
             "currency": str(get("Currency", "Tiền tệ", "currency_code") or "THB").strip(),
         }
+        # Pancake keeps the amount still phải thu (`cod`) separate from the
+        # amount already received by card (`charged_by_card`).  The JC web
+        # checkout only forwards an online order after PayPal capture has
+        # completed, so mark that amount as card-paid at creation time.  COD
+        # rows remain collect-on-delivery.  Only activate this block for a
+        # sheet carrying the JC payment columns (or an older row whose note
+        # explicitly says PayPal), so legacy VAYXA/Dropo payloads stay intact.
+        payment_headers = {
+            "Phương thức thanh toán",
+            "payment_method",
+            "paymentType",
+            "Trạng thái thanh toán",
+            "payment_status",
+            "paymentStatus",
+        }
+        if payment_headers.intersection(header) or self._is_online_paid_order(row, header):
+            payload.update(self._payment_fields(row, header, effective_total))
         if self.config.warehouse_id:
             payload["warehouse_id"] = self.config.warehouse_id
         # Tên hiển thị giúp dry-run dễ kiểm tra. Khi chạy live, _attach_order_source
         # sẽ thay bằng ID nguồn đơn thật trong trường order_sources.
         payload["ads_source"] = str(self.config.order_source_name or "Dropo").strip() or "Dropo"
         return payload
+
+    @classmethod
+    def _is_online_paid_order(cls, row: list[Any], header: list[str]) -> bool:
+        """Return whether a JC row represents a successfully paid online order.
+
+        New rows have explicit payment columns written by the JC Apps Script.
+        The note fallback keeps rows created by the earlier deployed receiver
+        compatible while still requiring an online/paid signal; a plain COD
+        note can never be promoted to paid by this fallback.
+        """
+        status = cls._normalize_payment_text(
+            cls._first_nonempty_cell(
+                row,
+                header,
+                "Trạng thái thanh toán",
+                "payment_status",
+                "paymentStatus",
+            )
+        )
+        method = cls._normalize_payment_text(
+            cls._first_nonempty_cell(
+                row,
+                header,
+                "Phương thức thanh toán",
+                "payment_method",
+                "paymentType",
+            )
+        )
+        note = cls._normalize_payment_text(
+            cls._first_nonempty_cell(row, header, "Ghi chú", "ghi_chu", "note", "c_ghichu")
+        )
+        if status in {"paid", "completed", "success", "da thanh toan"}:
+            return True
+        if method in {
+            "paypal",
+            "online",
+            "online card",
+            "online_card",
+            "thanh toán online",
+            "thanh toan online",
+            "card",
+            "paid",
+        }:
+            return True
+        return "paypal" in note and "cod" not in note
+
+    @classmethod
+    def _payment_fields(
+        cls,
+        row: list[Any],
+        header: list[str],
+        total_minor: int,
+    ) -> dict[str, int]:
+        amount = max(0, cls._to_int(total_minor))
+        if cls._is_online_paid_order(row, header):
+            return {
+                "cash": 0,
+                "cod": 0,
+                "charged_by_card": amount,
+                "transfer_money": 0,
+            }
+        return {
+            "cash": 0,
+            "cod": amount,
+            "charged_by_card": 0,
+            "transfer_money": 0,
+        }
+
+    @staticmethod
+    def _normalize_payment_text(value: Any) -> str:
+        raw = unicodedata.normalize("NFKD", str(value or "")).casefold()
+        return "".join(char for char in raw if not unicodedata.combining(char)).strip()
 
     @staticmethod
     def _public_order_id(value: Any) -> str:
@@ -1409,6 +1502,12 @@ class DropoPancakeBridge:
                     "size": size,
                     "field_values": field_values,
                 }
+                # Một số catalog Pancake không trả field Màu trong endpoint
+                # products nhưng vẫn giữ màu trong SKU biến thể (ví dụ
+                # ...-DEN-M / ...-KEM-M). Đưa SKU vào haystack để không rơi
+                # về biến thể đầu tiên, vốn thường là màu Kem.
+                if entry["variation_sku"]:
+                    entry["field_values"].append(entry["variation_sku"])
                 catalog.setdefault(code, []).append(entry)
                 result[entry["variation_sku"] or variation_id] = entry
         self._pancake_catalog = catalog

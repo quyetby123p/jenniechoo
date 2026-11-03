@@ -1,0 +1,25 @@
+{
+  "campaign_objective": "OUTCOME_SALES",
+  "conversion_location": "WEBSITE",
+  "result_goal": "MAXIMIZE_CONVERSIONS",
+  "customer_lifecycle_options": {
+    "ALL_AUDIENCES": "Thu hút lượt chuyển đổi từ tất cả đối tượng",
+    "NEW_CUSTOMERS_ONLY": "Chinh phục khách hàng mới"
+  },
+  "billing_event": "IMPRESSIONS",
+  "optimization_goal": "OFFSITE_CONVERSIONS",
+  "destination_type": "UNDEFINED",
+  "custom_event_type": "PURCHASE",
+  "campaign_payload_overrides": {},
+  "adset_payload_overrides": {
+    "billing_event": "IMPRESSIONS",
+    "optimization_goal": "OFFSITE_CONVERSIONS",
+    "destination_type": "UNDEFINED",
+    "promoted_object": {
+      "pixel_id": "${META_PIXEL_ID}",
+      "custom_event_type": "PURCHASE"
+    }
+  },
+  "creative_payload_overrides": {},
+  "ad_payload_overrides": {}
+}

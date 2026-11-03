@@ -70,6 +70,7 @@ function looksRelevantDirectText(text) {
     text.startsWith("/") ||
     lower.includes("facebook.com") ||
     lower.includes("fb.watch") ||
+    lower.includes("drive.google.com") ||
     lower.includes("lên") ||
     lower.includes("len ") ||
     lower.includes("báo cáo") ||
@@ -122,6 +123,12 @@ function shouldDispatch(update, env, botName = "main") {
 
   if (chatType === "private") {
     if (isBot3 || isMedia) {
+      return true;
+    }
+    // Pending caption/headline/budget steps may contain no command keyword.
+    // The allowed private user is already authenticated above, so let the
+    // Python bot route the message according to its persisted conversation state.
+    if (allowedUserId && actorId === allowedUserId) {
       return true;
     }
     return looksRelevantDirectText(text);
@@ -700,7 +707,9 @@ export default {
         const dispatchInputs = inputs.dispatch_inputs && typeof inputs.dispatch_inputs === "object"
           ? inputs.dispatch_inputs
           : Object.fromEntries(
-            Object.entries(inputs).filter(([key]) => !["task", "workflow_file", "dispatch_inputs"].includes(key)),
+            // Keep `task`: without it, free-scheduled-tasks.yml falls back to
+            // its default task and can turn every cron dispatch into health checks.
+            Object.entries(inputs).filter(([key]) => !["workflow_file", "dispatch_inputs"].includes(key)),
           );
         await dispatchGitHubInputs(dispatchInputs, env, workflowFile);
         console.log(`Dispatched GitHub task ${label} from cron ${event.cron}`);

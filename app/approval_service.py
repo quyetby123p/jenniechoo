@@ -23,6 +23,18 @@ class ApprovalService:
     RECONCILE_CANCEL_PREFIX = "rc_cancel:"
     RECONCILE_SHEET_APPLY_PREFIX = "rc_sheet_apply:"
     RECONCILE_SHEET_CANCEL_PREFIX = "rc_sheet_cancel:"
+    WEB_SKU_CAPTION_PREFIX = "web_sku_caption:"
+    WEB_SKU_OVERRIDE_PREFIX = "web_sku_override:"
+    WEB_SKU_CANCEL_PREFIX = "web_sku_cancel:"
+    WEB_LIFECYCLE_ALL_PREFIX = "web_lifecycle_all:"
+    WEB_LIFECYCLE_NEW_PREFIX = "web_lifecycle_new:"
+    WEB_LIFECYCLE_CANCEL_PREFIX = "web_lifecycle_cancel:"
+    MESSENGER_LIFECYCLE_ALL_PREFIX = "messenger_lifecycle_all:"
+    MESSENGER_LIFECYCLE_NEW_PREFIX = "messenger_lifecycle_new:"
+    MESSENGER_LIFECYCLE_CANCEL_PREFIX = "messenger_lifecycle_cancel:"
+    MEDIA_FLOW_WEB_PREFIX = "media_flow_web:"
+    MEDIA_FLOW_MESSENGER_PREFIX = "media_flow_messenger:"
+    MEDIA_FLOW_CANCEL_PREFIX = "media_flow_cancel:"
 
     def duplicate_keyboard(self, request_id: str, version: int) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
@@ -53,6 +65,98 @@ class ApprovalService:
                         callback_data=f"{self.REJECT_PREFIX}{job_id}",
                     ),
                 ]
+            ]
+        )
+
+    def web_sku_confirm_keyboard(self, request_id: str) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Dùng hashtag",
+                        callback_data=f"{self.WEB_SKU_CAPTION_PREFIX}{request_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="Dùng mã dự phòng",
+                        callback_data=f"{self.WEB_SKU_OVERRIDE_PREFIX}{request_id}",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="Hủy",
+                        callback_data=f"{self.WEB_SKU_CANCEL_PREFIX}{request_id}",
+                    )
+                ],
+            ]
+        )
+
+    def web_lifecycle_keyboard(self, request_id: str) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Tất cả đối tượng",
+                        callback_data=f"{self.WEB_LIFECYCLE_ALL_PREFIX}{request_id}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="Chinh phục khách hàng mới",
+                        callback_data=f"{self.WEB_LIFECYCLE_NEW_PREFIX}{request_id}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="Hủy",
+                        callback_data=f"{self.WEB_LIFECYCLE_CANCEL_PREFIX}{request_id}",
+                    )
+                ],
+            ]
+        )
+
+    def messenger_lifecycle_keyboard(self, request_id: str) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Tất cả đối tượng",
+                        callback_data=f"{self.MESSENGER_LIFECYCLE_ALL_PREFIX}{request_id}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="Chinh phục khách hàng mới",
+                        callback_data=f"{self.MESSENGER_LIFECYCLE_NEW_PREFIX}{request_id}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="Hủy",
+                        callback_data=f"{self.MESSENGER_LIFECYCLE_CANCEL_PREFIX}{request_id}",
+                    )
+                ],
+            ]
+        )
+
+    def media_flow_keyboard(self, request_id: str) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Web Sales",
+                        callback_data=f"{self.MEDIA_FLOW_WEB_PREFIX}{request_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="Messenger Purchase",
+                        callback_data=f"{self.MEDIA_FLOW_MESSENGER_PREFIX}{request_id}",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="Hủy",
+                        callback_data=f"{self.MEDIA_FLOW_CANCEL_PREFIX}{request_id}",
+                    )
+                ],
             ]
         )
 
@@ -151,6 +255,23 @@ class ApprovalService:
                 action="reconcile_sheet_cancel",
                 value=callback_data[len(self.RECONCILE_SHEET_CANCEL_PREFIX) :],
             )
+
+        for prefix, action_name in (
+            (self.WEB_SKU_CAPTION_PREFIX, "web_sku_caption"),
+            (self.WEB_SKU_OVERRIDE_PREFIX, "web_sku_override"),
+            (self.WEB_SKU_CANCEL_PREFIX, "web_sku_cancel"),
+            (self.WEB_LIFECYCLE_ALL_PREFIX, "web_lifecycle_all"),
+            (self.WEB_LIFECYCLE_NEW_PREFIX, "web_lifecycle_new"),
+            (self.WEB_LIFECYCLE_CANCEL_PREFIX, "web_lifecycle_cancel"),
+            (self.MESSENGER_LIFECYCLE_ALL_PREFIX, "messenger_lifecycle_all"),
+            (self.MESSENGER_LIFECYCLE_NEW_PREFIX, "messenger_lifecycle_new"),
+            (self.MESSENGER_LIFECYCLE_CANCEL_PREFIX, "messenger_lifecycle_cancel"),
+            (self.MEDIA_FLOW_WEB_PREFIX, "media_flow_web"),
+            (self.MEDIA_FLOW_MESSENGER_PREFIX, "media_flow_messenger"),
+            (self.MEDIA_FLOW_CANCEL_PREFIX, "media_flow_cancel"),
+        ):
+            if callback_data.startswith(prefix):
+                return CallbackAction(action=action_name, value=callback_data[len(prefix):])
 
         for prefix, action_name in (
             (self.DUPLICATE_CONFIRM_PREFIX, "duplicate_confirm"),

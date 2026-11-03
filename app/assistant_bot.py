@@ -1885,7 +1885,17 @@ class TelegramAssistantBot:
 
     def _format_fb_write_result(self, payload: dict[str, Any]) -> str:
         written = payload.get("written", {}) if isinstance(payload.get("written"), dict) else {}
-        return "Đã ghi kết quả đối soát FB vào Google Sheet.\n- Run: " + str(payload.get("run_id", "")) + "\n- Tab: " + ", ".join(written.keys())
+        lines = [
+            "Đã ghi kết quả đối soát FB vào cả 2 Google Sheet.",
+            "- Run: " + str(payload.get("run_id", "")),
+        ]
+        for target_name, target_written in written.items():
+            if isinstance(target_written, dict):
+                tabs = ", ".join(str(tab) for tab in target_written.keys())
+                lines.append(f"- {target_name}: {tabs}")
+            else:
+                lines.append(f"- {target_name}")
+        return "\n".join(lines)
 
     def _status_text(self) -> str:
         google_ok, google_reason = self.google.is_configured()

@@ -144,6 +144,54 @@ class ThaiDuongCodClient:
             data=payload if isinstance(payload, dict) else {},
         )
 
+    def update_order_for_sync(
+        self,
+        *,
+        order_id: str,
+        payload: dict[str, Any] | None = None,
+        endpoint_cfg: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing order while preserving its product lines."""
+        cfg = endpoint_cfg if isinstance(endpoint_cfg, dict) else {}
+        method = str(cfg.get("method", "PUT")).strip().upper() or "PUT"
+        path_template = str(cfg.get("path", "/api/v1/orders/{order_id}")).strip()
+        if not path_template:
+            path_template = "/api/v1/orders/{order_id}"
+        if not path_template.startswith("/"):
+            path_template = "/" + path_template
+        normalized_order_id = str(order_id or "").strip()
+        if not normalized_order_id:
+            raise ValidationError("Thiếu order_id Thái Dương để cập nhật đơn.")
+        try:
+            path = path_template.format(order_id=normalized_order_id)
+        except KeyError as exc:
+            raise ValidationError(f"Cấu hình cập nhật đơn Thái Dương thiếu placeholder: {exc}") from exc
+
+        base_url = self._resolve_api_base_url(cfg)
+        request_payload = payload if isinstance(payload, dict) else {}
+        use_session_login = bool(cfg.get("use_session_login", False))
+        if use_session_login:
+            session = self._build_authenticated_session(cfg)
+            try:
+                return self._request_json_with_session(
+                    session=session,
+                    method=method,
+                    url=f"{base_url}{path}",
+                    params=None,
+                    data=request_payload,
+                )
+            finally:
+                session.close()
+
+        headers = self._build_api_headers(cfg)
+        return self._request_json(
+            method=method,
+            url=f"{base_url}{path}",
+            headers=headers,
+            params=None,
+            data=request_payload,
+        )
+
     def update_order_status_for_sync(
         self,
         *,
