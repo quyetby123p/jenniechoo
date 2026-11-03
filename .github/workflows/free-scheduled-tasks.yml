@@ -485,6 +485,11 @@ jobs:
               args+=("--date" "${{ steps.task.outputs.date }}")
             fi
           fi
+          if [ "$task" = "reconcile-cash-in" ]; then
+            if [ -n "${{ steps.task.outputs.date }}" ]; then
+              args+=("--date" "${{ steps.task.outputs.date }}")
+            fi
+          fi
           if [ "$task" = "bot3-daily-checkin" ]; then
             args+=("--slot" "${{ steps.task.outputs.slot || 'morning' }}")
             if [ -n "${{ steps.task.outputs.date }}" ]; then

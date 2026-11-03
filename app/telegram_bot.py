@@ -6694,13 +6694,20 @@ class TelegramAdsBot:
                 max_len=180,
             )
 
-    async def _send_reconcile_cod_cash_in_report(self, *, chat_id: int, trigger_label: str) -> bool:
+    async def _send_reconcile_cod_cash_in_report(
+        self,
+        *,
+        chat_id: int,
+        trigger_label: str,
+        settlement_date: date | None = None,
+    ) -> bool:
         if not self._bot or not self.reconcile:
             return False
         report: dict[str, Any] | None = None
         send_chat_id = int(chat_id)
         try:
-            report = await asyncio.to_thread(self.reconcile.generate_report_if_settlement_exists, None)
+            report = await asyncio.to_thread(self.reconcile.generate_report_if_settlement_exists,
+                settlement_date)
             if report is None:
                 self.logger.info("Bo qua bao cao tien ve tu dong vi hom nay khong co ky doi soat Thai Duong")
                 return True
@@ -6727,7 +6734,7 @@ class TelegramAdsBot:
         return await self._send_reconcile_cod_report(
             chat_id=chat_id,
             trigger_label="Đối soát COD tự động theo cập nhật dòng tiền Thái Dương",
-            settlement_date=None,
+            settlement_date=settlement_date,
             notify_success=True,
             allow_update_prompt=True,
             allow_sheet_sync=True,

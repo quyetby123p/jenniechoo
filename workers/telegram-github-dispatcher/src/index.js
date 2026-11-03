@@ -496,6 +496,32 @@ function scheduledInputsFromCron(cron, scheduledTime) {
           });
         }
       }
+      // Cloudflare can collapse overlapping cron expressions into one event.
+      // Keep the 15:05 HCM reconciliation in this branch so Pancake sync
+      // cannot consume the only dispatch for the reconciliation slot.
+      if (parts.hour === 15 && parts.minute === 5) {
+        const dayOfWeek = new Date(scheduledTime || Date.now()).getUTCDay();
+        if (dayOfWeek === 6) {
+          backupInputs.push({
+            task: "reconcile-weekly",
+            source: "cloudflare-cron",
+          });
+          backupInputs.push({
+            task: "bot3-task-weekly-summary",
+            source: "cloudflare-cron",
+          });
+          backupInputs.push({
+            task: "work-progress-weekly",
+            source: "cloudflare-cron",
+          });
+        } else if (dayOfWeek === 1 || dayOfWeek === 5) {
+          backupInputs.push({
+            task: "reconcile-cash-in",
+            date: localRunDate(scheduledTime),
+            source: "cloudflare-cron",
+          });
+        }
+      }
       return backupInputs;
     }
     case "5 1 * * *":
@@ -532,29 +558,6 @@ function scheduledInputsFromCron(cron, scheduledTime) {
         });
       }
       return inputs;
-    }
-    case "5 8 * * 1,5,6": {
-      const dayOfWeek = new Date(scheduledTime || Date.now()).getUTCDay();
-      if (dayOfWeek === 6) {
-        return [
-          {
-            task: "reconcile-weekly",
-            source: "cloudflare-cron",
-          },
-          {
-            task: "bot3-task-weekly-summary",
-            source: "cloudflare-cron",
-          },
-          {
-            task: "work-progress-weekly",
-            source: "cloudflare-cron",
-          },
-        ];
-      }
-      return [{
-        task: "reconcile-cash-in",
-        source: "cloudflare-cron",
-      }];
     }
     case "5 14 * * *":
       return [

@@ -288,13 +288,18 @@ async def run_daily_report(runtime: ScheduledRuntime, *, slot: str, report_date:
         )
 
 
-async def run_reconcile_cash_in(runtime: ScheduledRuntime) -> None:
+async def run_reconcile_cash_in(
+    runtime: ScheduledRuntime,
+    *,
+    report_date: date | None = None,
+) -> None:
     if not runtime.settings.reconcile_cod_enabled:
         print("RECONCILE_COD_ENABLED=0, skip reconcile cash-in.")
         return
     await runtime.bot._send_reconcile_cod_cash_in_report(
         chat_id=runtime.bot._resolve_reconcile_cod_notify_chat_id(),
         trigger_label="Báo cáo tiền về tự động Thái Dương (GitHub Actions)",
+        settlement_date=report_date,
     )
 
 
@@ -647,7 +652,10 @@ async def run_task(args: argparse.Namespace) -> int:
                 report_date=parse_date(args.date),
             )
         elif task == "reconcile-cash-in":
-            await run_reconcile_cash_in(runtime)
+            await run_reconcile_cash_in(
+                runtime,
+                report_date=parse_date(args.date),
+            )
         elif task == "reconcile-weekly":
             await run_reconcile_weekly(runtime)
         elif task == "pancake-td-sync":
@@ -682,7 +690,11 @@ def build_parser() -> argparse.ArgumentParser:
     daily.add_argument("--slot", choices=["morning", "evening"], default="morning")
     daily.add_argument("--date", default="", help="Optional report date in YYYY-MM-DD.")
 
-    subparsers.add_parser("reconcile-cash-in", help="Send Thai Duong cash-in report.")
+    reconcile_cash_in = subparsers.add_parser(
+        "reconcile-cash-in",
+        help="Send Thai Duong cash-in report.",
+    )
+    reconcile_cash_in.add_argument("--date", default="", help="Optional settlement date in YYYY-MM-DD.")
     subparsers.add_parser("reconcile-weekly", help="Send weekly Thai Duong cash-in summary.")
 
     pancake = subparsers.add_parser("pancake-td-sync", help="Run one Pancake -> Thai Duong sync batch.")
