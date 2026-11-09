@@ -264,6 +264,8 @@ jobs:
         with:
           path: |
             state
+            storage/jobs
+            storage/pending_requests
             storage/pancake_td_sync
             storage/thai_duong_auth
             storage/reports
@@ -449,6 +451,8 @@ jobs:
         with:
           path: |
             state
+            storage/jobs
+            storage/pending_requests
             storage/pancake_td_sync
             storage/thai_duong_auth
             storage/reports

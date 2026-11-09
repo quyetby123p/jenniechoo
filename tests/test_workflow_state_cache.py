@@ -17,3 +17,11 @@ def test_runtime_state_restore_and_save_use_the_same_cache_paths() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert _cache_paths(workflow, "Restore runtime state") == _cache_paths(workflow, "Save runtime state")
+
+
+def test_runtime_state_cache_includes_ads_job_and_pending_request_state() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    paths = _cache_paths(workflow, "Restore runtime state")
+
+    assert "storage/jobs" in paths
+    assert "storage/pending_requests" in paths
