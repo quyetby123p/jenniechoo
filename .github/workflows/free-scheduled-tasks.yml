@@ -112,7 +112,7 @@ jobs:
       ADS2_META_ACCESS_TOKEN: ${{ secrets.ADS2_META_ACCESS_TOKEN || secrets.META_ACCESS_TOKEN }}
       ADS2_META_PAGE_ACCESS_TOKEN: ${{ secrets.ADS2_META_PAGE_ACCESS_TOKEN }}
       ADS2_META_AD_ACCOUNT_ID: ${{ secrets.ADS2_META_AD_ACCOUNT_ID }}
-      ADS2_META_PAGE_ID: ${{ secrets.ADS2_META_PAGE_ID }}
+      ADS2_META_PAGE_ID: ${{ secrets.ADS2_META_PAGE_ID || '649228828282105' }}
       ADS2_META_API_VERSION: ${{ secrets.ADS2_META_API_VERSION || secrets.META_API_VERSION }}
       ADS2_STORAGE_ROOT: ${{ secrets.ADS2_STORAGE_ROOT || 'storage/ads2' }}
       ADS2_STATE_ROOT: ${{ secrets.ADS2_STATE_ROOT || 'state/ads2' }}

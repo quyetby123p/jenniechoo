@@ -27,7 +27,14 @@ from app.daily_report_service import DailyReportService
 from app.daily_task_summary_service import DailyTaskSummaryService
 from app.dedup_service import DedupService
 from app.logger import configure_logger
+from app.media_approval_service import MediaApprovalService
+from app.media_bot import MediaResearchBot
+from app.media_main import _configure_media_logger
 from app.media_performance_service import MediaPerformanceService
+from app.media_research_service import MediaResearchService
+from app.media_settings import MediaSettings, load_media_settings
+from app.media_sheet_service import MediaSheetService
+from app.media_storage_service import MediaStorageService
 from app.meta_ads_client import MetaAdsClient
 from app.models import MediaPerformanceCommand
 from app.pancake_pos_client import PancakePosClient
@@ -39,6 +46,9 @@ from app.settings import Settings, load_settings
 from app.storage_service import StorageService
 from app.telegram_bot import TelegramAdsBot
 from app.thai_duong_cod_client import ThaiDuongCodClient
+from app.work_progress_scheduler import WorkProgressScheduler
+from app.work_progress_service import WorkProgressService
+from app.work_progress_settings import WorkProgressSettings, load_work_progress_settings
 
 
 @dataclass
@@ -53,6 +63,16 @@ class AssistantScheduledRuntime:
     settings: AssistantSettings
     bot: TelegramAssistantBot
     storage: AssistantStorageService
+    telegram: Bot
+
+
+@dataclass
+class MediaScheduledRuntime:
+    settings: MediaSettings
+    bot: MediaResearchBot
+    work_progress_settings: WorkProgressSettings | None
+    work_progress: WorkProgressService | None
+    work_progress_scheduler: WorkProgressScheduler | None
     telegram: Bot
 
 
@@ -169,6 +189,61 @@ def build_assistant_runtime(project_root: Path | None = None) -> AssistantSchedu
     )
     bot._bot = telegram
     return AssistantScheduledRuntime(settings=settings, bot=bot, storage=storage, telegram=telegram)
+
+
+def build_media_runtime(project_root: Path | None = None) -> MediaScheduledRuntime:
+    """Build the media-research runtime used by webhook updates for bot=media."""
+    if project_root is None:
+        project_root = Path(__file__).resolve().parents[1]
+
+    settings = load_media_settings(project_root=project_root)
+    logger = _configure_media_logger(
+        settings.logs_root,
+        secrets=[
+            settings.telegram_bot_token,
+            settings.serpapi_api_key,
+            settings.sheet_oauth_client_secret,
+            settings.sheet_oauth_refresh_token,
+        ],
+    )
+    storage = MediaStorageService(settings=settings, logger=logger)
+    research = MediaResearchService(settings=settings, logger=logger)
+    sheet = MediaSheetService(settings=settings, logger=logger)
+    approval = MediaApprovalService()
+
+    work_progress_settings = None
+    work_progress = None
+    work_progress_scheduler = None
+    if settings.work_progress_enabled:
+        work_progress_settings = load_work_progress_settings(project_root=project_root)
+        work_progress = WorkProgressService(settings=work_progress_settings, logger=logger)
+        work_progress_scheduler = WorkProgressScheduler(
+            settings=work_progress_settings,
+            service=work_progress,
+            logger=logger,
+        )
+
+    telegram = Bot(token=settings.telegram_bot_token)
+    bot = MediaResearchBot(
+        settings=settings,
+        logger=logger,
+        storage=storage,
+        research=research,
+        sheet=sheet,
+        approval=approval,
+        work_progress_service=work_progress,
+        work_progress_scheduler=work_progress_scheduler,
+        work_progress_api_server=None,
+    )
+    bot._bot = telegram
+    return MediaScheduledRuntime(
+        settings=settings,
+        bot=bot,
+        work_progress_settings=work_progress_settings,
+        work_progress=work_progress,
+        work_progress_scheduler=work_progress_scheduler,
+        telegram=telegram,
+    )
 
 
 def parse_date(value: str | None) -> date | None:
