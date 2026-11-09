@@ -1721,89 +1721,97 @@ class TelegramAdsBot:
             raise ValidationError("Link media chỉ hỗ trợ Google Drive HTTPS.")
 
         file_id = self._extract_google_drive_file_id(source_url)
-        download_url = source_url
-        if file_id:
-            download_url = (
-                "https://drive.usercontent.google.com/download?"
-                f"{urlencode({'id': file_id, 'export': 'download', 'confirm': 't'})}"
-            )
+        download_urls = self._google_drive_download_urls(source_url, file_id)
 
         headers = {
             "User-Agent": "FBAdsAutomation/1.0",
             "Accept": "image/*,video/*,application/octet-stream,text/html;q=0.8",
         }
-        response_url = download_url
-        redirect_count = 0
-        confirmation_used = False
-        while True:
-            response = requests.get(
-                response_url,
-                headers=headers,
-                stream=True,
-                allow_redirects=False,
-                timeout=(15, 120),
-            )
-            try:
-                if 300 <= int(response.status_code) < 400:
-                    location = str(response.headers.get("Location", "")).strip()
-                    if not location:
-                        raise ValidationError("Link media chuyển hướng nhưng thiếu địa chỉ đích.")
-                    next_url = urljoin(response_url, location)
-                    next_parsed = urlparse(next_url)
-                    next_host = (next_parsed.hostname or "").lower().rstrip(".")
-                    if next_parsed.scheme.lower() != "https" or not self._is_allowed_web_media_host(next_host):
-                        raise ValidationError("Link media chuyển hướng tới máy chủ không được hỗ trợ.")
-                    redirect_count += 1
-                    if redirect_count > 5:
-                        raise ValidationError("Link media chuyển hướng quá nhiều lần.")
-                    response_url = next_url
-                    continue
-
-                final_host = (urlparse(response_url).hostname or "").lower().rstrip(".")
-                if not self._is_allowed_web_media_host(final_host):
-                    raise ValidationError("Link media chuyển hướng tới máy chủ không được hỗ trợ.")
-                response.raise_for_status()
-                content_length = int(response.headers.get("Content-Length", "0") or 0)
-                limit = max(1, int(self.settings.web_media_max_bytes or 0))
-                if content_length > limit:
-                    raise ValidationError(
-                        f"Media vượt giới hạn {limit // (1024 * 1024)} MB đã cấu hình cho camp Web."
-                    )
-
-                chunks: list[bytes] = []
-                total = 0
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if not chunk:
+        last_http_error = ""
+        for download_url in download_urls:
+            response_url = download_url
+            redirect_count = 0
+            confirmation_used = False
+            while True:
+                response = requests.get(
+                    response_url,
+                    headers=headers,
+                    stream=True,
+                    allow_redirects=False,
+                    timeout=(15, 120),
+                )
+                try:
+                    status_code = int(response.status_code)
+                    if status_code in {403, 404}:
+                        last_http_error = f"HTTP {status_code}"
+                        break
+                    if 300 <= status_code < 400:
+                        location = str(response.headers.get("Location", "")).strip()
+                        if not location:
+                            raise ValidationError("Link media chuyển hướng nhưng thiếu địa chỉ đích.")
+                        next_url = urljoin(response_url, location)
+                        next_parsed = urlparse(next_url)
+                        next_host = (next_parsed.hostname or "").lower().rstrip(".")
+                        if next_parsed.scheme.lower() != "https" or not self._is_allowed_web_media_host(next_host):
+                            raise ValidationError("Link media chuyển hướng tới máy chủ không được hỗ trợ.")
+                        redirect_count += 1
+                        if redirect_count > 5:
+                            raise ValidationError("Link media chuyển hướng quá nhiều lần.")
+                        response_url = next_url
                         continue
-                    total += len(chunk)
-                    if total > limit:
+
+                    final_host = (urlparse(response_url).hostname or "").lower().rstrip(".")
+                    if not self._is_allowed_web_media_host(final_host):
+                        raise ValidationError("Link media chuyển hướng tới máy chủ không được hỗ trợ.")
+                    response.raise_for_status()
+                    content_length = int(response.headers.get("Content-Length", "0") or 0)
+                    limit = max(1, int(self.settings.web_media_max_bytes or 0))
+                    if content_length > limit:
                         raise ValidationError(
                             f"Media vượt giới hạn {limit // (1024 * 1024)} MB đã cấu hình cho camp Web."
                         )
-                    chunks.append(chunk)
-                content = b"".join(chunks)
-                if not content:
-                    raise ValidationError("Link media trả về file trống.")
 
-                content_type = str(response.headers.get("Content-Type", "")).lower()
-                if "text/html" in content_type:
-                    confirmation_url = self._google_drive_confirmation_url(response_url, content)
-                    if confirmation_url and not confirmation_used:
-                        response_url = confirmation_url
-                        confirmation_used = True
-                        continue
-                    raise ValidationError(
-                        "Google Drive không trả về file media. Anh kiểm tra file đang ở chế độ "
-                        "Anyone with the link / Viewer và gửi lại link."
-                    )
+                    chunks: list[bytes] = []
+                    total = 0
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if not chunk:
+                            continue
+                        total += len(chunk)
+                        if total > limit:
+                            raise ValidationError(
+                                f"Media vượt giới hạn {limit // (1024 * 1024)} MB đã cấu hình cho camp Web."
+                            )
+                        chunks.append(chunk)
+                    content = b"".join(chunks)
+                    if not content:
+                        raise ValidationError("Link media trả về file trống.")
 
-                media_kind = self._detect_web_media_kind(content, content_type)
-                if not media_kind:
-                    raise ValidationError("Link không trả về ảnh JPG/PNG/GIF/WEBP hoặc video MP4/WebM hợp lệ.")
-                filename = self._media_filename_from_response(response, media_kind)
-                return content, media_kind, filename
-            finally:
-                response.close()
+                    content_type = str(response.headers.get("Content-Type", "")).lower()
+                    if "text/html" in content_type:
+                        confirmation_url = self._google_drive_confirmation_url(response_url, content)
+                        if confirmation_url and not confirmation_used:
+                            response_url = confirmation_url
+                            confirmation_used = True
+                            continue
+                        raise ValidationError(
+                            "Google Drive không trả về file media. Anh kiểm tra file đang ở chế độ "
+                            "Anyone with the link / Viewer và gửi lại link."
+                        )
+
+                    media_kind = self._detect_web_media_kind(content, content_type)
+                    if not media_kind:
+                        raise ValidationError("Link không trả về ảnh JPG/PNG/GIF/WEBP hoặc video MP4/WebM hợp lệ.")
+                    filename = self._media_filename_from_response(response, media_kind)
+                    return content, media_kind, filename
+                finally:
+                    response.close()
+
+        if last_http_error:
+            raise ValidationError(
+                "Không tìm thấy hoặc không thể truy cập file Google Drive ("
+                f"{last_http_error}). Anh bật Anyone with the link / Viewer, kiểm tra file chưa bị xóa, "
+                "rồi gửi lại link file mới."
+            )
 
         raise ValidationError("Không tải được file media từ Google Drive.")
 
@@ -1900,6 +1908,22 @@ class TelegramAdsBot:
             return str(path_match.group(1)).strip()
         query_id = parse_qs(parsed.query or {}).get("id", [""])[0]
         return str(query_id).strip()
+
+    @staticmethod
+    def _google_drive_download_urls(source_url: str, file_id: str) -> list[str]:
+        if not file_id:
+            return [source_url]
+        source_query = parse_qs(urlparse(source_url).query or "")
+        params = {"id": file_id, "export": "download", "confirm": "t"}
+        resource_key = str(source_query.get("resourcekey", [""])[0]).strip()
+        if resource_key:
+            params["resourcekey"] = resource_key
+        encoded = urlencode(params)
+        return [
+            f"https://drive.usercontent.google.com/download?{encoded}",
+            f"https://drive.google.com/uc?{encoded}",
+            source_url,
+        ]
 
     @staticmethod
     def _is_allowed_web_media_host(host: str) -> bool:

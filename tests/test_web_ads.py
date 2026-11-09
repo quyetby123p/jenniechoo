@@ -315,6 +315,63 @@ def test_web_media_url_download_uses_content_bytes_and_detects_image(monkeypatch
     ]
 
 
+def test_web_media_url_download_falls_back_to_drive_uc_after_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        def __init__(self, status_code: int, content: bytes = b"") -> None:
+            self.status_code = status_code
+            self.headers = {
+                "Content-Type": "video/mp4" if content else "",
+                "Content-Length": str(len(content)),
+            }
+            self._content = content
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise AssertionError("404 fallback response must not call raise_for_status")
+
+        def iter_content(self, chunk_size: int):
+            assert chunk_size == 1024 * 1024
+            return iter((self._content,))
+
+        def close(self) -> None:
+            return None
+
+    calls: list[str] = []
+    video_bytes = b"....ftyp" + b"video"
+
+    def fake_get(url: str, **kwargs: object) -> FakeResponse:
+        calls.append(url)
+        assert kwargs["allow_redirects"] is False
+        if len(calls) == 1:
+            return FakeResponse(404)
+        return FakeResponse(200, video_bytes)
+
+    monkeypatch.setattr("app.telegram_bot.requests.get", fake_get)
+    bot = TelegramAdsBot.__new__(TelegramAdsBot)
+    bot.settings = _settings()
+
+    content, media_kind, filename = bot._download_web_media_url(
+        "https://drive.google.com/file/d/drive_file_123/view?usp=drive_link"
+    )
+
+    assert content == video_bytes
+    assert media_kind == "video"
+    assert filename == "creative.mp4"
+    assert calls == [
+        "https://drive.usercontent.google.com/download?id=drive_file_123&export=download&confirm=t",
+        "https://drive.google.com/uc?id=drive_file_123&export=download&confirm=t",
+    ]
+
+
+def test_google_drive_download_urls_preserve_resource_key() -> None:
+    urls = TelegramAdsBot._google_drive_download_urls(
+        "https://drive.google.com/file/d/drive_file_123/view?resourcekey=0-abc123",
+        "drive_file_123",
+    )
+
+    assert all("resourcekey=0-abc123" in url for url in urls[:2])
+
+
 def test_web_plan_uses_effective_sku_and_web_naming() -> None:
     plan = build_web_campaign_plan(
         web_input=_web_input(),
