@@ -1,7 +1,9 @@
+import asyncio
 from dataclasses import replace
 import logging
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -370,6 +372,60 @@ def test_google_drive_download_urls_preserve_resource_key() -> None:
     )
 
     assert all("resourcekey=0-abc123" in url for url in urls[:2])
+
+
+def test_replace_pending_web_media_url_preserves_current_form() -> None:
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.pending = {
+                "request_id": "req_1",
+                "stage": "awaiting_budget",
+                "caption": "caption",
+                "headline": "headline",
+                "cta_label": "Mua ngay",
+                "destination_url": "https://example.com",
+                "budget_daily_vnd": 431123,
+            }
+
+        def find_latest_pending_web_media(self, **kwargs: object) -> dict[str, object]:
+            return dict(self.pending)
+
+        def update_pending_request(self, request_id: str, updates: dict[str, object]) -> dict[str, object]:
+            assert request_id == "req_1"
+            self.pending.update(updates)
+            return dict(self.pending)
+
+    class FakeMessage:
+        chat = SimpleNamespace(id=7)
+        from_user = SimpleNamespace(id=1)
+
+        def __init__(self) -> None:
+            self.answers: list[str] = []
+
+        async def answer(self, text: str) -> None:
+            self.answers.append(text)
+
+    bot = TelegramAdsBot.__new__(TelegramAdsBot)
+    bot.storage = FakeStorage()
+    bot.settings = _settings()
+    message = FakeMessage()
+
+    replaced = asyncio.run(
+        bot._replace_pending_web_media_url(
+            message,
+            {"media_url": "https://drive.google.com/file/d/correct/view"},
+        )
+    )
+
+    assert replaced is True
+    assert bot.storage.pending["media_url"] == "https://drive.google.com/file/d/correct/view"
+    assert bot.storage.pending["caption"] == "caption"
+    assert bot.storage.pending["headline"] == "headline"
+    assert bot.storage.pending["budget_daily_vnd"] == 431123
+    assert bot.storage.pending["stage"] == "awaiting_budget"
+    assert message.answers == [
+        "Đã cập nhật đúng link file Drive cho job hiện tại. Anh gửi lại ngân sách để em tải media và chạy tiếp."
+    ]
 
 
 def test_web_plan_uses_effective_sku_and_web_naming() -> None:

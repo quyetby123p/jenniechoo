@@ -627,6 +627,47 @@ class TelegramAdsBot:
                 "Lưu ý: file Drive phải bật Anyone with the link / Viewer."
             )
 
+    async def _replace_pending_web_media_url(
+        self,
+        message: Message,
+        payload: dict[str, str],
+    ) -> bool:
+        """Repair a Drive URL on a failed pending Web job without restarting the form."""
+
+        if not message.chat:
+            return False
+        pending = await asyncio.to_thread(
+            self.storage.find_latest_pending_web_media,
+            chat_id=message.chat.id,
+            user_id=message.from_user.id if message.from_user else 0,
+            ttl_minutes=self.settings.web_pending_ttl_minutes,
+        )
+        if not pending or str(pending.get("stage", "")).strip().lower() != "awaiting_budget":
+            return False
+        media_url = str(payload.get("media_url", "")).strip()
+        if not media_url:
+            return False
+        request_id = str(pending.get("request_id", "")).strip()
+        updated = await asyncio.to_thread(
+            self.storage.update_pending_request,
+            request_id,
+            {
+                "media_source": "url",
+                "media_url": media_url,
+                "media_file_id": "",
+                "media_unique_id": "",
+                "media_kind": "auto",
+                "media_filename": "creative.bin",
+                "media_size_bytes": 0,
+                "stage": "awaiting_budget",
+            },
+        )
+        if not updated:
+            return False
+        await message.answer(
+            "Đã cập nhật đúng link file Drive cho job hiện tại. Anh gửi lại ngân sách để em tải media và chạy tiếp.")
+        return True
+
     async def handle_token_command(self, message: Message) -> None:
         if not self._is_authorized(message.from_user.id if message.from_user else None):
             await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
@@ -834,6 +875,8 @@ class TelegramAdsBot:
                 return
             is_media_url, media_url_payload = try_parse_web_media_url_message(parse_text)
             if is_media_url:
+                if await self._replace_pending_web_media_url(message, media_url_payload or {}):
+                    return
                 if await self._has_pending_media_intake_mode(message):
                     await self._process_media_intake_url_message(message, media_url_payload or {})
                     return
