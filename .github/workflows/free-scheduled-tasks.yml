@@ -265,11 +265,11 @@ jobs:
           path: |
             state
             storage/pancake_td_sync
-            storage/ads2
             storage/thai_duong_auth
             storage/reports
             storage/reconcile_cod
             storage/assistant_bot
+            storage/ads2
           key: ops-state-${{ github.run_id }}
           restore-keys: |
             ops-state-
