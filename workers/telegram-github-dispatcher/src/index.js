@@ -629,6 +629,47 @@ async function sendAck(update, env, botName = "main") {
   });
 }
 
+async function answerCallbackQuery(update, env, botName = "main") {
+  const callbackQuery = update && update.callback_query;
+  const callbackQueryId = String(callbackQuery && callbackQuery.id || "").trim();
+  if (!callbackQueryId) {
+    return;
+  }
+
+  const normalizedBot = String(botName || "main").trim().toLowerCase();
+  const isBot3 = normalizedBot === "bot3";
+  const isAds2 = normalizedBot === "ads2";
+  const token = String(
+    isBot3
+      ? env.BOT3_TELEGRAM_TOKEN || ""
+      : isAds2
+        ? env.ADS2_TELEGRAM_BOT_TOKEN || ""
+        : env.TELEGRAM_BOT_TOKEN || "",
+  ).trim();
+  if (!token) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text: "Đã nhận lựa chọn, đang xử lý...",
+        show_alert: false,
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      console.warn(`Telegram callback acknowledgement failed: ${response.status} ${body.slice(0, 300)}`);
+    }
+  } catch (error) {
+    // A callback acknowledgement must never prevent the actual update dispatch.
+    console.warn("Telegram callback acknowledgement request failed:", error);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -679,6 +720,11 @@ export default {
     }
 
     try {
+      // A GitHub Actions cold start can exceed Telegram's callback-query
+      // acknowledgement window. Acknowledge before dispatching the slow job.
+      if (update.callback_query) {
+        await answerCallbackQuery(update, env, botName);
+      }
       await dispatchTelegramUpdate(update, env, botName);
       ctx.waitUntil(sendAck(update, env, botName));
       return jsonResponse({ ok: true, dispatched: true });
