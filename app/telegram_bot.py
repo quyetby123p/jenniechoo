@@ -2382,7 +2382,7 @@ class TelegramAdsBot:
         # The old callback handler updated the request before Telegram rejected
         # its late acknowledgement. Accept the same button again so that a
         # partially advanced request can resume instead of becoming stuck.
-        if current_request_type not in {"media_intake", next_request_type}:
+        if current_request_type not in {"media_intake", "web_media", "messenger_media"}:
             await self._answer_callback(query, "Yêu cầu media đã hết hạn hoặc đã được xử lý.", show_alert=True)
             return
         if normalized_target == "web" and not self.settings.new_web_ads_enabled:
@@ -2408,7 +2408,7 @@ class TelegramAdsBot:
         caption = str(request.get("caption", "")).strip()
         stage = "awaiting_headline" if caption else "awaiting_caption"
         updated = request
-        if current_request_type == "media_intake":
+        if current_request_type != next_request_type:
             updated = await asyncio.to_thread(
                 self.storage.update_pending_request,
                 request_id,
@@ -2420,6 +2420,13 @@ class TelegramAdsBot:
         if not updated:
             await self._answer_callback(query, "Phiên media đã hết hạn.", show_alert=True)
             return
+        self.logger.info(
+            "Media flow selected: request=%s target=%s previous_type=%s stage=%s",
+            request_id,
+            normalized_target,
+            current_request_type,
+            stage,
+        )
         await self._answer_callback(query, "Đã chọn luồng media.")
         if query.message:
             await query.message.edit_reply_markup(reply_markup=None)
