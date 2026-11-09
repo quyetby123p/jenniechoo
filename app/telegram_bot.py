@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, FSInputFile, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, FSInputFile, LinkPreviewOptions, Message
 import requests
 
 from app.approval_service import ApprovalService
@@ -3203,10 +3203,18 @@ class TelegramAdsBot:
             sender = telegram_bot or self._bot
             if not sender:
                 raise RuntimeError("Bot Telegram chưa sẵn sàng để gửi thông báo review Web.")
+            await self._send_web_review_media_preview(
+                sender=sender,
+                chat_id=chat_id,
+                media_content=media_content,
+                media_kind=web_input.media_kind,
+                media_filename=web_input.media_filename,
+            )
             await sender.send_message(
                 chat_id=chat_id,
                 text=self._build_review_message(job_payload),
                 reply_markup=self.approval.review_keyboard(job_id),
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
             )
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("Tạo nháp campaign Web thất bại")
@@ -6455,6 +6463,38 @@ class TelegramAdsBot:
             "Bài viết là bài ẩn trong quảng cáo, chưa đăng lên Page. "
             "Anh bấm Duyệt để publish hoặc Hủy để rollback."
         )
+
+    async def _send_web_review_media_preview(
+        self,
+        *,
+        sender: Bot,
+        chat_id: int,
+        media_content: bytes,
+        media_kind: str,
+        media_filename: str,
+    ) -> None:
+        """Show the exact uploaded asset; do not rely on the destination URL preview."""
+
+        if not media_content:
+            return
+        filename = str(media_filename or "creative").strip() or "creative"
+        try:
+            media = BufferedInputFile(media_content, filename=filename)
+            if str(media_kind or "").strip().lower() == "video":
+                await sender.send_video(
+                    chat_id=chat_id,
+                    video=media,
+                    caption="Media đã dùng để tạo creative Web (video).",
+                )
+            else:
+                await sender.send_photo(
+                    chat_id=chat_id,
+                    photo=media,
+                    caption="Media đã dùng để tạo creative Web (ảnh).",
+                )
+        except Exception:  # noqa: BLE001
+            # A Telegram preview failure must not rollback an already-created draft.
+            self.logger.warning("Không gửi được media preview cho review Web", exc_info=True)
 
     def _build_messenger_media_review_message(self, job: dict[str, Any]) -> str:
         adset_lines = "\n".join(f"- {adset_id}" for adset_id in job.get("adset_ids", []))

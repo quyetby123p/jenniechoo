@@ -575,6 +575,39 @@ def test_web_video_creative_uses_video_id_and_title() -> None:
     assert data["contextual_multi_ads"] == {"enroll_status": "OPT_OUT"}
 
 
+def test_web_review_media_preview_uses_uploaded_video() -> None:
+    class Sender:
+        def __init__(self) -> None:
+            self.video_calls: list[dict[str, object]] = []
+            self.photo_calls: list[dict[str, object]] = []
+
+        async def send_video(self, **kwargs: object) -> None:
+            self.video_calls.append(kwargs)
+
+        async def send_photo(self, **kwargs: object) -> None:
+            self.photo_calls.append(kwargs)
+
+    sender = Sender()
+    bot = object.__new__(TelegramAdsBot)
+    bot.logger = logging.getLogger("test")
+
+    asyncio.run(
+        bot._send_web_review_media_preview(
+            sender=sender,  # type: ignore[arg-type]
+            chat_id=1,
+            media_content=b"video-bytes",
+            media_kind="video",
+            media_filename="creative.mp4",
+        )
+    )
+
+    assert len(sender.video_calls) == 1
+    assert sender.video_calls[0]["chat_id"] == 1
+    assert sender.video_calls[0]["caption"] == "Media đã dùng để tạo creative Web (video)."
+    assert sender.video_calls[0]["video"].filename == "creative.mp4"  # type: ignore[union-attr]
+    assert sender.photo_calls == []
+
+
 def test_web_ad_disables_contextual_multi_ads() -> None:
     client = MetaAdsClient(settings=_settings(), logger=logging.getLogger("test"))
     captured: dict[str, object] = {}
