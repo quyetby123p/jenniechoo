@@ -447,6 +447,10 @@ class DropoPancakeBridge:
             get("Tóm tắt đơn", "Tóm tắt", "tom_tat", "summary", "san_pham")
         )
         summary_sequence = summary_options.get("__sequence__", [])
+        if len(codes) > 1 and summary_sequence and len(summary_sequence) != len(codes):
+            raise ValidationError(
+                "tóm tắt đơn không đủ dòng để đối chiếu mã sản phẩm trong bundle"
+            )
         summary_occurrences: dict[str, int] = {}
         detail_rows = [row] + list(bundle_rows or [])
         items: list[dict[str, Any]] = []
@@ -478,32 +482,43 @@ class DropoPancakeBridge:
                 else {}
             )
             summary_occurrences[code] = occurrence + 1
-            # Product titles in the checkout summary do not always contain a
-            # SKU. In that format, preserve the cart order as the source of
-            # truth for each item's color/size instead of reusing the first
-            # row's shared color.
-            if not summary_option and index <= len(summary_sequence):
+            # A bundle must carry an explicit product code on every summary
+            # line. Without it, the shared color/size columns are ambiguous:
+            # they often contain the first product's choice and can silently
+            # map a later black item to the cream variation.
+            if len(codes) > 1 and summary_sequence:
                 sequential_option = summary_sequence[index - 1]
                 sequential_code = self._normalize_jennie_code(
                     sequential_option.get("code")
                 )
-                if not sequential_code or sequential_code == code:
-                    summary_option = sequential_option
+                if sequential_code != code:
+                    raise ValidationError(
+                        f"tóm tắt đơn lệch thứ tự/mã sản phẩm tại item {index}: "
+                        f"cần {code}, nhận {sequential_code or '?'}"
+                    )
+                summary_option = sequential_option
             # Tóm tắt đơn là snapshot lựa chọn theo từng sản phẩm tại lúc
             # checkout. Ưu tiên nó trước các cột Màu/Size dùng chung của dòng
             # chính; các cột dùng chung có thể còn giữ lựa chọn của sản phẩm
             # đầu tiên và làm sản phẩm màu Đen bị map nhầm sang Kem.
+            column_color = str(
+                get(f"mau{index}", f"color{index}", f"Màu {index}") or ""
+            ).strip()
+            detail_color = str(detail_get("Màu", "mau", "color") or "").strip()
+            column_size = str(get(f"size{index}", f"Size {index}") or "").strip()
+            detail_size = str(detail_get("Size", "size") or "").strip()
+            if len(codes) > 1 and not summary_option and not (
+                (column_color or detail_color) and (column_size or detail_size)
+            ):
+                raise ValidationError(
+                    f"thiếu màu/size riêng cho item {index} ({code}); "
+                    "không dùng màu/size dùng chung để tránh map nhầm"
+                )
             color = str(
-                summary_option.get("color")
-                or get(f"mau{index}", f"color{index}", f"Màu {index}")
-                or detail_get("Màu", "mau", "color")
-                or shared_color
+                summary_option.get("color") or column_color or detail_color or shared_color
             ).strip()
             size = str(
-                summary_option.get("size")
-                or get(f"size{index}", f"Size {index}")
-                or detail_get("Size", "size")
-                or shared_size
+                summary_option.get("size") or column_size or detail_size or shared_size
             ).strip()
             quantity_raw = get(f"sl{index}", f"qty{index}", f"Quantity {index}")
             if not quantity_raw:
