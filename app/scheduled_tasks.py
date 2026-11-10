@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
 from typing import Any
@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot
 
 from app.assistant_approval_service import AssistantApprovalService
-from app.assistant_bot import TelegramAssistantBot, _format_time_label, _is_google_scope_error
+from app.assistant_bot import TelegramAssistantBot
 from app.assistant_google_service import AssistantGoogleService
 from app.assistant_internal_ops_service import AssistantInternalOpsService
 from app.assistant_memory_service import AssistantMemoryService
@@ -36,6 +36,7 @@ from app.media_settings import MediaSettings, load_media_settings
 from app.media_sheet_service import MediaSheetService
 from app.media_storage_service import MediaStorageService
 from app.meta_ads_client import MetaAdsClient
+from app.models import MediaPerformanceCommand
 from app.pancake_pos_client import PancakePosClient
 from app.pancake_td_sync_service import PancakeToThaiDuongSyncService
 from app.reconcile_cod_service import ReconcileCodService
@@ -102,6 +103,12 @@ def build_runtime(project_root: Path | None = None, profile: str | None = None) 
         pancake_client=pancake,
         meta_client=meta,
     )
+    media_performance = MediaPerformanceService(
+        settings=settings,
+        logger=logger,
+        meta_client=meta,
+        pancake_client=pancake,
+    )
     daily_task_summary = DailyTaskSummaryService(settings=settings, logger=logger)
     reconcile = ReconcileCodService(
         settings=settings,
@@ -119,12 +126,6 @@ def build_runtime(project_root: Path | None = None, profile: str | None = None) 
         pancake_client=pancake,
         thai_duong_client=thai_duong,
     )
-    media_performance = MediaPerformanceService(
-        settings=settings,
-        logger=logger,
-        meta_client=meta,
-        pancake_client=pancake,
-    )
     telegram = Bot(token=settings.telegram_bot_token)
     bot = TelegramAdsBot(
         settings=settings,
@@ -133,11 +134,11 @@ def build_runtime(project_root: Path | None = None, profile: str | None = None) 
         dedup=DedupService(storage=storage),
         meta_client=meta,
         daily_report_service=reports,
+        media_performance_service=media_performance,
         daily_task_summary_service=daily_task_summary,
         reconcile_cod_service=reconcile,
         reconcile_cod_sheet_service=reconcile_sheet,
         pancake_td_sync_service=pancake_td_sync,
-        media_performance_service=media_performance,
         thai_duong_client=thai_duong,
         approval_service=ApprovalService(),
         rollback_service=RollbackService(meta_client=meta, logger=logger),
@@ -192,6 +193,7 @@ def build_assistant_runtime(project_root: Path | None = None) -> AssistantSchedu
 
 
 def build_media_runtime(project_root: Path | None = None) -> MediaScheduledRuntime:
+    """Build the media-research runtime used by webhook updates for bot=media."""
     if project_root is None:
         project_root = Path(__file__).resolve().parents[1]
 
@@ -256,8 +258,9 @@ async def run_token_health(runtime: ScheduledRuntime) -> None:
     await runtime.bot._send_token_health_report(
         chat_id=runtime.settings.telegram_allowed_user_id,
         trigger_label="Kiểm tra định kỳ GitHub Actions",
-        # Scheduled health checks stay quiet when everything is healthy.
-        # A failure still sends the full diagnostic report to Telegram.
+        # Scheduled health checks should stay quiet when everything is healthy.
+        # The bot still sends the full report when Meta/Thai Duong reports a
+        # failure, so this remains a monitor without spamming Telegram.
         notify_success=False,
     )
 
@@ -288,13 +291,50 @@ async def run_daily_report(runtime: ScheduledRuntime, *, slot: str, report_date:
         )
 
 
-async def run_reconcile_cash_in(runtime: ScheduledRuntime) -> None:
-    if not runtime.settings.reconcile_cod_enabled:
-        print("RECONCILE_COD_ENABLED=0, skip reconcile cash-in.")
+async def run_media_performance(
+    runtime: ScheduledRuntime,
+    *,
+    codes: str,
+    days: int | None,
+    campaign: str = "",
+) -> None:
+    if not runtime.settings.media_analytics_enabled:
+        print("MEDIA_ANALYTICS_ENABLED=0, skip media performance.")
         return
+    if not runtime.settings.media_analytics_auto_enabled:
+        print("MEDIA_ANALYTICS_AUTO_ENABLED=0, skip media performance.")
+        return
+    parsed_codes = [code.strip().upper() for code in str(codes or "").split(",") if code.strip()]
+    safe_days = days or runtime.settings.media_analytics_history_days
+    command = MediaPerformanceCommand(
+        codes=parsed_codes,
+        campaign_query=str(campaign or "").strip(),
+        days=safe_days,
+        raw_text="scheduled media-performance",
+    )
+    report = await asyncio.to_thread(runtime.media_performance.generate_report, command)
+    for text in runtime.media_performance.build_messages(report):
+        await runtime.telegram.send_message(
+            chat_id=runtime.settings.telegram_allowed_user_id,
+            text=text,
+        )
+
+
+async def run_reconcile_cash_in(
+    runtime: ScheduledRuntime,
+    *,
+    report_date: date | None = None,
+    source: str = "",
+) -> None:
+    if not runtime.settings.reconcile_cod_enabled:
+        raise RuntimeError("RECONCILE_COD_ENABLED=0; scheduled reconcile cash-in is disabled.")
     await runtime.bot._send_reconcile_cod_cash_in_report(
         chat_id=runtime.bot._resolve_reconcile_cod_notify_chat_id(),
         trigger_label="Báo cáo tiền về tự động Thái Dương (GitHub Actions)",
+        settlement_date=report_date,
+        # Explicitly dated manual/backfill runs are quiet. The Cloudflare
+        # scheduler passes its source so regular cash-in reports stay visible.
+        notify_cash_in=(report_date is None or str(source).strip().lower() == "cloudflare-cron"),
     )
 
 
@@ -308,14 +348,27 @@ async def run_reconcile_weekly(runtime: ScheduledRuntime) -> None:
     )
 
 
-async def run_pancake_td_sync(runtime: ScheduledRuntime, *, max_batch: int | None, notify: str) -> None:
+async def run_pancake_td_sync(
+    runtime: ScheduledRuntime,
+    *,
+    max_batch: int | None,
+    notify: str,
+    order_code: str | None = None,
+) -> None:
     if not runtime.settings.pancake_td_sync_enabled:
         print("PANCAKE_TD_SYNC_ENABLED=0, skip Pancake -> Thai Duong sync.")
         return
-    report = await asyncio.to_thread(
-        runtime.bot.pancake_td_sync.sync_once,
-        max_batch=max_batch,
-    )
+    normalized_order_code = str(order_code or "").strip()
+    if normalized_order_code:
+        report = await asyncio.to_thread(
+            runtime.bot.pancake_td_sync.sync_order_code_manual,
+            normalized_order_code,
+        )
+    else:
+        report = await asyncio.to_thread(
+            runtime.bot.pancake_td_sync.sync_once,
+            max_batch=max_batch,
+        )
     should_notify = bool(report.get("notify")) or str(notify).strip().lower() == "always"
     if not should_notify:
         print("Pancake -> Thai Duong sync completed without notification.")
@@ -326,38 +379,23 @@ async def run_pancake_td_sync(runtime: ScheduledRuntime, *, max_batch: int | Non
         if int(runtime.settings.pancake_td_sync_notify_chat_id) != 0
         else int(runtime.settings.telegram_allowed_user_id)
     )
+    profile_suffix = (
+        ""
+        if runtime.settings.profile_name in {"", "main", "default"}
+        else f", {runtime.settings.profile_name}"
+    )
+    trigger_label = (
+        f"Đồng bộ thủ công Pancake -> Thái Dương (GitHub Actions{profile_suffix}, mã {normalized_order_code})"
+        if normalized_order_code
+        else f"Đồng bộ tự động Pancake -> Thái Dương (GitHub Actions{profile_suffix})"
+    )
     text = runtime.bot.pancake_td_sync.build_message(
         report,
-        trigger_label="Đồng bộ tự động Pancake -> Thái Dương (GitHub Actions)",
+        trigger_label=trigger_label,
     )
     if len(text) > 3800:
         text = text[:3760] + "\n...\n(Đã rút gọn vì thông báo quá dài)"
     await runtime.telegram.send_message(chat_id=notify_chat_id, text=text)
-
-
-async def run_media_performance(runtime: ScheduledRuntime, *, codes: str, days: int | None, campaign: str) -> None:
-    if not runtime.settings.media_analytics_enabled:
-        print("MEDIA_ANALYTICS_ENABLED=0, skip ADS media performance.")
-        return
-    if not runtime.settings.media_analytics_auto_enabled:
-        print("MEDIA_ANALYTICS_AUTO_ENABLED=0, skip ADS media performance.")
-        return
-
-    from app.models import MediaPerformanceCommand
-
-    parsed_codes = [item.strip().upper() for item in str(codes or "").split(",") if item.strip()]
-    safe_days = days or runtime.settings.media_analytics_history_days
-    command = MediaPerformanceCommand(
-        codes=parsed_codes,
-        campaign_query=str(campaign or "").strip(),
-        days=safe_days,
-        raw_text="scheduled media-performance",
-    )
-    report = await asyncio.to_thread(runtime.media_performance.generate_report, command)
-    messages = runtime.media_performance.build_messages(report)
-    chat_id = runtime.settings.telegram_allowed_user_id
-    for text in messages:
-        await runtime.telegram.send_message(chat_id=chat_id, text=text)
 
 
 async def run_bot3_daily_checkin(runtime: AssistantScheduledRuntime, *, slot: str, run_date: date | None) -> None:
@@ -414,51 +452,14 @@ async def run_bot3_daily_checkin(runtime: AssistantScheduledRuntime, *, slot: st
 def _assistant_run_date(runtime: AssistantScheduledRuntime, run_date: date | None) -> date:
     if run_date is not None:
         return run_date
-    tzinfo = ZoneInfo(runtime.settings.timezone_name)
-    return datetime.now(tzinfo).date()
+    return datetime.now(ZoneInfo(runtime.settings.timezone_name)).date()
 
 
-async def run_bot3_agenda(runtime: AssistantScheduledRuntime, *, run_date: date | None) -> None:
-    if not runtime.settings.proactive_enabled:
-        print("BOT3_PROACTIVE_ENABLED=0, skip Bot 3 agenda.")
-        return
-
-    target_date = _assistant_run_date(runtime, run_date)
-    day_key = target_date.isoformat()
-    if not runtime.bot.scheduler.should_send_day_mark("agenda", day_key):
-        print(f"Bot 3 agenda already sent for {day_key}.")
-        return
-
-    reply = await runtime.bot._build_agenda_reply(target_date)
-    await runtime.bot._bot_send_message(
-        int(runtime.settings.telegram_allowed_user_id),
-        f"[Nhắc lịch {int(runtime.settings.agenda_hour):02d}:00]\n{reply}",
-    )
-    runtime.bot.scheduler.mark_day_sent("agenda", day_key)
-    print(f"Bot 3 agenda sent for {day_key}.")
-
-
-async def run_bot3_eod(runtime: AssistantScheduledRuntime, *, run_date: date | None) -> None:
-    if not runtime.settings.proactive_enabled:
-        print("BOT3_PROACTIVE_ENABLED=0, skip Bot 3 EOD.")
-        return
-
-    target_date = _assistant_run_date(runtime, run_date)
-    day_key = target_date.isoformat()
-    if not runtime.bot.scheduler.should_send_day_mark("eod", day_key):
-        print(f"Bot 3 EOD already sent for {day_key}.")
-        return
-
-    reply = await runtime.bot._build_result_reply(target_date)
-    await runtime.bot._bot_send_message(
-        int(runtime.settings.telegram_allowed_user_id),
-        f"[Tổng kết {int(runtime.settings.eod_hour):02d}:00]\n{reply}",
-    )
-    runtime.bot.scheduler.mark_day_sent("eod", day_key)
-    print(f"Bot 3 EOD sent for {day_key}.")
-
-
-async def run_bot3_task_weekly_summary(runtime: AssistantScheduledRuntime, *, run_date: date | None) -> None:
+async def run_bot3_task_weekly_summary(
+    runtime: AssistantScheduledRuntime,
+    *,
+    run_date: date | None,
+) -> None:
     if not runtime.settings.tasks_enabled:
         print("BOT3_TASKS_ENABLED=0, skip Bot 3 task weekly summary.")
         return
@@ -491,41 +492,6 @@ async def run_bot3_task_weekly_summary(runtime: AssistantScheduledRuntime, *, ru
     print(f"Bot 3 task weekly summary sent for {day_key}.")
 
 
-async def run_bot3_event_reminders(runtime: AssistantScheduledRuntime) -> None:
-    if not runtime.settings.proactive_enabled:
-        print("BOT3_PROACTIVE_ENABLED=0, skip Bot 3 event reminders.")
-        return
-
-    now_local = runtime.bot.scheduler.now_local()
-    end_local = now_local + timedelta(minutes=int(runtime.settings.event_reminder_lead_minutes) + 5)
-    try:
-        events = await asyncio.to_thread(
-            runtime.bot.google.fetch_events_between,
-            now_local,
-            end_local,
-            max_per_calendar=20,
-        )
-    except Exception as exc:  # noqa: BLE001
-        if _is_google_scope_error(exc):
-            print("Bot 3 event reminders skipped: missing Google Calendar/Gmail scope.")
-            return
-        raise
-
-    due = runtime.bot.scheduler.pick_due_event_reminders(events, now_local=now_local)
-    for event in due:
-        summary = str(event.get("summary", "")).strip() or "(Không tiêu đề)"
-        start_label = _format_time_label(str(event.get("start_iso", "")))
-        await runtime.bot._bot_send_message(
-            int(runtime.settings.telegram_allowed_user_id),
-            "[Nhắc trước sự kiện]\n"
-            f"- {summary}\n"
-            f"- Bắt đầu lúc: {start_label}\n"
-            f"- Còn khoảng: {int(runtime.settings.event_reminder_lead_minutes)} phút",
-        )
-        runtime.bot.scheduler.mark_event_reminded(event)
-    print(f"Bot 3 event reminder check completed: {len(due)} due.")
-
-
 def _work_progress_run_date(runtime: MediaScheduledRuntime, run_date: date | None) -> date:
     if run_date is not None:
         return run_date
@@ -556,11 +522,6 @@ async def run_work_progress_report(
     if selected_type == "weekly" and target_date.weekday() != int(settings.weekly_report_weekday):
         print(f"Work-progress weekly skipped for non-weekly day: {target_date.isoformat()}")
         return
-    if selected_type == "monthly":
-        target_day = min(int(settings.monthly_report_day), _month_last_day(target_date))
-        if target_date.day != target_day:
-            print(f"Work-progress monthly skipped for non-monthly day: {target_date.isoformat()}")
-            return
 
     day_key = target_date.isoformat()
     state = runtime.work_progress_scheduler._load_state()
@@ -568,10 +529,7 @@ async def run_work_progress_report(
         print(f"Work-progress {selected_type} already sent for {day_key}.")
         return
 
-    anchor_date = target_date
-    if selected_type == "daily":
-        anchor_date = target_date + timedelta(days=int(settings.daily_report_offset_days))
-    report = await asyncio.to_thread(runtime.work_progress.build_report, selected_type, anchor_date=anchor_date)
+    report = await asyncio.to_thread(runtime.work_progress.build_report, selected_type, anchor_date=target_date)
     text = await asyncio.to_thread(runtime.work_progress.format_report_text, report)
     await asyncio.to_thread(runtime.work_progress_scheduler._send_private_to_managers, text)
     runtime.work_progress_scheduler._mark_sent(state, slot_name=selected_type, day_key=day_key)
@@ -579,55 +537,32 @@ async def run_work_progress_report(
     print(f"Work-progress {selected_type} report sent for {day_key}.")
 
 
-def _month_last_day(value: date) -> int:
-    import calendar
-
-    return calendar.monthrange(value.year, value.month)[1]
-
-
 async def run_task(args: argparse.Namespace) -> int:
-    assistant_tasks = {
-        "bot3-agenda",
-        "bot3-event-reminders",
-        "bot3-eod",
-        "bot3-task-weekly-summary",
-        "bot3-daily-checkin",
-    }
-    if str(args.task).strip() in assistant_tasks:
+    if str(args.task).strip() in {"bot3-daily-checkin", "bot3-task-weekly-summary"}:
         assistant_runtime = build_assistant_runtime()
         try:
-            task = str(args.task).strip()
-            if task == "bot3-daily-checkin":
+            if str(args.task).strip() == "bot3-daily-checkin":
                 await run_bot3_daily_checkin(
                     assistant_runtime,
                     slot=args.slot,
                     run_date=parse_date(args.date),
                 )
-            elif task == "bot3-agenda":
-                await run_bot3_agenda(assistant_runtime, run_date=parse_date(args.date))
-            elif task == "bot3-event-reminders":
-                await run_bot3_event_reminders(assistant_runtime)
-            elif task == "bot3-eod":
-                await run_bot3_eod(assistant_runtime, run_date=parse_date(args.date))
-            elif task == "bot3-task-weekly-summary":
-                await run_bot3_task_weekly_summary(assistant_runtime, run_date=parse_date(args.date))
+            else:
+                await run_bot3_task_weekly_summary(
+                    assistant_runtime,
+                    run_date=parse_date(args.date),
+                )
             print(f"Scheduled task completed: {args.task} at {datetime.now(timezone.utc).isoformat()}")
             return 0
         finally:
             await assistant_runtime.telegram.session.close()
 
-    work_progress_tasks = {
-        "work-progress-daily": "daily",
-        "work-progress-weekly": "weekly",
-        "work-progress-monthly": "monthly",
-    }
-    if str(args.task).strip() in work_progress_tasks:
+    if str(args.task).strip() == "work-progress-weekly":
         media_runtime = build_media_runtime()
         try:
-            task = str(args.task).strip()
             await run_work_progress_report(
                 media_runtime,
-                report_type=work_progress_tasks[task],
+                report_type="weekly",
                 run_date=parse_date(args.date),
             )
             print(f"Scheduled task completed: {args.task} at {datetime.now(timezone.utc).isoformat()}")
@@ -646,8 +581,19 @@ async def run_task(args: argparse.Namespace) -> int:
                 slot=args.slot,
                 report_date=parse_date(args.date),
             )
+        elif task == "media-performance":
+            await run_media_performance(
+                runtime,
+                codes=args.codes,
+                days=args.days,
+                campaign=args.campaign,
+            )
         elif task == "reconcile-cash-in":
-            await run_reconcile_cash_in(runtime)
+            await run_reconcile_cash_in(
+                runtime,
+                report_date=parse_date(args.date),
+                source=args.source,
+            )
         elif task == "reconcile-weekly":
             await run_reconcile_weekly(runtime)
         elif task == "pancake-td-sync":
@@ -655,13 +601,7 @@ async def run_task(args: argparse.Namespace) -> int:
                 runtime,
                 max_batch=args.max_batch,
                 notify=args.notify,
-            )
-        elif task == "media-performance":
-            await run_media_performance(
-                runtime,
-                codes=args.codes,
-                days=args.days,
-                campaign=args.campaign,
+                order_code=args.order_code,
             )
         else:
             raise ValueError(f"Unknown task: {task}")
@@ -673,7 +613,7 @@ async def run_task(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run one scheduled cloud task.")
-    parser.add_argument("--profile", default="", help="Ads profile for scheduled tasks.")
+    parser.add_argument("--profile", choices=["main", "ads2"], default="main")
     subparsers = parser.add_subparsers(dest="task", required=True)
 
     subparsers.add_parser("token-health", help="Send Meta/Thai Duong token health report.")
@@ -682,41 +622,38 @@ def build_parser() -> argparse.ArgumentParser:
     daily.add_argument("--slot", choices=["morning", "evening"], default="morning")
     daily.add_argument("--date", default="", help="Optional report date in YYYY-MM-DD.")
 
-    subparsers.add_parser("reconcile-cash-in", help="Send Thai Duong cash-in report.")
+    media_performance = subparsers.add_parser("media-performance", help="Send ADS media performance report.")
+    media_performance.add_argument("--codes", default="", help="Optional comma-separated VXV codes.")
+    media_performance.add_argument("--days", type=int, default=None, help="Lookback days. Default from settings.")
+    media_performance.add_argument("--campaign", default="", help="Optional campaign id/name hint.")
+
+    reconcile_cash_in = subparsers.add_parser("reconcile-cash-in", help="Send Thai Duong cash-in report.")
+    reconcile_cash_in.add_argument(
+        "--date",
+        default="",
+        help="Optional settlement date in YYYY-MM-DD; scheduled cloud runs pass this explicitly.",
+    )
+    reconcile_cash_in.add_argument(
+        "--source",
+        default="",
+        help="Dispatch source; cloudflare-cron keeps the regular cash-in notification enabled.",
+    )
     subparsers.add_parser("reconcile-weekly", help="Send weekly Thai Duong cash-in summary.")
 
     pancake = subparsers.add_parser("pancake-td-sync", help="Run one Pancake -> Thai Duong sync batch.")
     pancake.add_argument("--max-batch", type=int, default=None)
     pancake.add_argument("--notify", choices=["auto", "always"], default="auto")
-
-    media_performance = subparsers.add_parser("media-performance", help="Send ADS media performance report.")
-    media_performance.add_argument("--codes", default="", help="Optional comma-separated VXV codes.")
-    media_performance.add_argument("--days", type=int, default=None, help="Optional lookback days.")
-    media_performance.add_argument("--campaign", default="", help="Optional campaign id/name hint.")
-
-    bot3_agenda = subparsers.add_parser("bot3-agenda", help="Send Bot 3 morning agenda.")
-    bot3_agenda.add_argument("--date", default="", help="Optional agenda date in YYYY-MM-DD.")
-
-    subparsers.add_parser("bot3-event-reminders", help="Check and send Bot 3 event reminders.")
-
-    bot3_eod = subparsers.add_parser("bot3-eod", help="Send Bot 3 end-of-day summary.")
-    bot3_eod.add_argument("--date", default="", help="Optional summary date in YYYY-MM-DD.")
-
-    bot3_weekly = subparsers.add_parser("bot3-task-weekly-summary", help="Send Bot 3 weekly task summary.")
-    bot3_weekly.add_argument("--date", default="", help="Optional summary date in YYYY-MM-DD.")
+    pancake.add_argument("--order-code", default="", help="Optional Pancake order code for one-order canary sync.")
 
     bot3_daily = subparsers.add_parser("bot3-daily-checkin", help="Send Bot 3 daily task check-in prompt.")
     bot3_daily.add_argument("--slot", choices=["morning", "evening"], default="morning")
     bot3_daily.add_argument("--date", default="", help="Optional check-in date in YYYY-MM-DD.")
 
-    work_progress_daily = subparsers.add_parser("work-progress-daily", help="Send work-progress daily report.")
-    work_progress_daily.add_argument("--date", default="", help="Optional report date in YYYY-MM-DD.")
+    bot3_weekly = subparsers.add_parser("bot3-task-weekly-summary", help="Send Bot 3 weekly task summary.")
+    bot3_weekly.add_argument("--date", default="", help="Optional summary date in YYYY-MM-DD.")
 
     work_progress_weekly = subparsers.add_parser("work-progress-weekly", help="Send work-progress weekly report.")
     work_progress_weekly.add_argument("--date", default="", help="Optional report date in YYYY-MM-DD.")
-
-    work_progress_monthly = subparsers.add_parser("work-progress-monthly", help="Send work-progress monthly report.")
-    work_progress_monthly.add_argument("--date", default="", help="Optional report date in YYYY-MM-DD.")
     return parser
 
 
@@ -734,3 +671,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

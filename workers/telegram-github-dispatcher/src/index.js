@@ -496,6 +496,32 @@ function scheduledInputsFromCron(cron, scheduledTime) {
           });
         }
       }
+      // Cloudflare can collapse overlapping cron expressions into one event.
+      // Keep the 15:05 HCM reconciliation in this branch so Pancake sync
+      // cannot consume the only dispatch for the reconciliation slot.
+      if (parts.hour === 15 && parts.minute === 5) {
+        const dayOfWeek = new Date(scheduledTime || Date.now()).getUTCDay();
+        if (dayOfWeek === 6) {
+          backupInputs.push({
+            task: "reconcile-weekly",
+            source: "cloudflare-cron",
+          });
+          backupInputs.push({
+            task: "bot3-task-weekly-summary",
+            source: "cloudflare-cron",
+          });
+          backupInputs.push({
+            task: "work-progress-weekly",
+            source: "cloudflare-cron",
+          });
+        } else if (dayOfWeek === 1 || dayOfWeek === 5) {
+          backupInputs.push({
+            task: "reconcile-cash-in",
+            date: localRunDate(scheduledTime),
+            source: "cloudflare-cron",
+          });
+        }
+      }
       return backupInputs;
     }
     case "5 1 * * *":
@@ -532,29 +558,6 @@ function scheduledInputsFromCron(cron, scheduledTime) {
         });
       }
       return inputs;
-    }
-    case "5 8 * * 1,5,6": {
-      const dayOfWeek = new Date(scheduledTime || Date.now()).getUTCDay();
-      if (dayOfWeek === 6) {
-        return [
-          {
-            task: "reconcile-weekly",
-            source: "cloudflare-cron",
-          },
-          {
-            task: "bot3-task-weekly-summary",
-            source: "cloudflare-cron",
-          },
-          {
-            task: "work-progress-weekly",
-            source: "cloudflare-cron",
-          },
-        ];
-      }
-      return [{
-        task: "reconcile-cash-in",
-        source: "cloudflare-cron",
-      }];
     }
     case "5 14 * * *":
       return [
@@ -626,6 +629,47 @@ async function sendAck(update, env, botName = "main") {
   });
 }
 
+async function answerCallbackQuery(update, env, botName = "main") {
+  const callbackQuery = update && update.callback_query;
+  const callbackQueryId = String(callbackQuery && callbackQuery.id || "").trim();
+  if (!callbackQueryId) {
+    return;
+  }
+
+  const normalizedBot = String(botName || "main").trim().toLowerCase();
+  const isBot3 = normalizedBot === "bot3";
+  const isAds2 = normalizedBot === "ads2";
+  const token = String(
+    isBot3
+      ? env.BOT3_TELEGRAM_TOKEN || ""
+      : isAds2
+        ? env.ADS2_TELEGRAM_BOT_TOKEN || ""
+        : env.TELEGRAM_BOT_TOKEN || "",
+  ).trim();
+  if (!token) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text: "Đã nhận lựa chọn, đang xử lý...",
+        show_alert: false,
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      console.warn(`Telegram callback acknowledgement failed: ${response.status} ${body.slice(0, 300)}`);
+    }
+  } catch (error) {
+    // A callback acknowledgement must never prevent the actual update dispatch.
+    console.warn("Telegram callback acknowledgement request failed:", error);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -676,6 +720,11 @@ export default {
     }
 
     try {
+      // A GitHub Actions cold start can exceed Telegram's callback-query
+      // acknowledgement window. Acknowledge before dispatching the slow job.
+      if (update.callback_query) {
+        await answerCallbackQuery(update, env, botName);
+      }
       await dispatchTelegramUpdate(update, env, botName);
       ctx.waitUntil(sendAck(update, env, botName));
       return jsonResponse({ ok: true, dispatched: true });

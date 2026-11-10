@@ -1,7 +1,9 @@
+import asyncio
 from dataclasses import replace
 import logging
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -315,6 +317,117 @@ def test_web_media_url_download_uses_content_bytes_and_detects_image(monkeypatch
     ]
 
 
+def test_web_media_url_download_falls_back_to_drive_uc_after_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        def __init__(self, status_code: int, content: bytes = b"") -> None:
+            self.status_code = status_code
+            self.headers = {
+                "Content-Type": "video/mp4" if content else "",
+                "Content-Length": str(len(content)),
+            }
+            self._content = content
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise AssertionError("404 fallback response must not call raise_for_status")
+
+        def iter_content(self, chunk_size: int):
+            assert chunk_size == 1024 * 1024
+            return iter((self._content,))
+
+        def close(self) -> None:
+            return None
+
+    calls: list[str] = []
+    video_bytes = b"....ftyp" + b"video"
+
+    def fake_get(url: str, **kwargs: object) -> FakeResponse:
+        calls.append(url)
+        assert kwargs["allow_redirects"] is False
+        if len(calls) == 1:
+            return FakeResponse(404)
+        return FakeResponse(200, video_bytes)
+
+    monkeypatch.setattr("app.telegram_bot.requests.get", fake_get)
+    bot = TelegramAdsBot.__new__(TelegramAdsBot)
+    bot.settings = _settings()
+
+    content, media_kind, filename = bot._download_web_media_url(
+        "https://drive.google.com/file/d/drive_file_123/view?usp=drive_link"
+    )
+
+    assert content == video_bytes
+    assert media_kind == "video"
+    assert filename == "creative.mp4"
+    assert calls == [
+        "https://drive.usercontent.google.com/download?id=drive_file_123&export=download&confirm=t",
+        "https://drive.google.com/uc?id=drive_file_123&export=download&confirm=t",
+    ]
+
+
+def test_google_drive_download_urls_preserve_resource_key() -> None:
+    urls = TelegramAdsBot._google_drive_download_urls(
+        "https://drive.google.com/file/d/drive_file_123/view?resourcekey=0-abc123",
+        "drive_file_123",
+    )
+
+    assert all("resourcekey=0-abc123" in url for url in urls[:2])
+
+
+def test_replace_pending_web_media_url_preserves_current_form() -> None:
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.pending = {
+                "request_id": "req_1",
+                "stage": "awaiting_budget",
+                "caption": "caption",
+                "headline": "headline",
+                "cta_label": "Mua ngay",
+                "destination_url": "https://example.com",
+                "budget_daily_vnd": 431123,
+            }
+
+        def find_latest_pending_web_media(self, **kwargs: object) -> dict[str, object]:
+            return dict(self.pending)
+
+        def update_pending_request(self, request_id: str, updates: dict[str, object]) -> dict[str, object]:
+            assert request_id == "req_1"
+            self.pending.update(updates)
+            return dict(self.pending)
+
+    class FakeMessage:
+        chat = SimpleNamespace(id=7)
+        from_user = SimpleNamespace(id=1)
+
+        def __init__(self) -> None:
+            self.answers: list[str] = []
+
+        async def answer(self, text: str) -> None:
+            self.answers.append(text)
+
+    bot = TelegramAdsBot.__new__(TelegramAdsBot)
+    bot.storage = FakeStorage()
+    bot.settings = _settings()
+    message = FakeMessage()
+
+    replaced = asyncio.run(
+        bot._replace_pending_web_media_url(
+            message,
+            {"media_url": "https://drive.google.com/file/d/correct/view"},
+        )
+    )
+
+    assert replaced is True
+    assert bot.storage.pending["media_url"] == "https://drive.google.com/file/d/correct/view"
+    assert bot.storage.pending["caption"] == "caption"
+    assert bot.storage.pending["headline"] == "headline"
+    assert bot.storage.pending["budget_daily_vnd"] == 431123
+    assert bot.storage.pending["stage"] == "awaiting_budget"
+    assert message.answers == [
+        "Đã cập nhật đúng link file Drive cho job hiện tại. Anh gửi lại ngân sách để em tải media và chạy tiếp."
+    ]
+
+
 def test_web_plan_uses_effective_sku_and_web_naming() -> None:
     plan = build_web_campaign_plan(
         web_input=_web_input(),
@@ -460,6 +573,39 @@ def test_web_video_creative_uses_video_id_and_title() -> None:
     assert data["object_story_spec"]["video_data"]["image_hash"] == "thumbnail_hash_1"
     assert "image_url" not in data["object_story_spec"]["video_data"]
     assert data["contextual_multi_ads"] == {"enroll_status": "OPT_OUT"}
+
+
+def test_web_review_media_preview_uses_uploaded_video() -> None:
+    class Sender:
+        def __init__(self) -> None:
+            self.video_calls: list[dict[str, object]] = []
+            self.photo_calls: list[dict[str, object]] = []
+
+        async def send_video(self, **kwargs: object) -> None:
+            self.video_calls.append(kwargs)
+
+        async def send_photo(self, **kwargs: object) -> None:
+            self.photo_calls.append(kwargs)
+
+    sender = Sender()
+    bot = object.__new__(TelegramAdsBot)
+    bot.logger = logging.getLogger("test")
+
+    asyncio.run(
+        bot._send_web_review_media_preview(
+            sender=sender,  # type: ignore[arg-type]
+            chat_id=1,
+            media_content=b"video-bytes",
+            media_kind="video",
+            media_filename="creative.mp4",
+        )
+    )
+
+    assert len(sender.video_calls) == 1
+    assert sender.video_calls[0]["chat_id"] == 1
+    assert sender.video_calls[0]["caption"] == "Media đã dùng để tạo creative Web (video)."
+    assert sender.video_calls[0]["video"].filename == "creative.mp4"  # type: ignore[union-attr]
+    assert sender.photo_calls == []
 
 
 def test_web_ad_disables_contextual_multi_ads() -> None:

@@ -30,6 +30,7 @@ class ReconcileCodService:
         self.pancake = pancake_client
         self.thai_duong = thai_duong_client
         self._extra_pancake_clients: dict[str, PancakePosClient] = {}
+        self._pancake_product_detail_cache: dict[str, dict[str, Any]] = {}
         self._ensure_layout()
 
     def _ensure_layout(self) -> None:
@@ -45,6 +46,7 @@ class ReconcileCodService:
     def generate_report(self, settlement_date: date | None = None) -> dict[str, Any]:
         errors: dict[str, str] = {}
         warnings: list[str] = []
+        self._pancake_product_detail_cache = {}
         match_cfg = self._load_match_config()
         target_date = settlement_date or self._resolve_default_settlement_date(match_cfg, warnings)
 
@@ -90,6 +92,7 @@ class ReconcileCodService:
             status_map_cfg=status_map_cfg,
         )
         summary = self._build_summary(records)
+        product_detail = self._build_product_detail_summary(records)
         conclusion_totals = self._build_conclusion_totals(
             records,
             settlement=settlement,
@@ -107,6 +110,7 @@ class ReconcileCodService:
             "detail_count": len(detail_rows),
             "pancake_order_count": len(pancake_orders),
             "summary": summary,
+            "product_detail": product_detail,
             "conclusion_totals": conclusion_totals,
             "records": records,
             "warnings": warnings,
@@ -172,6 +176,18 @@ class ReconcileCodService:
             lines.append(
                 f"(Đã quy đổi {converted_count:,} đơn thiếu VNĐ theo tỷ giá {self._format_rate(rate)})"
             )
+        product_detail = report.get("product_detail", {})
+        if isinstance(product_detail, dict):
+            lines.extend(
+                [
+                    "",
+                    f"Chi tiết sản phẩm: {self._to_int(product_detail.get('eligible_order_count')):,} đơn, "
+                    f"{self._to_int(product_detail.get('line_count')):,} dòng.",
+                ]
+            )
+            missing_codes = product_detail.get("missing_product_order_codes", [])
+            if isinstance(missing_codes, list) and missing_codes:
+                lines.append("- Đơn thiếu chi tiết sản phẩm: " + ", ".join(str(item) for item in missing_codes))
         sheet_sync = report.get("sheet_sync", {})
         if isinstance(sheet_sync, dict) and sheet_sync.get("enabled"):
             sheet_status = "OK" if sheet_sync.get("ok") else "LỖI"
@@ -945,6 +961,9 @@ class ReconcileCodService:
                 "pancake_profile": "",
                 "pancake_shop_id": None,
                 "pancake_sheet_label": "",
+                "product_lines": [],
+                "product_detail_status": "not_applicable",
+                "product_detail_error": "",
             }
 
             if not candidates:
@@ -1004,6 +1023,18 @@ class ReconcileCodService:
                 records.append(record)
                 continue
 
+            product_lines, product_error = self._extract_pancake_product_lines(
+                matched,
+                order_id=str(meta.get("order_id", "")).strip(),
+                profile=str(meta.get("profile", "")).strip(),
+            )
+            record["product_lines"] = product_lines
+            if product_lines:
+                record["product_detail_status"] = "ok"
+            else:
+                record["product_detail_status"] = "missing"
+                record["product_detail_error"] = product_error
+
             if self._to_optional_int(meta.get("status")) == target_status_int:
                 record["match_result"] = "already_correct"
                 record["reason"] = "Đơn Pancake đã ở đúng trạng thái."
@@ -1038,6 +1069,267 @@ class ReconcileCodService:
             records.append(record)
 
         return records
+
+    def _build_product_detail_summary(self, records: list[dict[str, Any]]) -> dict[str, Any]:
+        eligible_order_ids: set[str] = set()
+        line_count = 0
+        missing_orders: list[str] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            if str(record.get("match_result", "")).strip() not in {"matched_unique", "already_correct"}:
+                continue
+            order_id = str(record.get("pancake_order_id", "")).strip()
+            if order_id:
+                eligible_order_ids.add(order_id)
+            product_lines = record.get("product_lines", [])
+            if isinstance(product_lines, list) and product_lines:
+                line_count += len(product_lines)
+                continue
+            display_id = str(record.get("pancake_display_id", "")).strip() or order_id
+            if display_id and display_id not in missing_orders:
+                missing_orders.append(display_id)
+        return {
+            "eligible_order_count": len(eligible_order_ids),
+            "line_count": line_count,
+            "missing_product_order_count": len(missing_orders),
+            "missing_product_order_codes": missing_orders,
+        }
+
+    def _extract_pancake_product_lines(
+        self,
+        order: dict[str, Any],
+        *,
+        order_id: str,
+        profile: str,
+    ) -> tuple[list[dict[str, Any]], str]:
+        cache_key = f"{self._normalize_profile_name(profile)}|{order_id}"
+        if cache_key in self._pancake_product_detail_cache:
+            cached = self._pancake_product_detail_cache[cache_key]
+            return (
+                list(cached.get("lines", [])),
+                str(cached.get("error", "")).strip(),
+            )
+
+        raw_items = order.get("items") if isinstance(order, dict) else None
+        detail_error = ""
+        if not isinstance(raw_items, list) or not raw_items:
+            detail_fn = None
+            if order_id:
+                try:
+                    client = self._get_pancake_client_for_profile(profile)
+                    detail_fn = getattr(client, "get_order_detail", None)
+                    if callable(detail_fn):
+                        detail_payload = detail_fn(order_id)
+                        if isinstance(detail_payload, dict):
+                            raw_items = detail_payload.get("items")
+                except Exception as exc:  # noqa: BLE001
+                    detail_error = f"Không lấy được chi tiết sản phẩm đơn {order_id}: {exc}"
+            if not isinstance(raw_items, list) or not raw_items:
+                if not detail_error:
+                    detail_error = "Pancake không trả danh sách sản phẩm cho đơn đã match."
+                self._pancake_product_detail_cache[cache_key] = {"lines": [], "error": detail_error}
+                return [], detail_error
+
+        aggregate: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            sku = self._extract_product_sku(item)
+            quantity = self._extract_product_quantity(item)
+            if not sku:
+                detail_error = "Thiếu mã sản phẩm/SKU trong dữ liệu Pancake."
+                break
+            if quantity is None or quantity <= 0:
+                detail_error = f"Số lượng sản phẩm không hợp lệ cho SKU {sku}."
+                break
+            # Blank optional attributes stay blank; do not invent product data.
+            color = self._extract_product_color(item)
+            size = self._extract_product_size(item)
+            sale_price = self._extract_product_sale_price(item)
+            key = (
+                self._normalize_product_key(sku),
+                self._normalize_product_key(color),
+                self._normalize_product_key(size),
+            )
+            current = aggregate.get(key)
+            if current is None:
+                aggregate[key] = {
+                    "sku": sku,
+                    "color": color,
+                    "size": size,
+                    "quantity": quantity,
+                }
+                if sale_price is not None:
+                    aggregate[key]["sale_price"] = sale_price
+            else:
+                current["quantity"] = int(current.get("quantity", 0)) + quantity
+                if sale_price is not None:
+                    existing_price = self._to_optional_float(current.get("sale_price"))
+                    if existing_price is None:
+                        current["sale_price"] = sale_price
+                    elif abs(existing_price - sale_price) > 1e-9:
+                        # The same variant was sold at different prices in one order.
+                        # Leave the field blank instead of choosing an arbitrary price.
+                        current["sale_price"] = None
+
+        lines = list(aggregate.values()) if not detail_error else []
+        self._pancake_product_detail_cache[cache_key] = {"lines": lines, "error": detail_error}
+        return lines, detail_error
+
+    @staticmethod
+    def _product_dicts(item: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return known Pancake item/variation containers without guessing values."""
+        result: list[dict[str, Any]] = []
+        queue: list[Any] = [item]
+        seen: set[int] = set()
+        while queue:
+            current = queue.pop(0)
+            if not isinstance(current, dict) or id(current) in seen:
+                continue
+            seen.add(id(current))
+            result.append(current)
+            for key in ("variation_info", "variation", "variant", "product", "product_info"):
+                nested = current.get(key)
+                if isinstance(nested, dict):
+                    queue.append(nested)
+        return result
+
+    @staticmethod
+    def _product_field_value(container: dict[str, Any], keys: tuple[str, ...]) -> str:
+        for key in keys:
+            value = container.get(key)
+            if isinstance(value, dict):
+                value = value.get("value") or value.get("name") or value.get("keyValue")
+            if isinstance(value, (str, int, float)) and str(value).strip():
+                return str(value).strip()
+        return ""
+
+    def _extract_named_product_field(
+        self,
+        container: dict[str, Any],
+        *,
+        name_tokens: tuple[str, ...],
+    ) -> str:
+        for key in ("fields", "options", "attributes", "properties", "field_values"):
+            fields = container.get(key)
+            if isinstance(fields, dict):
+                fields = [fields]
+            if not isinstance(fields, list):
+                continue
+            for field in fields:
+                if not isinstance(field, dict):
+                    continue
+                field_name = self._normalize_compare_text(
+                    str(field.get("name") or field.get("label") or field.get("key") or field.get("title") or "")
+                )
+                if not any(token in field_name for token in name_tokens):
+                    continue
+                value = self._product_field_value(field, ("value", "keyValue", "text", "name"))
+                if value:
+                    return value
+        return ""
+
+    def _extract_product_sku(self, item: dict[str, Any]) -> str:
+        for container in self._product_dicts(item):
+            value = self._product_field_value(
+                container,
+                ("sku", "variation_sku", "product_code", "code", "custom_id", "display_id"),
+            )
+            if value:
+                return value
+        return ""
+
+    def _extract_product_color(self, item: dict[str, Any]) -> str:
+        for container in self._product_dicts(item):
+            value = self._product_field_value(
+                container,
+                ("color", "colour", "color_name", "colour_name", "mau"),
+            )
+            if value:
+                return value
+            value = self._extract_named_product_field(container, name_tokens=("mau", "color", "colour"))
+            if value:
+                return value
+        return ""
+
+    def _extract_product_size(self, item: dict[str, Any]) -> str:
+        for container in self._product_dicts(item):
+            value = self._product_field_value(container, ("size", "size_name", "kich_co", "kich_thuoc"))
+            if value:
+                return value
+            value = self._extract_named_product_field(
+                container,
+                name_tokens=("size", "kich co", "kich thuoc"),
+            )
+            if value:
+                return value
+        return ""
+
+    def _extract_product_quantity(self, item: dict[str, Any]) -> int | None:
+        for container in self._product_dicts(item):
+            for key in ("quantity", "qty", "count"):
+                raw = container.get(key)
+                if raw is None or str(raw).strip() == "":
+                    continue
+                try:
+                    numeric = float(raw)
+                except (TypeError, ValueError):
+                    return None
+                if not numeric.is_integer():
+                    return None
+                return int(numeric)
+        return None
+
+    def _extract_product_sale_price(self, item: dict[str, Any]) -> int | float | None:
+        """Return the Pancake unit sale price in major THB units.
+
+        Pancake returns order prices in minor units (for example 250000 means
+        2500 THB). Prefer an item-level price when available, then fall back to
+        the variation retail price used by the order.
+        """
+        price: float | None = None
+        for container in self._product_dicts(item):
+            raw = self._product_field_value(
+                container,
+                ("price", "sale_price", "unit_price", "selling_price"),
+            )
+            price = self._to_optional_float(raw)
+            if price is not None:
+                break
+        if price is None:
+            for container in self._product_dicts(item):
+                raw = self._product_field_value(
+                    container,
+                    (
+                        "retail_price",
+                        "retail_price_currency_original",
+                        "retail_price_by_weight",
+                        "retail_price_original",
+                    ),
+                )
+                price = self._to_optional_float(raw)
+                if price is not None:
+                    break
+        if price is None or price < 0:
+            return None
+        factor = max(
+            1,
+            self._to_int(
+                getattr(self.settings, "report_thb_minor_unit_factor", 100),
+                fallback=100,
+            ),
+        )
+        major = price / float(factor)
+        if abs(major - round(major)) < 1e-9:
+            return int(round(major))
+        return round(major, 2)
+
+    @staticmethod
+    def _normalize_product_key(value: Any) -> str:
+        raw = unicodedata.normalize("NFKD", str(value or "").lower())
+        stripped = "".join(ch for ch in raw if not unicodedata.combining(ch))
+        return re.sub(r"[^a-z0-9]+", "", stripped)
 
     @staticmethod
     def _build_summary(records: list[dict[str, Any]]) -> dict[str, int]:
@@ -1652,7 +1944,7 @@ class ReconcileCodService:
     def _normalize_compare_text(text: str) -> str:
         normalized = unicodedata.normalize("NFKD", str(text or "").lower())
         stripped = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-        return re.sub(r"\s+", " ", stripped).strip()
+        return re.sub(r"\s+", " ", stripped.replace("đ", "d")).strip()
 
     @staticmethod
     def _to_optional_int(value: Any) -> int | None:
@@ -1732,3 +2024,4 @@ class ReconcileCodService:
             except ValueError:
                 continue
         return None
+
