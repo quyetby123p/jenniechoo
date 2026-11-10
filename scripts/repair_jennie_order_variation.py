@@ -122,6 +122,23 @@ def _replace_item_variation(
         if isinstance(item, dict) and _item_code(bridge, item) == normalized_code
     ]
     if occurrence < 1 or occurrence > len(candidates):
+        debug_items = []
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            info = item.get("variation_info")
+            info = info if isinstance(info, dict) else {}
+            debug_items.append({
+                "index": index,
+                "item_keys": sorted(str(key) for key in item.keys()),
+                "variation_info_keys": sorted(str(key) for key in info.keys()),
+                "variation_values": [
+                    str(info.get(key, ""))[:160]
+                    for key in ("id", "variation_id", "sku", "custom_id", "product_code", "name")
+                    if info.get(key) not in (None, "")
+                ],
+            })
+        print(f"DEBUG item candidates: {debug_items}")
         raise ValidationError(
             f"Đơn không có lần xuất hiện thứ {occurrence} của {normalized_code}; "
             f"tìm thấy {len(candidates)} item."
