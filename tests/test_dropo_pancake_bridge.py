@@ -421,7 +421,7 @@ def test_jennie_summary_color_wins_over_shared_color_for_each_item():
     ]
 
 
-def test_jennie_cart_summary_maps_title_only_items_by_order():
+def test_jennie_cart_summary_maps_code_tagged_items_by_order():
     bridge, _, _ = build_bridge([HEADER])
     bridge._pancake_catalog = {
         "JC-A-260": [{

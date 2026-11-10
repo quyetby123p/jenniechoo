@@ -447,7 +447,7 @@ class DropoPancakeBridge:
             get("Tóm tắt đơn", "Tóm tắt", "tom_tat", "summary", "san_pham")
         )
         summary_sequence = summary_options.get("__sequence__", [])
-        if len(codes) > 1 and summary_sequence and len(summary_sequence) != len(codes):
+        if summary_sequence and len(summary_sequence) != len(codes):
             raise ValidationError(
                 "tóm tắt đơn không đủ dòng để đối chiếu mã sản phẩm trong bundle"
             )
@@ -486,15 +486,19 @@ class DropoPancakeBridge:
             # line. Without it, the shared color/size columns are ambiguous:
             # they often contain the first product's choice and can silently
             # map a later black item to the cream variation.
-            if len(codes) > 1 and summary_sequence:
+            if summary_sequence:
                 sequential_option = summary_sequence[index - 1]
                 sequential_code = self._normalize_jennie_code(
                     sequential_option.get("code")
                 )
-                if sequential_code != code:
+                if sequential_code and sequential_code != code:
                     raise ValidationError(
                         f"tóm tắt đơn lệch thứ tự/mã sản phẩm tại item {index}: "
                         f"cần {code}, nhận {sequential_code or '?'}"
+                    )
+                if len(codes) > 1 and not sequential_code:
+                    raise ValidationError(
+                        f"tóm tắt đơn thiếu mã sản phẩm tại item {index} ({code})"
                     )
                 summary_option = sequential_option
             # Tóm tắt đơn là snapshot lựa chọn theo từng sản phẩm tại lúc
