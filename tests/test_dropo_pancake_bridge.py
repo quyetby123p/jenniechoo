@@ -422,6 +422,61 @@ def test_jennie_summary_color_wins_over_shared_color_for_each_item():
     ]
 
 
+def test_jennie_cart_summary_maps_title_only_items_by_order():
+    bridge, _, _ = build_bridge([HEADER])
+    bridge._pancake_catalog = {
+        "JC-A-260": [{
+            "variation_id": "jca260-kem-s",
+            "variation_sku": "JC-A-260-KEM-S",
+            "size": "S",
+            "field_values": ["Kem", "S"],
+            "retail_price": 190000,
+        }],
+        "JC-CV-232": [{
+            "variation_id": "jccv232-den-s",
+            "variation_sku": "JC-CV-232-DEN-S",
+            "size": "S",
+            "field_values": ["Đen", "S"],
+            "retail_price": 210000,
+        }],
+        "JC-A-250": [
+            {
+                "variation_id": "jca250-kem-s",
+                "variation_sku": "JC-A-250-KEM-S",
+                "size": "S",
+                "field_values": ["Kem", "S"],
+                "retail_price": 250000,
+            },
+            {
+                "variation_id": "jca250-den-s",
+                "variation_sku": "JC-A-250-DEN-S",
+                "size": "S",
+                "field_values": ["Đen", "S"],
+                "retail_price": 250000,
+            },
+        ],
+    }
+    header = ["SKU Code", "Mã sản phẩm", "Màu", "Size", "Số lượng", "Tóm tắt đơn"]
+    row = [
+        "JC-A-260, JC-CV-232, JC-A-250",
+        "JC-A-260",
+        "Kem",
+        "S",
+        "3",
+        "เสื้อ Soya Tea-shirt JCA260 (Kem/S) x1 · ฿1,900 | "
+        "กระโปรง Ivory Poise Skirt (Đen/S) x1 · ฿2,100 | "
+        "เสื้อ Morning Veil Top (Đen/S) x1 · ฿2,500",
+    ]
+
+    items = bridge.resolve_jennie_items(row, header)
+
+    assert [item["variation_id"] for item in items] == [
+        "jca260-kem-s",
+        "jccv232-den-s",
+        "jca250-den-s",
+    ]
+
+
 def test_jennie_payload_uses_web_source_column_instead_of_dropo_fallback():
     header = HEADER + ["Nguồn"]
     row = make_row(**{"Nguồn": "https://th.jcdejc.com/?jcpost=1"}) + [

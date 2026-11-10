@@ -446,6 +446,7 @@ class DropoPancakeBridge:
         summary_options = self._parse_jennie_summary(
             get("Tóm tắt đơn", "Tóm tắt", "tom_tat", "summary", "san_pham")
         )
+        summary_sequence = summary_options.get("__sequence__", [])
         summary_occurrences: dict[str, int] = {}
         detail_rows = [row] + list(bundle_rows or [])
         items: list[dict[str, Any]] = []
@@ -477,6 +478,17 @@ class DropoPancakeBridge:
                 else {}
             )
             summary_occurrences[code] = occurrence + 1
+            # Product titles in the checkout summary do not always contain a
+            # SKU. In that format, preserve the cart order as the source of
+            # truth for each item's color/size instead of reusing the first
+            # row's shared color.
+            if not summary_option and index <= len(summary_sequence):
+                sequential_option = summary_sequence[index - 1]
+                sequential_code = self._normalize_jennie_code(
+                    sequential_option.get("code")
+                )
+                if not sequential_code or sequential_code == code:
+                    summary_option = sequential_option
             # Tóm tắt đơn là snapshot lựa chọn theo từng sản phẩm tại lúc
             # checkout. Ưu tiên nó trước các cột Màu/Size dùng chung của dòng
             # chính; các cột dùng chung có thể còn giữ lựa chọn của sản phẩm
@@ -541,23 +553,34 @@ class DropoPancakeBridge:
         if not text:
             return {}
         result: dict[str, list[dict[str, Any]]] = {}
-        pattern = re.compile(
-            r"(?P<code>JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+))\s*"
+        choice_pattern = re.compile(
             r"\((?P<color>[^()/|]+)\s*/\s*(?P<size>[^()|]+)\)"
             r"\s*x\s*(?P<quantity>\d+)",
             re.IGNORECASE,
         )
-        for match in pattern.finditer(text):
-            code = cls._normalize_jennie_code(match.group("code"))
-            if not code:
+        code_pattern = re.compile(r"JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+)", re.IGNORECASE)
+        sequence: list[dict[str, Any]] = []
+        for segment in re.split(r"\s*\|\s*", text):
+            match = choice_pattern.search(segment)
+            if not match:
                 continue
-            result.setdefault(code, []).append(
-                {
-                    "color": match.group("color").strip(),
-                    "size": match.group("size").strip(),
-                    "quantity": int(match.group("quantity")),
-                }
+            code_matches = list(code_pattern.finditer(segment[: match.start()]))
+            code = (
+                cls._normalize_jennie_code(code_matches[-1].group(0))
+                if code_matches
+                else ""
             )
+            item = {
+                "code": code,
+                "color": match.group("color").strip(),
+                "size": match.group("size").strip(),
+                "quantity": int(match.group("quantity")),
+            }
+            sequence.append(item)
+            if code:
+                result.setdefault(code, []).append(item)
+        if sequence:
+            result["__sequence__"] = sequence
         return result
 
     def resolve_items(self, selected_skus: str, fallback_sku: str = "") -> list[dict[str, Any]]:
