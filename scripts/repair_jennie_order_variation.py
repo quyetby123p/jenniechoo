@@ -89,9 +89,17 @@ def _item_code(bridge: DropoPancakeBridge, item: dict[str, Any]) -> str:
         item.get("custom_id"),
         item.get("sku"),
     ):
-        code = bridge._normalize_jennie_code(value)
+        raw = str(value or "").strip()
+        code = bridge._normalize_jennie_code(raw)
         if code.startswith("JC-") and re.search(r"\d", code):
             return code
+        # Pancake order details can return a variation SKU with a human
+        # description appended, e.g. ``JC-A-250-BE: AO REN MAU BE-S``.
+        # Extract the product code before normalizing the full variation SKU.
+        for match in re.finditer(r"JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+)", raw, re.IGNORECASE):
+            embedded = bridge._normalize_jennie_code(match.group(0))
+            if embedded.startswith("JC-") and re.search(r"\d", embedded):
+                return embedded
     return ""
 
 
