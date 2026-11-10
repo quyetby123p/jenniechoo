@@ -208,6 +208,7 @@ def test_routes_render_success(tmp_path: Path) -> None:
     assert client.get("/?date=2026-06-01").status_code == 200
     assert client.get("/baocao?date=2026-06-01").status_code == 200
     assert client.get("/baocaofb?date=2026-06-01").status_code == 200
+    assert client.post("/baocaofb?mode=range&start_date=2026-06-01&end_date=2026-06-01").status_code == 200
     assert client.get("/brand/jennie-choo?date=2026-06-01").status_code == 200
     assert client.get("/status/waiting?date=2026-06-01").status_code == 200
     assert client.get("/status/shipping?date=2026-06-01").status_code == 200

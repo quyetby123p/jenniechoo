@@ -104,10 +104,11 @@ def create_app(
             return jsonify({"ok": False, "error": "Không tải được dữ liệu báo cáo lúc này."}), 503
         return jsonify(snapshot)
 
-    @app.get("/ruza")
-    @app.get("/baocaofb")
-    @app.get("/baocao")
-    @app.get("/")
+    # Accept POST as well as GET so a browser/form retry cannot turn the dashboard link into a 405.
+    @app.route("/ruza", methods=["GET", "POST"])
+    @app.route("/baocaofb", methods=["GET", "POST"])
+    @app.route("/baocao", methods=["GET", "POST"])
+    @app.route("/", methods=["GET", "POST"])
     def dashboard():  # type: ignore[no-untyped-def]
         report = _report_for_path(
             request.path,
