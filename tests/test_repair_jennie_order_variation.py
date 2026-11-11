@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app.dropo_pancake_bridge import DropoPancakeBridge
-from scripts.repair_jennie_order_variation import _item_code, _replace_item_variation
+from scripts.repair_jennie_order_variation import _guard, _item_code, _replace_item_variation
 
 
 def _bridge_stub():
@@ -123,3 +123,22 @@ def test_replace_variation_always_writes_item_level_variation_id():
     assert "actual_variation_info" not in updated["items"][0]
     assert "variation_values" not in updated["items"][0]
     assert "components" not in updated["items"][0]
+
+
+def test_guard_ignores_pancake_audit_history_but_keeps_order_fields():
+    before = {
+        "status": "new",
+        "histories": [{"id": "h1"}],
+        "items": [{"variation_id": "cream-s"}],
+    }
+    after = {
+        "status": "new",
+        "histories": [{"id": "h1"}, {"id": "h2"}],
+        "items": [{"variation_id": "black-s"}],
+    }
+
+    assert _guard(before) == _guard(after)
+
+    changed = dict(after)
+    changed["status"] = "confirmed"
+    assert _guard(before) != _guard(changed)
