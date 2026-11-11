@@ -255,6 +255,10 @@ _SERVER_MANAGED_ORDER_FIELDS = frozenset(
         "lastUpdatedAt",
         "last_modified_at",
         "lastModifiedAt",
+        # Pancake appends an audit entry whenever an order item is changed.
+        # It is server-generated history, not customer/order data submitted
+        # by this repair, so it must not trip the non-item mutation guard.
+        "histories",
     }
 )
 
