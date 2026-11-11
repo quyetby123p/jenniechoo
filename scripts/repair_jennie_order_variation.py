@@ -79,6 +79,28 @@ def _find_order(client: PancakePosClient, custom_id: str) -> dict[str, Any]:
 
 
 def _item_code(bridge: DropoPancakeBridge, item: dict[str, Any]) -> str:
+    def _base_code(raw: Any) -> str:
+        text = str(raw or "").strip()
+        if not text:
+            return ""
+        normalized = bridge._normalize_jennie_code(text)
+        if re.fullmatch(r"JC-(?:CV|[VAQ])-\d+T?", normalized):
+            return normalized
+        # Make every separator equivalent, then match only the product-code
+        # prefix. This also handles JCA250/JCCV232 aliases from product names.
+        compact = re.sub(r"[^A-Z0-9]+", "-", text.upper()).strip("-")
+        patterns = (
+            r"(JC-(?:CV|[VAQ])-\d+T?)(?:-|$)",
+            r"(JCCV\d+T?|JC[VAQ]\d+T?)(?:-|$)",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, compact)
+            if match:
+                candidate = bridge._normalize_jennie_code(match.group(1))
+                if re.fullmatch(r"JC-(?:CV|[VAQ])-\d+T?", candidate):
+                    return candidate
+        return ""
+
     def _strings(value: Any):
         """Yield every scalar string; Pancake nests SKU data inconsistently."""
         if isinstance(value, dict):
@@ -97,19 +119,9 @@ def _item_code(bridge: DropoPancakeBridge, item: dict[str, Any]) -> str:
         raw = raw.strip()
         if not raw:
             continue
-        code = bridge._normalize_jennie_code(raw)
-        if re.fullmatch(r"JC-(?:CV|[VAQ])-\d+T?", code):
+        code = _base_code(raw)
+        if code:
             return code
-        # Pancake can return a descriptive variation SKU such as
-        # ``JC-A-250-BE: AO REN MAU BE-S``. Extract only the base product code.
-        # Normalize punctuation too: some responses contain a non-breaking or
-        # typographic hyphen even though the value looks identical in logs.
-        haystacks = (raw, re.sub(r"[^A-Z0-9]+", "-", raw.upper()))
-        for haystack in haystacks:
-            for match in re.finditer(r"JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+)", haystack, re.IGNORECASE):
-                embedded = bridge._normalize_jennie_code(match.group(0))
-                if re.fullmatch(r"JC-(?:CV|[VAQ])-\d+T?", embedded):
-                    return embedded
     return ""
 
 
@@ -140,6 +152,7 @@ def _replace_item_variation(
             info = info if isinstance(info, dict) else {}
             debug_items.append({
                 "index": index,
+                "detected_code": _item_code(bridge, item),
                 "item_keys": sorted(str(key) for key in item.keys()),
                 "variation_info_keys": sorted(str(key) for key in info.keys()),
                 "variation_values": [
