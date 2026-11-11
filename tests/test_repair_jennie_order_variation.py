@@ -28,3 +28,13 @@ def test_item_code_reads_nested_variation_values():
     }
 
     assert _item_code(_bridge_stub(), item) == "JC-A-260"
+
+
+def test_item_code_handles_typographic_hyphens():
+    item = {
+        "variation_info": {
+            "custom_id": "JC‑A‑250‑BE: AO REN MAU BE-S",
+        }
+    }
+
+    assert _item_code(_bridge_stub(), item) == "JC-A-250"
