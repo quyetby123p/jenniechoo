@@ -285,6 +285,29 @@ def _guard(order: dict[str, Any]) -> dict[str, Any]:
     return strip_server_fields(snapshot)
 
 
+def _changed_paths(before: Any, after: Any, path: str = "") -> list[str]:
+    """Return compact paths for a failed non-item mutation guard."""
+    if isinstance(before, dict) and isinstance(after, dict):
+        paths: list[str] = []
+        for key in sorted(set(before) | set(after)):
+            child_path = f"{path}.{key}" if path else str(key)
+            if key not in before or key not in after:
+                paths.append(child_path)
+            else:
+                paths.extend(_changed_paths(before[key], after[key], child_path))
+        return paths
+    if isinstance(before, list) and isinstance(after, list):
+        paths: list[str] = []
+        for index in range(max(len(before), len(after))):
+            child_path = f"{path}[{index}]"
+            if index >= len(before) or index >= len(after):
+                paths.append(child_path)
+            else:
+                paths.extend(_changed_paths(before[index], after[index], child_path))
+        return paths
+    return [] if before == after else [path or "<root>"]
+
+
 def repair(args: argparse.Namespace) -> int:
     logger = build_logger()
     _apply_config_defaults("")
@@ -330,8 +353,14 @@ def repair(args: argparse.Namespace) -> int:
     )
     client._request("PUT", path, data=updated)
     latest = client.get_order_detail(order_id)
-    if _guard(current) != _guard(latest):
-        raise PancakeApiError("Cập nhật đã làm thay đổi dữ liệu ngoài danh sách items.")
+    current_guard = _guard(current)
+    latest_guard = _guard(latest)
+    if current_guard != latest_guard:
+        changed = _changed_paths(current_guard, latest_guard)
+        raise PancakeApiError(
+            "Cập nhật đã làm thay đổi dữ liệu ngoài danh sách items: "
+            + ", ".join(changed[:20])
+        )
     persisted_items = latest.get("items")
     if not isinstance(persisted_items, list):
         raise PancakeApiError("Pancake không trả lại items sau khi cập nhật.")
