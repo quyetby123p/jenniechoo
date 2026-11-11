@@ -241,10 +241,48 @@ def _replace_item_variation(
     }
 
 
+_SERVER_MANAGED_ORDER_FIELDS = frozenset(
+    {
+        "updated_at",
+        "updatedAt",
+        "update_time",
+        "updateTime",
+        "updated_time",
+        "updatedTime",
+        "modified_at",
+        "modifiedAt",
+        "last_updated_at",
+        "lastUpdatedAt",
+        "last_modified_at",
+        "lastModifiedAt",
+    }
+)
+
+
 def _guard(order: dict[str, Any]) -> dict[str, Any]:
+    """Snapshot order data that the item update is not allowed to mutate.
+
+    Pancake refreshes server-managed timestamps when an order item changes.
+    Those fields are expected side effects of a successful update and must not
+    make a verified color/size repair look like a customer-data mutation.
+    All customer, payment, address, status, total and non-target-item fields
+    remain part of this guard.
+    """
+
+    def strip_server_fields(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: strip_server_fields(child)
+                for key, child in value.items()
+                if key not in _SERVER_MANAGED_ORDER_FIELDS
+            }
+        if isinstance(value, list):
+            return [strip_server_fields(child) for child in value]
+        return value
+
     snapshot = copy.deepcopy(order)
     snapshot.pop("items", None)
-    return snapshot
+    return strip_server_fields(snapshot)
 
 
 def repair(args: argparse.Namespace) -> int:
