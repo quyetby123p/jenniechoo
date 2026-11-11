@@ -38,3 +38,28 @@ def test_item_code_handles_typographic_hyphens():
     }
 
     assert _item_code(_bridge_stub(), item) == "JC-A-250"
+
+
+def test_choose_variation_prefers_exact_black_token_over_cream_description():
+    candidates = [
+        {
+            "variation_id": "cream-s",
+            "variation_sku": "JC-A-250-BE: AO REN MAU BE-S",
+            "size": "S",
+            "field_values": ["JC-A-250-BE: AO REN MAU BE-S"],
+        },
+        {
+            "variation_id": "black-s",
+            "variation_sku": "JC-A-250-DEN: AO DEN-S",
+            "size": "S",
+            "field_values": ["JC-A-250-DEN: AO DEN-S"],
+        },
+    ]
+
+    chosen = DropoPancakeBridge._choose_jennie_variation(
+        candidates,
+        color="Đen",
+        size="S",
+    )
+
+    assert chosen["variation_id"] == "black-s"
