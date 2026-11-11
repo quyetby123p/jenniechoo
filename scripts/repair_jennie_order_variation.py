@@ -193,8 +193,11 @@ def _replace_item_variation(
     if chosen.get("retail_price") not in (None, ""):
         new_info["retail_price"] = chosen["retail_price"]
     new_item["variation_info"] = new_info
-    if "variation_id" in new_item:
-        new_item["variation_id"] = variation_id
+    # Pancake uses the item-level variation_id as the authoritative product
+    # reference when updating an order.  Some order responses omit this key
+    # and expose the ID only inside variation_info; always write the canonical
+    # item-level field so those orders cannot silently retain the old color.
+    new_item["variation_id"] = variation_id
     if "sku" in new_item:
         new_item["sku"] = sku
     new_order["items"][index] = new_item
