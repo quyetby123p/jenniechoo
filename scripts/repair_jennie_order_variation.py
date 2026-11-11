@@ -208,24 +208,30 @@ def _replace_item_variation(
         raise ValidationError("Catalog Pancake thiếu variation_sku hoặc variation_id.")
 
     new_order = copy.deepcopy(order)
-    new_item = copy.deepcopy(old_item)
     old_info = old_item.get("variation_info")
-    new_info = copy.deepcopy(old_info) if isinstance(old_info, dict) else {}
-    new_info["id"] = variation_id
-    new_info["variation_id"] = variation_id
-    new_info["sku"] = sku
-    new_info["custom_id"] = sku
-    new_info["product_code"] = normalized_code
-    if chosen.get("retail_price") not in (None, ""):
-        new_info["retail_price"] = chosen["retail_price"]
-    new_item["variation_info"] = new_info
-    # Pancake uses the item-level variation_id as the authoritative product
-    # reference when updating an order.  Some order responses omit this key
-    # and expose the ID only inside variation_info; always write the canonical
-    # item-level field so those orders cannot silently retain the old color.
+    # The GET response contains many read-only/display fields (including the
+    # old variation_info, actual_variation_info, variation_values, and
+    # components).  Pancake's update schema accepts the canonical item fields;
+    # sending the stale display payload can make the API silently rehydrate the
+    # previous color after a successful PUT.
+    update_item_keys = (
+        "discount_each_product",
+        "is_bonus_product",
+        "is_discount_percent",
+        "is_wholesale",
+        "one_time_product",
+        "quantity",
+    )
+    new_item = {
+        key: copy.deepcopy(old_item[key])
+        for key in update_item_keys
+        if key in old_item
+    }
+    if "product_id" in old_item:
+        new_item["product_id"] = old_item["product_id"]
+    elif isinstance(old_info, dict) and old_info.get("product_id"):
+        new_item["product_id"] = old_info["product_id"]
     new_item["variation_id"] = variation_id
-    if "sku" in new_item:
-        new_item["sku"] = sku
     new_order["items"][index] = new_item
     return new_order, {
         "index": index,

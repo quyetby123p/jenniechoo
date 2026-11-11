@@ -93,9 +93,15 @@ def test_replace_variation_always_writes_item_level_variation_id():
     order = {
         "items": [
             {
+                "product_id": "product-250",
+                "variation_id": "cream-s",
+                "quantity": 1,
                 "variation_info": {
                     "custom_id": "JC-A-250-BE: AO REN MAU BE-S",
-                }
+                },
+                "actual_variation_info": {"id": "cream-s"},
+                "variation_values": ["JC-A-250-BE: AO REN MAU BE-S"],
+                "components": [{"variation_id": "cream-s"}],
             }
         ]
     }
@@ -111,3 +117,9 @@ def test_replace_variation_always_writes_item_level_variation_id():
 
     assert change["variation_id"] == "black-s"
     assert updated["items"][0]["variation_id"] == "black-s"
+    assert updated["items"][0]["product_id"] == "product-250"
+    assert updated["items"][0]["quantity"] == 1
+    assert "variation_info" not in updated["items"][0]
+    assert "actual_variation_info" not in updated["items"][0]
+    assert "variation_values" not in updated["items"][0]
+    assert "components" not in updated["items"][0]
