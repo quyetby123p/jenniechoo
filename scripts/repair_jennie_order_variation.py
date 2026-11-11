@@ -264,12 +264,28 @@ def repair(args: argparse.Namespace) -> int:
         raise PancakeApiError("Pancake không trả lại items sau khi cập nhật.")
     persisted = persisted_items[change["index"]]
     persisted_info = persisted.get("variation_info") if isinstance(persisted, dict) else {}
-    persisted_sku = str((persisted_info or {}).get("sku", "")).strip() if isinstance(persisted_info, dict) else ""
-    if persisted_sku != change["new_sku"]:
+    persisted_values: set[str] = set()
+    for source in (
+        persisted if isinstance(persisted, dict) else {},
+        persisted_info if isinstance(persisted_info, dict) else {},
+        persisted.get("actual_variation_info", {}) if isinstance(persisted, dict) else {},
+    ):
+        if isinstance(source, dict):
+            for key in ("variation_id", "id", "sku", "custom_id"):
+                value = str(source.get(key, "")).strip()
+                if value:
+                    persisted_values.add(value)
+    if change["new_sku"] not in persisted_values and change["variation_id"] not in persisted_values:
         raise PancakeApiError(
-            f"Pancake chưa lưu đúng biến thể: expected={change['new_sku']}, actual={persisted_sku}."
+            f"Pancake chưa lưu đúng biến thể: expected={change['new_sku']} / "
+            f"{change['variation_id']}, actual={sorted(persisted_values)}."
         )
-    logger.info("Đã sửa %s: %s -> %s", args.custom_id, change["old_sku"], persisted_sku)
+    logger.info(
+        "Đã sửa %s: %s -> %s",
+        args.custom_id,
+        change["old_sku"],
+        change["new_sku"],
+    )
     return 0
 
 

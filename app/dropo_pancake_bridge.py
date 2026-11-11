@@ -1588,6 +1588,29 @@ class DropoPancakeBridge:
         return re.sub(r"[^A-Z0-9]", "", text.upper())
 
     @staticmethod
+    def _color_tokens(value: Any) -> set[str]:
+        """Return accent-safe color tokens without substring false positives."""
+        text = str(value or "").replace("Đ", "D").replace("đ", "d")
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        return {token for token in re.findall(r"[A-Z0-9]+", text.upper()) if token}
+
+    @classmethod
+    def _color_match_tokens(cls, value: Any) -> set[str]:
+        """Add catalog abbreviations used by the JC/Pancake color SKUs."""
+        tokens = cls._color_tokens(value)
+        aliases = {
+            "DEN": {"DEN", "BLACK"},
+            "KEM": {"KEM", "BE", "CREAM", "IVORY"},
+            "TRANG": {"TRANG", "WHITE"},
+            "XANH": {"XANH", "BLUE", "GREEN"},
+        }
+        expanded = set(tokens)
+        for token in tokens:
+            expanded.update(aliases.get(token, set()))
+        return expanded
+
+    @staticmethod
     def _norm_geo_match(value: Any) -> str:
         """Chuẩn hóa tên địa danh nhưng giữ chữ Thái để còn match được."""
         text = unicodedata.normalize("NFKC", str(value or "")).casefold()
@@ -1609,11 +1632,19 @@ class DropoPancakeBridge:
         if not color_key:
             return sized[0]
         scored: list[tuple[int, dict[str, Any]]] = []
+        target_color_tokens = cls._color_match_tokens(color)
         for candidate in sized:
-            haystack = cls._norm_match(" ".join(candidate.get("field_values", [])))
+            raw_values = " ".join(candidate.get("field_values", []))
+            haystack = cls._norm_match(raw_values)
             if not haystack:
                 continue
-            if color_key == haystack:
+            candidate_color_tokens = cls._color_tokens(raw_values)
+            exact_color_tokens = target_color_tokens & candidate_color_tokens
+            if exact_color_tokens:
+                # Explicit SKU/field tokens beat fuzzy text matches. This
+                # prevents Đen -> EN from matching REN in a cream SKU.
+                score = 100 + len(exact_color_tokens)
+            elif color_key == haystack:
                 score = 3
             elif color_key in haystack:
                 score = 2
