@@ -79,23 +79,29 @@ def _find_order(client: PancakePosClient, custom_id: str) -> dict[str, Any]:
 
 
 def _item_code(bridge: DropoPancakeBridge, item: dict[str, Any]) -> str:
-    info = item.get("variation_info")
-    info = info if isinstance(info, dict) else {}
-    for value in (
-        info.get("product_code"),
-        info.get("custom_id"),
-        info.get("sku"),
-        item.get("product_code"),
-        item.get("custom_id"),
-        item.get("sku"),
-    ):
-        raw = str(value or "").strip()
+    def _strings(value: Any):
+        """Yield every scalar string; Pancake nests SKU data inconsistently."""
+        if isinstance(value, dict):
+            for child in value.values():
+                yield from _strings(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from _strings(child)
+        elif isinstance(value, str):
+            yield value
+
+    # Order-detail responses have appeared in at least two shapes: the SKU
+    # may be under variation_info, or under top-level variation_values.  Walk
+    # the complete item so a schema change cannot silently select zero items.
+    for raw in _strings(item):
+        raw = raw.strip()
+        if not raw:
+            continue
         code = bridge._normalize_jennie_code(raw)
-        if code.startswith("JC-") and re.search(r"\d", code):
+        if re.fullmatch(r"JC-(?:CV|[VAQ])-\d+T?", code):
             return code
-        # Pancake order details can return a variation SKU with a human
-        # description appended, e.g. ``JC-A-250-BE: AO REN MAU BE-S``.
-        # Extract the product code before normalizing the full variation SKU.
+        # Pancake can return a descriptive variation SKU such as
+        # ``JC-A-250-BE: AO REN MAU BE-S``. Extract only the base product code.
         for match in re.finditer(r"JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+)", raw, re.IGNORECASE):
             embedded = bridge._normalize_jennie_code(match.group(0))
             if embedded.startswith("JC-") and re.search(r"\d", embedded):
