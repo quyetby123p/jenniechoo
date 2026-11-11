@@ -112,10 +112,36 @@ def _item_code(bridge: DropoPancakeBridge, item: dict[str, Any]) -> str:
         elif isinstance(value, str):
             yield value
 
-    # Order-detail responses have appeared in at least two shapes: the SKU
-    # may be under variation_info, or under top-level variation_values.  Walk
-    # the complete item so a schema change cannot silently select zero items.
-    for raw in _strings(item):
+    def _preferred_strings() -> Any:
+        """Yield product-specific fields before unrelated order metadata.
+
+        Pancake order items can contain links, keywords, and internal metadata
+        from other products.  A full recursive walk is still useful as a
+        fallback, but it must not outrank the authoritative variation fields.
+        """
+        for key in ("variation_values", "variation_info", "actual_variation_info"):
+            value = item.get(key)
+            if isinstance(value, dict):
+                for nested_key in (
+                    "custom_id",
+                    "sku",
+                    "product_code",
+                    "variation_sku",
+                    "name",
+                ):
+                    if nested_key in value:
+                        yield from _strings(value[nested_key])
+            elif value is not None:
+                yield from _strings(value)
+        for key in ("sku", "custom_id", "product_code", "variation_sku", "name"):
+            if key in item:
+                yield from _strings(item[key])
+
+    # Prefer the authoritative variation fields.  Only then inspect every
+    # scalar as a compatibility fallback for older Pancake response shapes.
+    prioritized = list(_preferred_strings())
+    fallback = _strings(item)
+    for raw in (*prioritized, *fallback):
         raw = raw.strip()
         if not raw:
             continue

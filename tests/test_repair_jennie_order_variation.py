@@ -40,6 +40,19 @@ def test_item_code_handles_typographic_hyphens():
     assert _item_code(_bridge_stub(), item) == "JC-A-250"
 
 
+def test_item_code_prefers_variation_values_over_unrelated_metadata():
+    item = {
+        "keyword_product": "JC-A-248 campaign metadata",
+        "links": [{"url": "https://example.test/JCA248"}],
+        "variation_values": [
+            "JC-A-250-BE: AO REN MAU BE-S",
+            "Falling Cloud JCA250",
+        ],
+    }
+
+    assert _item_code(_bridge_stub(), item) == "JC-A-250"
+
+
 def test_choose_variation_prefers_exact_black_token_over_cream_description():
     candidates = [
         {
