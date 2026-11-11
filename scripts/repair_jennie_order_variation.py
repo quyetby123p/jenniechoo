@@ -102,10 +102,14 @@ def _item_code(bridge: DropoPancakeBridge, item: dict[str, Any]) -> str:
             return code
         # Pancake can return a descriptive variation SKU such as
         # ``JC-A-250-BE: AO REN MAU BE-S``. Extract only the base product code.
-        for match in re.finditer(r"JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+)", raw, re.IGNORECASE):
-            embedded = bridge._normalize_jennie_code(match.group(0))
-            if embedded.startswith("JC-") and re.search(r"\d", embedded):
-                return embedded
+        # Normalize punctuation too: some responses contain a non-breaking or
+        # typographic hyphen even though the value looks identical in logs.
+        haystacks = (raw, re.sub(r"[^A-Z0-9]+", "-", raw.upper()))
+        for haystack in haystacks:
+            for match in re.finditer(r"JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+)", haystack, re.IGNORECASE):
+                embedded = bridge._normalize_jennie_code(match.group(0))
+                if re.fullmatch(r"JC-(?:CV|[VAQ])-\d+T?", embedded):
+                    return embedded
     return ""
 
 
