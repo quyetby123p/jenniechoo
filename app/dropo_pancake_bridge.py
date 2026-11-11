@@ -26,6 +26,7 @@ import re
 import time
 from typing import Any
 import unicodedata
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 import requests
@@ -432,7 +433,7 @@ class DropoPancakeBridge:
         codes = self._split_order_values(raw_codes)
         if not codes:
             codes = self._split_order_values(
-                get("Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku")
+                get("Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku", "san_pham")
             )
         if not codes:
             raise ValidationError("thiếu SKU sản phẩm Jennie trong lead")
@@ -444,22 +445,63 @@ class DropoPancakeBridge:
         shared_color = str(get("Màu", "mau", "color") or "").strip()
         shared_size = str(get("Size", "size") or "").strip()
         summary_options = self._parse_jennie_summary(
-            get("Tóm tắt đơn", "Tóm tắt", "tom_tat", "summary", "san_pham")
+            get(
+                "Tóm tắt đơn",
+                "Tóm tắt",
+                "tom_tat",
+                "summary",
+                "san_pham",
+                "Selected SKUs",
+                "selected_skus",
+                "Item choices in combo",
+                "item_choices",
+            )
         )
         summary_sequence = summary_options.get("__sequence__", [])
+        detail_rows = [row] + list(bundle_rows or [])
+
+        # The JC sheet stores only the first SKU in the main row.  The full
+        # order is represented by the checkout summary and by one ``jcpost``
+        # row per following item.  Treat the summary sequence as the
+        # authoritative order when it contains explicit product codes; using
+        # only the main-row SKU silently drops the remaining products.
+        summary_codes = [
+            self._normalize_jennie_code(option.get("code"))
+            for option in summary_sequence
+        ]
+        if summary_sequence and all(summary_codes):
+            if len(summary_codes) < len(codes):
+                raise ValidationError(
+                    "tóm tắt đơn không đủ mã để đối chiếu bundle sản phẩm"
+                )
+            # Equal-length lists still need order validation below; only use
+            # the summary to expand the main-row list when the sheet stored
+            # just the first SKU there.
+            if len(summary_codes) > len(codes):
+                codes = summary_codes
+        elif bundle_rows:
+            detail_codes = [
+                self._normalize_jennie_code(
+                    self._cell(detail, header, "Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku", "san_pham")
+                )
+                for detail in bundle_rows
+            ]
+            detail_codes = [code for code in detail_codes if code]
+            if detail_codes:
+                codes = codes[:1] + detail_codes
+
         if summary_sequence and len(summary_sequence) != len(codes):
             raise ValidationError(
                 "tóm tắt đơn không đủ dòng để đối chiếu mã sản phẩm trong bundle"
             )
         summary_occurrences: dict[str, int] = {}
-        detail_rows = [row] + list(bundle_rows or [])
         items: list[dict[str, Any]] = []
         for index, raw_code in enumerate(codes, start=1):
             code = self._normalize_jennie_code(raw_code)
             detail_row = detail_rows[index - 1] if index <= len(detail_rows) else []
             detail_get = lambda *names: self._cell(detail_row, header, *names)  # noqa: E731
             detail_code = self._normalize_jennie_code(
-                detail_get("Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku")
+                detail_get("Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku", "san_pham")
             )
             if detail_code != code:
                 detail_row = next(
@@ -467,7 +509,7 @@ class DropoPancakeBridge:
                         candidate
                         for candidate in detail_rows[index:]
                         if self._normalize_jennie_code(
-                            self._cell(candidate, header, "Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku")
+                            self._cell(candidate, header, "Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku", "san_pham")
                         )
                         == code
                     ),
@@ -1257,8 +1299,32 @@ class DropoPancakeBridge:
         codes = self._split_order_values(
             self._cell(main_row, header, "SKU Code", "sku_code", "sku_codes")
         )
-        if len(codes) <= 1:
-            return []
+        summary = self._parse_jennie_summary(
+            self._cell(
+                main_row,
+                header,
+                "Tóm tắt đơn",
+                "Tóm tắt",
+                "tom_tat",
+                "summary",
+                "san_pham",
+                "Selected SKUs",
+                "selected_skus",
+                "Item choices in combo",
+                "item_choices",
+            )
+        )
+        summary_sequence = summary.get("__sequence__", [])
+        expected_items = max(len(codes), len(summary_sequence))
+        # A single SKU in the main row is normal for the JC sheet: the other
+        # items are in the summary/detail rows.  Do not return early here.
+        if expected_items <= 1 and not summary_sequence:
+            expected_items = 1
+
+        main_source = str(
+            self._cell(main_row, header, "Nguồn", "source", "landing_url", "Link", "URL") or ""
+        ).strip()
+        main_source_family = self._source_family(main_source)
 
         details: list[list[Any]] = []
         for candidate in data_rows[main_offset + 1 :]:
@@ -1277,7 +1343,9 @@ class DropoPancakeBridge:
             )
             if candidate_phone or self._cell(candidate_row, header, "Order ID", "ma_don", "order_id"):
                 break
-            source = str(self._cell(candidate_row, header, "Nguồn", "source") or "").strip()
+            source = str(
+                self._cell(candidate_row, header, "Nguồn", "source", "landing_url", "Link", "URL") or ""
+            ).strip()
             raw_code = self._cell(
                 candidate_row,
                 header,
@@ -1286,13 +1354,50 @@ class DropoPancakeBridge:
                 "ma_sp",
                 "SKU",
                 "sku",
+                "san_pham",
             )
-            if not raw_code or not re.search(r"[?&]jcpost=\d+", source, re.IGNORECASE):
+            if not raw_code:
+                break
+            has_jcpost_marker = bool(re.search(r"[?&]jcpost=\d+", source, re.IGNORECASE))
+            candidate_family = self._source_family(source)
+            # Do not require the literal jcpost query: the JC export may
+            # normalize it away while keeping the item rows contiguous.  The
+            # row is still safe to attach because it has no customer/order
+            # identity and has an explicit product code.
+            if source and main_source_family and candidate_family != main_source_family and not has_jcpost_marker:
                 break
             details.append(candidate_row)
-            if len(details) >= len(codes) - 1:
+            if expected_items > 1 and len(details) >= expected_items - 1:
+                break
+            if expected_items <= 1 and not has_jcpost_marker:
                 break
         return details
+
+    @staticmethod
+    def _source_family(value: Any) -> str:
+        """Normalize a lead URL for grouping main/detail sheet rows.
+
+        ``jcpost=1``/``jcpost=2`` are row markers, not different orders.  A
+        few Sheet exports also omit that marker, so grouping uses the URL
+        without it and leaves all other query parameters intact.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        try:
+            parts = urlsplit(text)
+            query = [(key, val) for key, val in parse_qsl(parts.query, keep_blank_values=True) if key.lower() != "jcpost"]
+            return urlunsplit(
+                (
+                    parts.scheme.lower(),
+                    parts.netloc.lower(),
+                    parts.path.rstrip("/"),
+                    urlencode(query),
+                    "",
+                )
+            ).rstrip("/")
+        except ValueError:
+            return re.sub(r"([?&])jcpost=\d+", "", text, flags=re.IGNORECASE).rstrip("/?&")
 
     def _fetch_sheet_values(self) -> list[list[Any]]:
         """Đọc TOÀN BỘ dòng có dữ liệu của tab.
