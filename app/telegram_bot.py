@@ -801,6 +801,12 @@ class TelegramAdsBot:
         chat_id = message.chat.id if message.chat else None
         parse_text = self._strip_bot_mention_tokens(text)
         try:
+            if self._is_retry_last_web_campaign_request(parse_text):
+                if not self._is_authorized(message.from_user.id if message.from_user else None):
+                    await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
+                    return
+                await self._retry_latest_failed_web_campaign(message)
+                return
             if self._is_media_intake_start(parse_text):
                 if not self._is_authorized(message.from_user.id if message.from_user else None):
                     await message.answer("Xin lỗi, anh/chị không có quyền sử dụng bot này.")
@@ -1021,6 +1027,101 @@ class TelegramAdsBot:
         normalized = re.sub(r"\s+", " ", str(text or "").strip().lower())
         return bool(
             re.fullmatch(r"(?:/mess|/messenger|lên mới mess|len moi mess|lên mới messenger|len moi messenger)", normalized)
+        )
+
+    @staticmethod
+    def _is_retry_last_web_campaign_request(text: str) -> bool:
+        normalized = re.sub(r"\s+", " ", str(text or "").strip().lower())
+        return normalized in {
+            "tạo camp vừa rồi",
+            "tao camp vua roi",
+            "tạo lại camp vừa rồi",
+            "tao lai camp vua roi",
+            "/retry_last_web",
+        }
+
+    async def _retry_latest_failed_web_campaign(self, message: Message) -> None:
+        """Recreate the latest failed Web draft using its already-uploaded asset."""
+
+        failed_jobs: list[dict[str, Any]] = []
+        for path in self.settings.jobs_failed_dir.glob("*.json"):
+            try:
+                job = load_json(path)
+            except Exception:  # noqa: BLE001
+                continue
+            if str(job.get("campaign_variant", "")).strip().lower() != "web":
+                continue
+            if not str(job.get("media_asset_id", "")).strip():
+                continue
+            failed_jobs.append(job)
+
+        if not failed_jobs:
+            await message.answer("Em chưa tìm thấy job Web lỗi nào còn media đã upload để tạo lại.")
+            return
+
+        failed_jobs.sort(
+            key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""),
+            reverse=True,
+        )
+        previous = failed_jobs[0]
+        try:
+            budget_daily_vnd = int(previous.get("budget_daily_vnd") or 0)
+        except (TypeError, ValueError):
+            budget_daily_vnd = 0
+        if budget_daily_vnd <= 0:
+            await message.answer("Job Web gần nhất không có ngân sách hợp lệ nên em dừng, không tạo thiếu dữ liệu.")
+            return
+
+        media_kind = str(previous.get("media_kind") or "image").strip().lower()
+        if media_kind not in {"image", "video"}:
+            media_kind = "video" if "video" in media_kind else "image"
+        try:
+            previous_version = int(previous.get("version") or 1)
+        except (TypeError, ValueError):
+            previous_version = 1
+        chat_id = message.chat.id if message.chat else 0
+        user_id = message.from_user.id if message.from_user else 0
+        media_filename = str(previous.get("media_filename") or "").strip()
+        if not media_filename:
+            media_filename = "media.mp4" if media_kind == "video" else "media.jpg"
+        locked = locked_web_fields()
+        web_input = WebAdsInput(
+            media_file_id=str(previous.get("media_file_id") or "retry").strip(),
+            media_unique_id=str(previous.get("media_unique_id") or previous.get("media_sha256") or "retry").strip(),
+            media_kind=media_kind,
+            media_filename=media_filename,
+            caption=str(previous.get("caption") or "").strip(),
+            headline=LOCKED_MEDIA_HEADLINE,
+            cta_label=locked["cta_label"],
+            cta_type=locked["cta_type"],
+            destination_url=locked["destination_url"],
+            budget_daily_vnd=budget_daily_vnd,
+            media_sha256=str(previous.get("media_sha256") or "").strip(),
+            chat_id=chat_id,
+            user_id=user_id,
+            media_source=str(previous.get("media_source") or "telegram").strip(),
+            media_url=str(previous.get("media_url") or "").strip(),
+            customer_lifecycle_strategy=str(previous.get("customer_lifecycle_strategy") or "").strip(),
+            media_owner=str(previous.get("media_owner") or "").strip(),
+        )
+        post_fingerprint = str(previous.get("post_fingerprint") or "").strip()
+        if not post_fingerprint:
+            post_fingerprint = fingerprint(
+                f"retry:{web_input.media_sha256}:{web_input.caption}:{web_input.media_owner}"
+            )
+        await message.answer(
+            "Em đã lấy lại thông tin Web gần nhất và đang tạo bản nháp mới từ media đã upload. "
+            "Không hỏi lại caption, ngân sách, người làm media hoặc chiến lược vòng đời."
+        )
+        await self._create_web_draft_and_send_review(
+            chat_id=chat_id,
+            web_input=web_input,
+            media_content=b"",
+            post_fingerprint=post_fingerprint,
+            version=previous_version + 1,
+            telegram_bot=self._bot,
+            existing_media_asset_id=str(previous.get("media_asset_id") or "").strip(),
+            existing_thumbnail_image_hash=str(previous.get("thumbnail_image_hash") or "").strip(),
         )
 
     async def _process_media_owner_step(self, message: Message, text: str) -> bool:
@@ -3075,6 +3176,8 @@ class TelegramAdsBot:
         request_id: str | None = None,
         media_request_id: str | None = None,
         telegram_bot: Bot | None = None,
+        existing_media_asset_id: str = "",
+        existing_thumbnail_image_hash: str = "",
     ) -> None:
         audiences = load_json(self.settings.audiences_config_path)
         objective = load_json(self.settings.web_objective_config_path)
@@ -3082,8 +3185,8 @@ class TelegramAdsBot:
         adset_ids: list[str] = []
         ad_ids: list[str] = []
         creative_ids: list[str] = []
-        media_asset_id = ""
-        thumbnail_image_hash = ""
+        media_asset_id = str(existing_media_asset_id or "").strip()
+        thumbnail_image_hash = str(existing_thumbnail_image_hash or "").strip()
 
         try:
             await asyncio.to_thread(self.meta.ensure_ads_token_can_access_page)
@@ -3095,28 +3198,29 @@ class TelegramAdsBot:
                 audiences_config=audiences,
                 objective_config=objective,
             )
-            if plan.media_kind == "video":
-                thumbnail_content = await asyncio.to_thread(
-                    self._download_web_video_thumbnail,
-                    web_input.media_url,
-                )
-                if thumbnail_content:
-                    thumbnail_image_hash = await asyncio.to_thread(
-                        self.meta.upload_image_asset,
-                        thumbnail_content,
-                        "video_thumbnail.jpg",
+            if not media_asset_id:
+                if plan.media_kind == "video":
+                    thumbnail_content = await asyncio.to_thread(
+                        self._download_web_video_thumbnail,
+                        web_input.media_url,
                     )
-                media_asset_id = await asyncio.to_thread(
-                    self.meta.upload_video_asset,
-                    media_content,
-                    web_input.media_filename,
-                )
-            else:
-                media_asset_id = await asyncio.to_thread(
-                    self.meta.upload_image_asset,
-                    media_content,
-                    web_input.media_filename,
-                )
+                    if thumbnail_content:
+                        thumbnail_image_hash = await asyncio.to_thread(
+                            self.meta.upload_image_asset,
+                            thumbnail_content,
+                            "video_thumbnail.jpg",
+                        )
+                    media_asset_id = await asyncio.to_thread(
+                        self.meta.upload_video_asset,
+                        media_content,
+                        web_input.media_filename,
+                    )
+                else:
+                    media_asset_id = await asyncio.to_thread(
+                        self.meta.upload_image_asset,
+                        media_content,
+                        web_input.media_filename,
+                    )
 
             campaign_id = await asyncio.to_thread(self.meta.create_campaign, plan)
             for slot in plan.audiences:
@@ -3198,13 +3302,19 @@ class TelegramAdsBot:
             sender = telegram_bot or self._bot
             if not sender:
                 raise RuntimeError("Bot Telegram chưa sẵn sàng để gửi thông báo review Web.")
-            await self._send_web_review_media_preview(
-                sender=sender,
-                chat_id=chat_id,
-                media_content=media_content,
-                media_kind=web_input.media_kind,
-                media_filename=web_input.media_filename,
-            )
+            if media_content:
+                await self._send_web_review_media_preview(
+                    sender=sender,
+                    chat_id=chat_id,
+                    media_content=media_content,
+                    media_kind=web_input.media_kind,
+                    media_filename=web_input.media_filename,
+                )
+            else:
+                await sender.send_message(
+                    chat_id=chat_id,
+                    text="Em đã dùng lại media đã upload từ job trước để tạo bản nháp mới.",
+                )
             await sender.send_message(
                 chat_id=chat_id,
                 text=self._build_review_message(job_payload),
@@ -3225,8 +3335,13 @@ class TelegramAdsBot:
                 "post_url": "",
                 "post_fingerprint": post_fingerprint,
                 "budget_daily_vnd": web_input.budget_daily_vnd,
-                "campaign_name": "",
+                "campaign_name": plan.campaign_name if plan else "",
                 "media_kind": web_input.media_kind,
+                "media_file_id": web_input.media_file_id,
+                "media_unique_id": web_input.media_unique_id,
+                "media_filename": web_input.media_filename,
+                "media_source": web_input.media_source,
+                "media_url": web_input.media_url,
                 "media_sha256": web_input.media_sha256,
                 "media_owner": web_input.media_owner,
                 "media_asset_id": media_asset_id,
