@@ -46,8 +46,6 @@ from app.command_parser import (
     try_parse_web_ads_form,
     try_parse_web_media_url_message,
     parse_web_budget,
-    parse_web_cta,
-    parse_web_url,
     normalize_web_caption,
 )
 from app.cloud_schedule_guard import CloudScheduleGuardClient
@@ -56,6 +54,7 @@ from app.daily_task_summary_service import DailyTaskSummaryService
 from app.dedup_service import DedupService
 from app.exceptions import CommandParseError, MetaApiError, ValidationError
 from app.media_performance_service import MediaPerformanceService
+from app.media_ads_defaults import LOCKED_MEDIA_HEADLINE, locked_web_fields
 from app.meta_ads_client import MetaAdsClient
 from app.media_owner import normalize_media_owner
 from app.models import (
@@ -267,7 +266,7 @@ class TelegramAdsBot:
             "Lên campaign cũ: <link> JCV140 lên cũ\n"
             "Lên campaign cũ theo hint: <link> lên cũ camp video\n"
             "Trước khi tạo bất kỳ camp nào, em sẽ hỏi media này của ai để đặt tên quảng cáo\n"
-            "Lên camp Web: gửi ảnh/video kèm caption, em sẽ hỏi lần lượt tiêu đề/nút/URL/ngân sách, "
+            "Lên camp Web: gửi ảnh/video kèm caption, em chỉ hỏi ngân sách sau khi chọn luồng; "
             "media của ai; sau đó bắt buộc chọn chiến lược vòng đời khách hàng bằng nút Telegram\n"
             "Hoặc gửi media Google Drive: media: <link Drive> rồi gửi caption nếu cần\n"
             "Lên camp media trực tiếp: gửi ảnh/video hoặc link Drive; bot sẽ hỏi chọn Web Sales hay Messenger Purchase "
@@ -466,7 +465,7 @@ class TelegramAdsBot:
         if previous:
             await asyncio.to_thread(self.storage.delete_pending_request, str(previous.get("request_id", "")))
         caption = str(getattr(message, "caption", "") or "").strip()
-        stage = "awaiting_headline" if caption else "awaiting_caption"
+        stage = "awaiting_budget" if caption else "awaiting_caption"
         request_id = await asyncio.to_thread(
             self.storage.create_pending_request,
             {
@@ -479,6 +478,7 @@ class TelegramAdsBot:
                 "media_size_bytes": media_size_bytes,
                 "caption": caption,
                 "stage": stage,
+                "headline": LOCKED_MEDIA_HEADLINE,
             },
             "messenger_media",
         )
@@ -486,12 +486,12 @@ class TelegramAdsBot:
         if stage == "awaiting_caption":
             await message.answer(
                 f"Đã nhận {media_label} Messenger ({request_id}) nhưng chưa có caption.\n"
-                "Anh gửi caption trước, rồi em sẽ hỏi tiếp tiêu đề."
+                "Anh gửi caption; tiêu đề đã khóa theo cấu hình, sau đó em sẽ hỏi ngân sách."
             )
         else:
             await message.answer(
                 f"Đã nhận {media_label} kèm caption ({request_id}).\n"
-                "Anh gửi tiêu đề muốn hiển thị trong quảng cáo Messenger."
+                "Tiêu đề đã khóa theo cấu hình. Anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000."
             )
 
     async def handle_web_media_message(self, message: Message) -> None:
@@ -535,7 +535,7 @@ class TelegramAdsBot:
             return
 
         caption = str(getattr(message, "caption", "") or "").strip()
-        stage = "awaiting_headline" if caption else "awaiting_caption"
+        stage = "awaiting_budget" if caption else "awaiting_caption"
 
         previous = await asyncio.to_thread(
             self.storage.find_latest_pending_web_media,
@@ -558,6 +558,7 @@ class TelegramAdsBot:
                 "media_size_bytes": media_size_bytes,
                 "caption": caption,
                 "stage": stage,
+                **locked_web_fields(),
             },
             "web_media",
         )
@@ -565,12 +566,12 @@ class TelegramAdsBot:
         if stage == "awaiting_caption":
             await message.answer(
                 f"Đã nhận {media_label} ({request_id}) nhưng chưa có caption.\n"
-                "Anh gửi caption trước, rồi em sẽ hỏi tiếp tiêu đề."
+                "Anh gửi caption; tiêu đề, nút và URL đã khóa, sau đó em sẽ hỏi ngân sách."
             )
         else:
             await message.answer(
                 f"Đã nhận {media_label} kèm caption ({request_id}).\n"
-                "Anh gửi tiêu đề muốn hiển thị trong quảng cáo."
+                "Tiêu đề, nút và URL đã khóa theo cấu hình. Anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000."
             )
 
     async def _process_web_media_url_message(self, message: Message, payload: dict[str, str]) -> None:
@@ -596,7 +597,7 @@ class TelegramAdsBot:
         if previous:
             await asyncio.to_thread(self.storage.delete_pending_request, str(previous.get("request_id", "")))
 
-        stage = "awaiting_headline" if caption else "awaiting_caption"
+        stage = "awaiting_budget" if caption else "awaiting_caption"
         request_id = await asyncio.to_thread(
             self.storage.create_pending_request,
             {
@@ -611,19 +612,20 @@ class TelegramAdsBot:
                 "media_size_bytes": 0,
                 "caption": caption,
                 "stage": stage,
+                **locked_web_fields(),
             },
             "web_media",
         )
         if stage == "awaiting_caption":
             await message.answer(
                 f"Đã nhận link media Google Drive ({request_id}).\n"
-                "Anh gửi caption, rồi em sẽ hỏi tiếp tiêu đề.\n"
+                "Anh gửi caption; tiêu đề, nút và URL đã khóa, sau đó em sẽ hỏi ngân sách.\n"
                 "Lưu ý: file Drive phải bật Anyone with the link / Viewer."
             )
         else:
             await message.answer(
                 f"Đã nhận link media kèm caption ({request_id}).\n"
-                "Anh gửi tiêu đề muốn hiển thị trong quảng cáo.\n"
+                "Tiêu đề, nút và URL đã khóa theo cấu hình. Anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000.\n"
                 "Lưu ý: file Drive phải bật Anyone with the link / Viewer."
             )
 
@@ -898,7 +900,7 @@ class TelegramAdsBot:
                 if is_web_ads_form:
                     await self._process_web_ads_form(message, web_ads_form or {})
                     return
-                if await self._process_web_conversation_step(message, parse_text, web_cta):
+                if await self._process_web_conversation_step(message, parse_text):
                     return
             is_reconcile_command, reconcile_date = try_parse_reconcile_cod_command(
                 parse_text,
@@ -1194,7 +1196,7 @@ class TelegramAdsBot:
             self.storage.delete_pending_request,
             str(mode_request.get("request_id", "")),
         )
-        stage = "awaiting_headline" if caption else "awaiting_caption"
+        stage = "awaiting_budget" if caption else "awaiting_caption"
         request_id = await asyncio.to_thread(
             self.storage.create_pending_request,
             {
@@ -1209,18 +1211,19 @@ class TelegramAdsBot:
                 "media_size_bytes": 0,
                 "caption": caption,
                 "stage": stage,
+                "headline": LOCKED_MEDIA_HEADLINE,
             },
             "messenger_media",
         )
         if stage == "awaiting_caption":
             await message.answer(
-                f"Đã nhận link media Messenger ({request_id}). Anh gửi caption, rồi em sẽ hỏi tiếp tiêu đề.\n"
+                f"Đã nhận link media Messenger ({request_id}). Anh gửi caption; tiêu đề đã khóa, sau đó em sẽ hỏi ngân sách.\n"
                 "File Drive phải bật Anyone with the link / Viewer."
             )
         else:
             await message.answer(
                 f"Đã nhận link media Messenger kèm caption ({request_id}).\n"
-                "Anh gửi tiêu đề muốn hiển thị trong quảng cáo Messenger."
+                "Tiêu đề đã khóa. Anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000."
             )
 
     async def _process_media_intake_url_message(
@@ -1288,22 +1291,26 @@ class TelegramAdsBot:
             return False
 
         request_id = str(pending.get("request_id", "")).strip()
-        stage = str(pending.get("stage", "awaiting_headline")).strip().lower()
+        stage = str(pending.get("stage", "awaiting_caption")).strip().lower()
         if stage == "awaiting_caption":
             await asyncio.to_thread(
                 self.storage.update_pending_request,
                 request_id,
-                {"caption": text, "stage": "awaiting_headline"},
+                {"caption": text, "headline": LOCKED_MEDIA_HEADLINE, "stage": "awaiting_budget"},
             )
-            await message.answer("Đã nhận caption. Anh gửi tiêu đề muốn hiển thị trong quảng cáo Messenger.")
+            await message.answer(
+                "Đã nhận caption. Tiêu đề đã khóa theo cấu hình; anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000."
+            )
             return True
         if stage == "awaiting_headline":
             await asyncio.to_thread(
                 self.storage.update_pending_request,
                 request_id,
-                {"headline": text, "stage": "awaiting_budget"},
+                {"headline": LOCKED_MEDIA_HEADLINE, "stage": "awaiting_budget"},
             )
-            await message.answer("Đã nhận tiêu đề. Anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000.")
+            await message.answer(
+                "Tiêu đề đã khóa theo cấu hình. Anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000."
+            )
             return True
         if stage == "awaiting_budget":
             try:
@@ -1362,7 +1369,7 @@ class TelegramAdsBot:
                 media_kind=media_kind,
                 media_filename=media_filename,
                 caption=normalize_web_caption(str(pending.get("caption", ""))),
-                headline=str(pending.get("headline", "")).strip(),
+                headline=LOCKED_MEDIA_HEADLINE,
                 budget_daily_vnd=int(pending.get("budget_daily_vnd", 0) or 0),
                 media_sha256=media_sha256,
                 chat_id=message.chat.id,
@@ -1436,9 +1443,8 @@ class TelegramAdsBot:
         self,
         message: Message,
         text: str,
-        cta_config: dict,
     ) -> bool:
-        """Advance the media -> headline -> CTA -> URL -> budget conversation."""
+        """Advance the locked media -> caption -> budget conversation."""
 
         if not message.chat or text.startswith("/"):
             return False
@@ -1452,55 +1458,47 @@ class TelegramAdsBot:
             return False
 
         request_id = str(pending.get("request_id", "")).strip()
-        stage = str(pending.get("stage", "awaiting_headline")).strip().lower()
+        stage = str(pending.get("stage", "awaiting_caption")).strip().lower()
         if stage == "awaiting_caption":
             await asyncio.to_thread(
                 self.storage.update_pending_request,
                 request_id,
-                {"caption": text, "stage": "awaiting_headline"},
+                {"caption": text, **locked_web_fields(), "stage": "awaiting_budget"},
             )
-            await message.answer("Đã nhận caption. Anh gửi tiêu đề muốn hiển thị trong quảng cáo.")
+            await message.answer(
+                "Đã nhận caption. Tiêu đề, nút và URL đã khóa theo cấu hình; anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000."
+            )
             return True
 
         if stage == "awaiting_headline":
             await asyncio.to_thread(
                 self.storage.update_pending_request,
                 request_id,
-                {"headline": text, "stage": "awaiting_cta"},
+                {**locked_web_fields(), "stage": "awaiting_budget"},
             )
             await message.answer(
-                "Đã nhận tiêu đề. Anh gửi nút hành động, ví dụ: Mua ngay, Xem thêm hoặc Đăng ký."
+                "Tiêu đề, nút và URL đã khóa theo cấu hình; anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000."
             )
             return True
 
         if stage == "awaiting_cta":
-            try:
-                cta_label, cta_type = parse_web_cta(text, cta_config)
-            except ValidationError as exc:
-                await message.answer(str(exc))
-                return True
             await asyncio.to_thread(
                 self.storage.update_pending_request,
                 request_id,
-                {"cta_label": cta_label, "cta_type": cta_type, "stage": "awaiting_url"},
+                {**locked_web_fields(), "stage": "awaiting_budget"},
             )
             await message.answer(
-                "Đã nhận nút hành động. Anh gửi URL đích website, có thể là homepage hoặc product page."
+                "Tiêu đề, nút và URL đã khóa theo cấu hình; anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000."
             )
             return True
 
         if stage == "awaiting_url":
-            try:
-                destination_url = parse_web_url(text)
-            except ValidationError as exc:
-                await message.answer(str(exc))
-                return True
             await asyncio.to_thread(
                 self.storage.update_pending_request,
                 request_id,
-                {"destination_url": destination_url, "stage": "awaiting_budget"},
+                {**locked_web_fields(), "stage": "awaiting_budget"},
             )
-            await message.answer("Đã nhận URL. Anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000.")
+            await message.answer("URL đã khóa theo cấu hình; anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000.")
             return True
 
         if stage == "awaiting_budget":
@@ -1522,10 +1520,7 @@ class TelegramAdsBot:
                 message,
                 {
                     "caption": str(updated.get("caption", "")),
-                    "headline": str(updated.get("headline", "")),
-                    "cta_label": str(updated.get("cta_label", "")),
-                    "cta_type": str(updated.get("cta_type", "")),
-                    "destination_url": str(updated.get("destination_url", "")),
+                    **locked_web_fields(),
                     "budget_daily_vnd": str(updated.get("budget_daily_vnd", "0")),
                     "sku_override": "",
                 },
@@ -1585,10 +1580,10 @@ class TelegramAdsBot:
                 media_kind=media_kind,
                 media_filename=media_filename,
                 caption=normalize_web_caption(str(form.get("caption", ""))),
-                headline=str(form.get("headline", "")).strip(),
-                cta_label=str(form.get("cta_label", "")).strip(),
-                cta_type=str(form.get("cta_type", "")).strip().upper(),
-                destination_url=str(form.get("destination_url", "")).strip(),
+                headline=LOCKED_MEDIA_HEADLINE,
+                cta_label=locked_web_fields()["cta_label"],
+                cta_type=locked_web_fields()["cta_type"],
+                destination_url=locked_web_fields()["destination_url"],
                 budget_daily_vnd=int(form.get("budget_daily_vnd", "0")),
                 sku_override=str(form.get("sku_override", "")).strip(),
                 media_sha256=media_sha256,
@@ -2473,17 +2468,17 @@ class TelegramAdsBot:
             return
 
         caption = str(request.get("caption", "")).strip()
-        stage = "awaiting_headline" if caption else "awaiting_caption"
-        updated = request
-        if current_request_type != next_request_type:
-            updated = await asyncio.to_thread(
-                self.storage.update_pending_request,
-                request_id,
-                {
-                    "request_type": next_request_type,
-                    "stage": stage,
-                },
-            )
+        stage = "awaiting_budget" if caption else "awaiting_caption"
+        locked_fields = locked_web_fields() if normalized_target == "web" else {"headline": LOCKED_MEDIA_HEADLINE}
+        updated = await asyncio.to_thread(
+            self.storage.update_pending_request,
+            request_id,
+            {
+                "request_type": next_request_type,
+                "stage": stage,
+                **locked_fields,
+            },
+        )
         if not updated:
             await self._answer_callback(query, "Phiên media đã hết hạn.", show_alert=True)
             return
@@ -2500,11 +2495,11 @@ class TelegramAdsBot:
             label = "Web Sales" if normalized_target == "web" else "Messenger Purchase"
             if stage == "awaiting_caption":
                 await query.message.answer(
-                    f"Đã chọn luồng {label}. Anh gửi caption, rồi em sẽ gửi tiếp câu hỏi tiêu đề."
+                    f"Đã chọn luồng {label}. Anh gửi caption; tiêu đề đã khóa, sau đó em sẽ hỏi ngân sách."
                 )
             else:
                 await query.message.answer(
-                    f"Đã chọn luồng {label}. Anh gửi tiêu đề muốn hiển thị trong quảng cáo."
+                    f"Đã chọn luồng {label}. Caption đã có; tiêu đề đã khóa, anh gửi ngân sách mỗi ngày bằng VND, ví dụ: 300000."
                 )
 
     async def _on_media_flow_cancel(self, query: CallbackQuery, request_id: str) -> None:
