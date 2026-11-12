@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import replace
+import json
 import logging
 from dataclasses import replace
 from pathlib import Path
@@ -18,6 +19,13 @@ from app.command_parser import (
     try_parse_web_media_url_message,
 )
 from app.exceptions import ValidationError
+from app.media_ads_defaults import (
+    LOCKED_MEDIA_HEADLINE,
+    LOCKED_WEB_CTA_LABEL,
+    LOCKED_WEB_CTA_TYPE,
+    LOCKED_WEB_DESTINATION_URL,
+    locked_web_fields,
+)
 from app.meta_ads_client import MetaAdsClient
 from app.models import AudienceSlot, MessengerMediaAdsInput, PlannedCampaign, WebAdsInput
 from app.approval_service import ApprovalService
@@ -704,6 +712,68 @@ def test_web_adset_matches_manual_sales_campaign_payload() -> None:
     assert "existing_customer_budget_percentage" not in data
     assert "customer_lifecycle_strategy" not in data
     assert data["promoted_object"] == {"pixel_id": "pixel_1", "custom_event_type": "PURCHASE"}
+    assert data["regional_regulated_categories"] == ["THAILAND_UNIVERSAL"]
+
+
+def test_direct_media_web_fields_are_locked() -> None:
+    assert locked_web_fields() == {
+        "headline": LOCKED_MEDIA_HEADLINE,
+        "cta_label": LOCKED_WEB_CTA_LABEL,
+        "cta_type": LOCKED_WEB_CTA_TYPE,
+        "destination_url": LOCKED_WEB_DESTINATION_URL,
+    }
+
+
+def test_thailand_regulation_uses_account_defaults_or_explicit_verified_ids() -> None:
+    client = MetaAdsClient(settings=_settings(), logger=logging.getLogger("test"))
+    payload = client._apply_regional_regulation_requirements(
+        {"targeting": {"geo_locations": {"countries": ["TH"]}}}
+    )
+    assert payload["regional_regulated_categories"] == ["THAILAND_UNIVERSAL"]
+    assert "regional_regulation_identities" not in payload
+
+    explicit = MetaAdsClient(
+        settings=replace(
+            _settings(),
+            meta_thailand_beneficiary_id="beneficiary_1",
+            meta_thailand_payer_id="payer_1",
+        ),
+        logger=logging.getLogger("test"),
+    )
+    payload = explicit._apply_regional_regulation_requirements(
+        {"targeting": {"geo_locations": {"countries": ["TH"]}}}
+    )
+    assert payload["regional_regulation_identities"] == {
+        "universal_beneficiary": "beneficiary_1",
+        "universal_payer": "payer_1",
+    }
+
+
+def test_thailand_regulation_rejects_partial_verified_identity_configuration() -> None:
+    client = MetaAdsClient(
+        settings=replace(_settings(), meta_thailand_beneficiary_id="beneficiary_1"),
+        logger=logging.getLogger("test"),
+    )
+    with pytest.raises(ValidationError, match="đồng thời"):
+        client._apply_regional_regulation_requirements(
+            {"targeting": {"geo_locations": {"countries": ["TH"]}}}
+        )
+
+
+def test_meta_verified_advertiser_error_is_actionable() -> None:
+    message = MetaAdsClient._extract_error_message(
+        json.dumps(
+            {
+                "error": {
+                    "message": "Hãy cung cấp nhà quảng cáo đã xác minh để phân phối quảng cáo.",
+                    "code": 100,
+                    "error_subcode": 3585634,
+                }
+            }
+        )
+    )
+    assert "THAILAND_UNIVERSAL" in message
+    assert "META_THAILAND_UNIVERSAL_BENEFICIARY_ID" in message
 
 
 def test_web_adset_does_not_misrepresent_all_audiences_as_customer_cap() -> None:
