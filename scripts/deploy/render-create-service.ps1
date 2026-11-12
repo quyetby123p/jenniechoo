@@ -164,7 +164,13 @@ foreach ($key in $baseEnvKeys) {
     $envVars += @{ key = $key; value = (Get-EnvValue -EnvMap $envMap -Key $key) }
 }
 
-foreach ($optionalKey in @("META_PAGE_ACCESS_TOKEN", "PANCAKE_ACCESS_TOKEN", "PANCAKE_API_KEY")) {
+foreach ($optionalKey in @(
+    "META_PAGE_ACCESS_TOKEN",
+    "META_THAILAND_UNIVERSAL_BENEFICIARY_ID",
+    "META_THAILAND_UNIVERSAL_PAYER_ID",
+    "PANCAKE_ACCESS_TOKEN",
+    "PANCAKE_API_KEY"
+)) {
     $value = Get-EnvValue -EnvMap $envMap -Key $optionalKey
     if (-not [string]::IsNullOrWhiteSpace($value)) {
         $envVars += @{ key = $optionalKey; value = $value }
@@ -177,6 +183,8 @@ foreach ($ads2Key in @(
     "ADS2_META_AD_ACCOUNT_ID",
     "ADS2_META_PAGE_ID",
     "ADS2_META_API_VERSION",
+    "ADS2_META_THAILAND_UNIVERSAL_BENEFICIARY_ID",
+    "ADS2_META_THAILAND_UNIVERSAL_PAYER_ID",
     "ADS2_PANCAKE_API_BASE_URL",
     "ADS2_PANCAKE_API_KEY",
     "ADS2_PANCAKE_ACCESS_TOKEN",
