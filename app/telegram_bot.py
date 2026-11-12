@@ -1049,8 +1049,16 @@ class TelegramAdsBot:
                 job = load_json(path)
             except Exception:  # noqa: BLE001
                 continue
-            if str(job.get("campaign_variant", "")).strip().lower() != "web":
-                continue
+            variant = str(job.get("campaign_variant", "")).strip().lower()
+            if variant != "web":
+                # Web failures written before campaign_variant was added still
+                # have a new-campaign mode plus a website CTA/URL.
+                if variant or str(job.get("campaign_mode", "")).strip().lower() != "new":
+                    continue
+                if not str(job.get("destination_url", "")).strip():
+                    continue
+                if str(job.get("cta_type", "")).strip().upper() == "MESSAGE_PAGE":
+                    continue
             if not str(job.get("media_asset_id", "")).strip():
                 continue
             failed_jobs.append(job)
