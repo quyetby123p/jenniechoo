@@ -4,7 +4,8 @@ from app.settings import load_settings
 from app.web_report_app import create_app
 
 
-settings = load_settings()
+# The web-only Render service does not run Telegram/Meta bot workers.
+settings = load_settings(require_app_credentials=False)
 ruza_settings = load_settings(profile="ads2", require_app_credentials=False)
 app = create_app(settings=settings, ruza_settings=ruza_settings)
 
