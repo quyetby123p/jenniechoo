@@ -78,6 +78,7 @@ def _dummy_settings(tmp_path: Path) -> Settings:
         pancake_page_size=200,
         report_thb_to_vnd_rate=815.0,
         report_thb_minor_unit_factor=100,
+        web_report_api_token="test-export-token",
     )
 
 
@@ -230,6 +231,26 @@ def test_routes_render_success(tmp_path: Path) -> None:
     assert client.get("/status/reconcile-received?mode=today").status_code == 200
     assert client.get("/status/returning?mode=range&start_date=2026-06-01&end_date=2026-06-01").status_code == 200
     assert client.get("/api/v1/snapshot?date=2026-06-01").status_code == 200
+
+
+def test_export_api_requires_bearer_token_and_includes_pnl(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    app = create_app(settings=settings, report_service=_StubReportService(_snapshot_payload()))
+    app.testing = True
+    client = app.test_client()
+
+    assert client.get("/api/v1/export?date=2026-06-01").status_code == 401
+    response = client.get(
+        "/api/v1/export?date=2026-06-01",
+        headers={"Authorization": "Bearer test-export-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["report"]["namespace"] == "jc"
+    assert payload["snapshot"]["metrics"]["total_orders"] == 2
+    assert payload["pnl"]["pnl_vnd"] == 700_000
 
 
 def test_report_includes_operational_links(tmp_path: Path) -> None:

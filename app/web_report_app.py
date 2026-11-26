@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import hmac
 import logging
 from pathlib import Path
 from typing import Any
@@ -103,6 +104,49 @@ def create_app(
             current_logger.exception("Web report snapshot API failed: %s", exc)
             return jsonify({"ok": False, "error": "Không tải được dữ liệu báo cáo lúc này."}), 503
         return jsonify(snapshot)
+
+    @app.get("/ruza/api/v1/export")
+    @app.get("/api/v1/export")
+    def export_api():  # type: ignore[no-untyped-def]
+        report = _report_for_path(
+            request.path,
+            default_settings=current_settings,
+            default_service=current_report_service,
+            ruza_settings=ruza_settings,
+            ruza_service=current_ruza_report_service,
+        )
+        if report is None:
+            abort(404)
+        report_settings, report_service_for_request, report_meta = report
+        unauthorized = _authorize_export_request(report_settings)
+        if unauthorized is not None:
+            return unauthorized
+        period = _parse_query_period(request.args, timezone_name=report_settings.app_timezone)
+        try:
+            snapshot = report_service_for_request.get_snapshot(period["start_date"], period["end_date"])
+            pnl = None
+            if not report_meta["prefix"]:
+                get_pnl = getattr(report_service_for_request, "get_pnl", None)
+                if callable(get_pnl):
+                    pnl = get_pnl(period["end_date"])
+        except Exception as exc:  # noqa: BLE001
+            current_logger.exception("Web report export API failed: %s", exc)
+            return jsonify({"ok": False, "error": "Không tải được dữ liệu báo cáo lúc này."}), 503
+        now = datetime.now(_resolve_timezone(report_settings.app_timezone))
+        return jsonify(
+            {
+                "ok": True,
+                "generated_at": now.isoformat(),
+                "report": {
+                    "brand_name": report_meta["brand_name"],
+                    "label": report_meta["label"],
+                    "namespace": "ruza" if report_meta["prefix"] else "jc",
+                },
+                "period": snapshot.get("period", period),
+                "snapshot": snapshot,
+                "pnl": pnl,
+            }
+        )
 
     # Accept POST as well as GET so a browser/form retry cannot turn the dashboard link into a 405.
     @app.route("/ruza", methods=["GET", "POST"])
@@ -345,6 +389,19 @@ def _report_for_path(
             return None
         return ruza_settings, ruza_service, _report_meta(True, request_path)
     return default_settings, default_service, _report_meta(False, request_path)
+
+
+def _authorize_export_request(settings: Settings):
+    expected = str(getattr(settings, "web_report_api_token", "") or "").strip()
+    if not expected:
+        return jsonify({"ok": False, "error": "Web report export API chưa được cấu hình."}), 503
+    authorization = request.headers.get("Authorization", "")
+    scheme, _, provided = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not provided or not hmac.compare_digest(provided.strip(), expected):
+        response = jsonify({"ok": False, "error": "Thiếu hoặc sai Bearer token."})
+        response.headers["WWW-Authenticate"] = "Bearer"
+        return response, 401
+    return None
 
 
 def _parse_query_period(args: Any, *, timezone_name: str) -> dict[str, Any]:

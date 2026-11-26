@@ -155,6 +155,14 @@ Mac dinh web chay `http://127.0.0.1:8000`.
 - `WEB_REPORT_REFRESH_SECONDS` (mac dinh `600`)
 - `WEB_REPORT_STATUS_MAP_PATH` (mac dinh `config/web_report_status_map.json`)
 - `WEB_REPORT_SOURCE_COSTS_PATH` (mac dinh `config/web_report_source_costs.json`)
+- `WEB_REPORT_API_TOKEN` (Bearer token cho API export read-only; khong commit token vao Git)
+
+API export cho ben thong ke:
+
+- JC: `GET /api/v1/export?mode=range&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`
+- Ruza: `GET /ruza/api/v1/export?mode=range&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`
+- Header bat buoc: `Authorization: Bearer <WEB_REPORT_API_TOKEN>`
+- Response gom `snapshot` va `pnl` (P&L chi ap dung cho JC). Endpoint nay chi doc; khong co MCP server rieng.
 
 Chi phi FB/IG lay tu Meta Ads. Chi phi Dropo doc theo ngay tu file JSON tuy chon:
 
