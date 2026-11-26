@@ -718,7 +718,9 @@ class WebReportService:
             status_cfg.get("dropo_campaign_name_markers", ["web"])
         ) or {"web"}
         rows = self._fetch_ads_insight_rows(start_date=start_date, end_date=end_date)
-        if rows is not None:
+        # An empty insights response is not authoritative: Meta can return no
+        # ad-level rows while the account-level spend endpoint still has data.
+        if rows:
             self._last_ads_insight_rows = rows
             fb_ig_spend_vnd = 0
             dropo_spend_vnd = 0

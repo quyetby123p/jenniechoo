@@ -53,9 +53,11 @@ class _FakeMetaClient:
 
 
 class _FakeMetaInsightsClient:
-    def __init__(self, rows: list[dict]):
+    def __init__(self, rows: list[dict], *, account_spend_vnd: int = 0):
         self.rows = rows
+        self.account_spend_vnd = account_spend_vnd
         self.calls: list[tuple[date, date, str, int]] = []
+        self.account_spend_calls: list[tuple[date, date, str]] = []
 
     def get_ad_insights_for_range(
         self,
@@ -67,6 +69,10 @@ class _FakeMetaInsightsClient:
     ):  # noqa: ANN001
         self.calls.append((start_date, end_date, timezone_name, max_rows))
         return self.rows
+
+    def get_spend_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
+        self.account_spend_calls.append((start_date, end_date, timezone_name))
+        return {"spend_vnd": self.account_spend_vnd}
 
 
 class _FakeThaiDuongClient:
@@ -700,6 +706,23 @@ def test_snapshot_ads_spend_failure_falls_back_to_zero(tmp_path: Path) -> None:
 
     assert snapshot["metrics"]["ads_spend_vnd"] == 0
     assert snapshot["metrics"]["ads_spend_vnd_text"] == "0"
+
+
+def test_empty_meta_insights_falls_back_to_account_spend(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path)
+    meta = _FakeMetaInsightsClient([], account_spend_vnd=3_422_314)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+        meta_client=meta,
+    )
+
+    snapshot = service.get_snapshot(date(2026, 11, 26))
+
+    assert snapshot["metrics"]["ads_spend_vnd"] == 3_422_314
+    assert snapshot["metrics"]["ads_spend_vnd_text"] == "3,422,314"
+    assert meta.account_spend_calls == [(date(2026, 11, 26), date(2026, 11, 26), "Asia/Ho_Chi_Minh")]
 
 
 def test_snapshot_breaks_down_revenue_and_cost_by_source(tmp_path: Path) -> None:
