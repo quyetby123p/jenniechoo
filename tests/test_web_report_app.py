@@ -14,6 +14,20 @@ class _StubReportService:
         self.calls.append((start_date, end_date or start_date))
         return self.payload
 
+    def get_pnl(self, as_of_date: date):  # noqa: ANN001
+        return {
+            "as_of_date": as_of_date.isoformat(),
+            "period": {"label": "26-05-2026 → 25-06-2026"},
+            "actual_received_vnd_text": "1,000,000",
+            "actual_received_thb_text": "1,234",
+            "reconcile_session_count": 1,
+            "ads_spend_vnd_text": "300,000",
+            "ads_cost_percent_text": "30.00%",
+            "pnl_vnd": 700_000,
+            "pnl_vnd_text": "700,000",
+            "pnl_margin_percent_text": "70.00%",
+        }
+
 
 class _RangeAwareStubReportService:
     def __init__(self, *, today_payload: dict, range_payload: dict):
@@ -227,6 +241,8 @@ def test_report_includes_operational_links(tmp_path: Path) -> None:
     assert "https://pos.pancake.vn/" in html
     assert "https://www.facebook.com/adsmanager/" in html
     assert "https://dropo.io/app" in html
+    assert "P&L JC" in html
+    assert "1,000,000 VNĐ" in html
 
 
 def test_unknown_brand_and_status_return_404(tmp_path: Path) -> None:

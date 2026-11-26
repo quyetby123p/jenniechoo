@@ -128,6 +128,11 @@ def create_app(
             today_snapshot = snapshot
         else:
             today_snapshot = report_service_for_request.get_snapshot(today, today)
+        pnl = None
+        if not report_meta["prefix"]:
+            get_pnl = getattr(report_service_for_request, "get_pnl", None)
+            if callable(get_pnl):
+                pnl = get_pnl(today)
         overall_start = min(REPORT_BASELINE_DATE, today)
         overall_query_string = urlencode(
             {
@@ -154,6 +159,7 @@ def create_app(
         return render_template(
             "web_report/dashboard.html",
             snapshot=snapshot,
+            pnl=pnl,
             missing_overview=missing_overview,
             summary_cards=summary_cards,
             active_path=report_meta["prefix"] or "/",

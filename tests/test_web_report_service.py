@@ -91,6 +91,15 @@ class _FakeThaiDuongClient:
         return self._rows
 
 
+class _FakeThaiDuongHistoryClient:
+    def __init__(self, rows: list[dict]):
+        self._rows = rows
+
+    def fetch_settlement_history(self, start_date: date, end_date: date):  # noqa: ANN001
+        del start_date, end_date
+        return self._rows, "api"
+
+
 class _BrokenPancakeClient:
     def fetch_orders_snapshot_for_range(self, start_date: date, end_date: date, timezone_name: str):  # noqa: ANN001
         raise RuntimeError("snapshot unavailable")
@@ -723,6 +732,77 @@ def test_empty_meta_insights_falls_back_to_account_spend(tmp_path: Path) -> None
     assert snapshot["metrics"]["ads_spend_vnd"] == 3_422_314
     assert snapshot["metrics"]["ads_spend_vnd_text"] == "3,422,314"
     assert meta.account_spend_calls == [(date(2026, 11, 26), date(2026, 11, 26), "Asia/Ho_Chi_Minh")]
+
+
+def test_pnl_uses_latest_reconcile_session_and_26_to_25_cycle(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path, report_thb_to_vnd_rate=770.0)
+    dump_json(
+        settings.reconcile_cod_runs_dir / "run_2026-10-26_old.json",
+        {
+            "settlement_date": "2026-10-26",
+            "generated_at": "2026-10-26T08:00:00+00:00",
+            "conclusion_totals": {"thb_total": 1000, "vnd_total": 770000},
+        },
+    )
+    dump_json(
+        settings.reconcile_cod_runs_dir / "run_2026-10-26_latest.json",
+        {
+            "settlement_date": "2026-10-26",
+            "generated_at": "2026-10-26T09:00:00+00:00",
+            "conclusion_totals": {"thb_total": 1200, "vnd_total": 924000},
+        },
+    )
+    dump_json(
+        settings.reconcile_cod_runs_dir / "run_2026-11-25_20261125T030000Z.json",
+        {
+            "settlement_date": "2026-11-25",
+            "generated_at": "2026-11-25T03:00:00+00:00",
+            "conclusion_totals": {"thb_total": 500, "vnd_total": 0},
+        },
+    )
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+        meta_client=_FakeMetaClient(spend_vnd=2_000_000),
+    )
+
+    pnl = service.get_pnl(date(2026, 11, 26))
+
+    assert pnl["period"] == {
+        "start_date": "2026-10-26",
+        "end_date": "2026-11-25",
+        "label": "26-10-2026 → 25-11-2026",
+    }
+    assert pnl["actual_received_thb"] == 1700.0
+    assert pnl["actual_received_vnd"] == 1_309_000
+    assert pnl["ads_spend_vnd"] == 2_000_000
+    assert pnl["pnl_vnd"] == -691_000
+    assert pnl["reconcile_session_count"] == 2
+    assert WebReportService._pnl_period(date(2026, 11, 20)) == (date(2026, 10, 26), date(2026, 11, 20))
+
+
+def test_pnl_prefers_live_reconcile_session_history(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path, report_thb_to_vnd_rate=770.0)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+        meta_client=_FakeMetaClient(spend_vnd=2_000_000),
+        thai_duong_client=_FakeThaiDuongHistoryClient(
+            [
+                {"settlement_date": "2026-10-26", "conclusion": 1200, "conclusionVND": 924000},
+                {"settlement_date": "2026-11-25", "conclusion": 500, "conclusionVND": 385000},
+                {"settlement_date": "2026-12-01", "conclusion": 900, "conclusionVND": 693000},
+            ]
+        ),
+    )
+
+    pnl = service.get_pnl(date(2026, 11, 26))
+
+    assert pnl["actual_received_thb"] == 1700.0
+    assert pnl["actual_received_vnd"] == 1_309_000
+    assert pnl["reconcile_session_count"] == 2
 
 
 def test_snapshot_breaks_down_revenue_and_cost_by_source(tmp_path: Path) -> None:

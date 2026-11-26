@@ -81,6 +81,182 @@ class WebReportService:
             return end_date, start_date
         return start_date, end_date
 
+    def get_pnl(self, as_of_date: date | None = None) -> dict[str, Any]:
+        """Build JC P&L from realtime ads cost and settled cash received."""
+        as_of = as_of_date or datetime.now(self._resolve_timezone()).date()
+        period_start, period_end = self._pnl_period(as_of)
+        key = f"pnl::{period_start.isoformat()}::{period_end.isoformat()}"
+        now_ts = time.time()
+        with self._cache_lock:
+            cached = self._cache.get(key)
+            if cached is not None:
+                cached_ts, payload = cached
+                if now_ts - cached_ts < float(self.settings.web_report_refresh_seconds):
+                    return payload
+
+        with self._snapshot_build_lock:
+            now_ts = time.time()
+            with self._cache_lock:
+                cached = self._cache.get(key)
+                if cached is not None:
+                    cached_ts, payload = cached
+                    if now_ts - cached_ts < float(self.settings.web_report_refresh_seconds):
+                        return payload
+
+            status_cfg = self._load_status_map_config()
+            ads_spend_vnd, _fb_ig_spend_vnd, _dropo_spend_vnd, _dropo_configured = (
+                self._fetch_ads_spend_breakdown_vnd(
+                    start_date=period_start,
+                    end_date=period_end,
+                    status_cfg=status_cfg,
+                )
+            )
+            cash_received = self._load_pnl_cash_received(
+                start_date=period_start,
+                end_date=period_end,
+            )
+            received_vnd = max(0, int(round(float(cash_received.get("vnd_total") or 0))))
+            received_thb = max(0.0, float(cash_received.get("thb_total") or 0.0))
+            ads_spend_vnd = max(0, int(ads_spend_vnd))
+            pnl_vnd = received_vnd - ads_spend_vnd
+            ads_cost_percent = self._calculate_cost_percent(received_vnd, ads_spend_vnd)
+            pnl_margin_percent = (
+                round(float(pnl_vnd) / float(received_vnd) * 100.0, 2)
+                if received_vnd > 0
+                else 0.0
+            )
+            payload = {
+                "ok": True,
+                "as_of_date": as_of.isoformat(),
+                "period": {
+                    "start_date": period_start.isoformat(),
+                    "end_date": period_end.isoformat(),
+                    "label": f"{period_start.strftime('%d-%m-%Y')} → {period_end.strftime('%d-%m-%Y')}",
+                },
+                "actual_received_thb": round(received_thb, 2),
+                "actual_received_thb_text": self._fmt_thb_amount(received_thb),
+                "actual_received_vnd": received_vnd,
+                "actual_received_vnd_text": self._fmt_vnd_amount(received_vnd),
+                "ads_spend_vnd": ads_spend_vnd,
+                "ads_spend_vnd_text": self._fmt_vnd_amount(ads_spend_vnd),
+                "ads_cost_percent": ads_cost_percent,
+                "ads_cost_percent_text": self._fmt_percent(ads_cost_percent),
+                "pnl_vnd": pnl_vnd,
+                "pnl_vnd_text": self._fmt_vnd_amount(pnl_vnd),
+                "pnl_margin_percent": pnl_margin_percent,
+                "pnl_margin_percent_text": self._fmt_percent(pnl_margin_percent),
+                "reconcile_session_count": int(cash_received.get("session_count") or 0),
+            }
+            with self._cache_lock:
+                self._cache[key] = (time.time(), payload)
+            return payload
+
+    @staticmethod
+    def _pnl_period(as_of_date: date) -> tuple[date, date]:
+        if as_of_date.month == 1:
+            previous_year, previous_month = as_of_date.year - 1, 12
+        else:
+            previous_year, previous_month = as_of_date.year, as_of_date.month - 1
+        period_start = date(previous_year, previous_month, 26)
+        period_end = min(as_of_date, date(as_of_date.year, as_of_date.month, 25))
+        return period_start, period_end
+
+    def _load_pnl_cash_received(self, *, start_date: date, end_date: date) -> dict[str, Any]:
+        """Sum the latest stored reconciliation session for each settlement date."""
+        live_summary = self._load_pnl_cash_received_from_history(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if live_summary is not None:
+            return live_summary
+
+        thb_total = 0.0
+        vnd_total = 0.0
+        session_count = 0
+        rate = max(0.0, float(self.settings.report_thb_to_vnd_rate))
+        for settlement_date in self._iter_dates(start_date, end_date):
+            run_payload = self._load_latest_reconcile_run_for_date(settlement_date)
+            if not isinstance(run_payload, dict):
+                continue
+            totals = run_payload.get("conclusion_totals")
+            if not isinstance(totals, dict):
+                continue
+            session_thb = self._to_optional_float(totals.get("thb_total"))
+            session_vnd = self._to_optional_float(totals.get("vnd_total"))
+            if session_thb is None and session_vnd is None:
+                continue
+            session_thb = float(session_thb or 0.0)
+            session_vnd = float(session_vnd or 0.0)
+            if session_thb <= 0 and session_vnd > 0 and rate > 0:
+                session_thb = session_vnd / rate
+            if session_vnd <= 0 and session_thb > 0 and rate > 0:
+                session_vnd = session_thb * rate
+            thb_total += session_thb
+            vnd_total += session_vnd
+            if abs(session_thb) > 1e-9 or abs(session_vnd) > 1e-9:
+                session_count += 1
+        return {
+            "thb_total": round(thb_total, 2),
+            "vnd_total": round(vnd_total, 2),
+            "session_count": session_count,
+        }
+
+    def _load_pnl_cash_received_from_history(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> dict[str, Any] | None:
+        if self.thai_duong is None or not hasattr(self.thai_duong, "fetch_settlement_history"):
+            return None
+        try:
+            history, _source = self.thai_duong.fetch_settlement_history(start_date, end_date)  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Khong lay duoc lich su phien doi soat cho P&L: %s", exc)
+            return None
+        if not isinstance(history, list):
+            return None
+
+        thb_total = 0.0
+        vnd_total = 0.0
+        session_count = 0
+        rate = max(0.0, float(self.settings.report_thb_to_vnd_rate))
+        for settlement in history:
+            if not isinstance(settlement, dict):
+                continue
+            settlement_date = self._extract_settlement_date(settlement)
+            if settlement_date is None or not (start_date <= settlement_date <= end_date):
+                continue
+            session_thb = self._to_optional_float(
+                self._extract_first_text(
+                    settlement,
+                    ("conclusion", "ket_luan_doi_soat_thb", "codRemain", "cod_remain"),
+                )
+            )
+            session_vnd = self._to_optional_float(
+                self._extract_first_text(
+                    settlement,
+                    ("conclusionVND", "conclusionVnd", "ket_luan_doi_soat_vnd"),
+                )
+            )
+            if session_thb is None and session_vnd is None:
+                continue
+            session_thb = float(session_thb or 0.0)
+            session_vnd = float(session_vnd or 0.0)
+            if session_thb <= 0 and session_vnd > 0 and rate > 0:
+                session_thb = session_vnd / rate
+            if session_vnd <= 0 and session_thb > 0 and rate > 0:
+                session_vnd = session_thb * rate
+            thb_total += session_thb
+            vnd_total += session_vnd
+            if abs(session_thb) > 1e-9 or abs(session_vnd) > 1e-9:
+                session_count += 1
+        return {
+            "thb_total": round(thb_total, 2),
+            "vnd_total": round(vnd_total, 2),
+            "session_count": session_count,
+        }
+
     def _build_snapshot(self, start_date: date, end_date: date) -> dict[str, Any]:
         tz = self._resolve_timezone()
         status_cfg = self._load_status_map_config()
@@ -1436,6 +1612,10 @@ class WebReportService:
             "payDate",
             "paidDate",
             "codPaymentDate",
+            "Ngày trả tiền COD",
+            "Ngay tra tien COD",
+            "Ngày đối soát",
+            "Ngay doi soat",
             "date",
             "createdAt",
             "created_at",

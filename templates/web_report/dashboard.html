@@ -278,6 +278,37 @@
   {% endif %}
 </div>
 {% endif %}
+{% if pnl %}
+<div class="brand-card p-3 mb-3 pnl-card">
+  <div class="d-flex justify-content-between align-items-baseline gap-2 flex-wrap mb-2">
+    <h2 class="h5 mb-0">P&L JC</h2>
+    <span class="text-muted small">Kỳ {{ pnl.period.label }} · realtime đến {{ pnl.as_of_date }}</span>
+  </div>
+  <div class="text-muted small mb-3">Tiền thực nhận theo phiên đối soát trừ chi phí Meta Ads realtime.</div>
+  <div class="pnl-grid">
+    <div class="metric-card p-3">
+      <div class="label">Tiền thực nhận</div>
+      <div class="value text-success" style="font-size: 24px;">{{ pnl.actual_received_vnd_text }} VNĐ</div>
+      <small class="text-muted">~ {{ pnl.actual_received_thb_text }} THB · {{ pnl.reconcile_session_count }} phiên đối soát</small>
+    </div>
+    <div class="metric-card p-3">
+      <div class="label">Chi phí Ads realtime</div>
+      <div class="value text-danger" style="font-size: 24px;">{{ pnl.ads_spend_vnd_text }} VNĐ</div>
+      <small class="text-muted">{{ pnl.ads_cost_percent_text }} trên tiền thực nhận</small>
+    </div>
+    <div class="metric-card p-3">
+      <div class="label">P&L sau Ads</div>
+      <div class="value {% if pnl.pnl_vnd >= 0 %}text-success{% else %}text-danger{% endif %}" style="font-size: 24px;">{{ pnl.pnl_vnd_text }} VNĐ</div>
+      <small class="text-muted">Biên sau Ads: {{ pnl.pnl_margin_percent_text }}</small>
+    </div>
+    <div class="metric-card p-3">
+      <div class="label">Chu kỳ tính</div>
+      <div class="value" style="font-size: 24px;">26 → 25</div>
+      <small class="text-muted">Cập nhật theo cache realtime 10 phút</small>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
