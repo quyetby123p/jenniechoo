@@ -33,6 +33,7 @@ class MetaAdsClient:
     _DEFAULT_MESSAGING_DESTINATION = "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
     _DEFAULT_MESSAGING_OPTIMIZATION = "MESSAGING_PURCHASE_CONVERSION"
     _CONTEXTUAL_MULTI_ADS_OPT_OUT = {"enroll_status": "OPT_OUT"}
+    _THAILAND_REGULATED_CATEGORY = "THAILAND_UNIVERSAL"
     _LEGACY_RESULT_GOAL_TO_OPTIMIZATION = {
         "MAXIMIZE_PURCHASES_VIA_MESSAGE": _DEFAULT_MESSAGING_OPTIMIZATION,
     }
@@ -456,6 +457,18 @@ class MetaAdsClient:
                     if subcode:
                         details.append(f"subcode={subcode}")
                     suffix = f" ({', '.join(details)})" if details else ""
+                    lowered = str(message).lower()
+                    if (
+                        subcode in {"3585634", "3858634", "3858636"}
+                        or "verified advertiser" in lowered
+                        or "nhà quảng cáo đã xác minh" in lowered
+                    ):
+                        return (
+                            "Meta yêu cầu khai báo advertiser/beneficiary và payer đã xác minh cho ad set "
+                            "nhắm Thái Lan. Bot đã gửi THAILAND_UNIVERSAL; anh cần hoàn tất xác minh trong "
+                            "Ads Manager hoặc cấu hình META_THAILAND_UNIVERSAL_BENEFICIARY_ID và "
+                            f"META_THAILAND_UNIVERSAL_PAYER_ID{suffix}."
+                        )
                     return f"{message}{suffix}"
         except json.JSONDecodeError:
             pass
@@ -2167,6 +2180,7 @@ class MetaAdsClient:
             payload,
             plan.raw.get("adset_payload_overrides", {}),
         )
+        payload = self._apply_regional_regulation_requirements(payload)
         payload = self._normalize_adset_payload(payload)
         fallback_payload = self._build_simple_adset_fallback(payload)
         try:
@@ -2247,6 +2261,7 @@ class MetaAdsClient:
             },
         }
         payload = self._apply_overrides(payload, plan.raw.get("adset_payload_overrides", {}))
+        payload = self._apply_regional_regulation_requirements(payload)
         # The legacy existing-customer budget cap is not the new Ads Manager
         # lifecycle selector. Do not send a misleading value for all audiences.
         payload.pop("existing_customer_budget_percentage", None)
@@ -2266,6 +2281,54 @@ class MetaAdsClient:
         if isinstance(slot.targeting_override, dict) and slot.targeting_override:
             return slot.targeting_override
         return self.get_saved_audience_targeting(slot.saved_audience_id)
+
+    def _apply_regional_regulation_requirements(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Declare Thailand advertiser identities when the targeting reaches Thailand.
+
+        Meta can reuse identities configured as ad-account defaults. Explicit IDs are
+        optional, but a partially configured pair must never be sent because Meta
+        rejects an ad set with only one side of the beneficiary/payer declaration.
+        """
+
+        targeting = payload.get("targeting")
+        if not isinstance(targeting, dict):
+            return payload
+        geo_locations = targeting.get("geo_locations")
+        if not isinstance(geo_locations, dict):
+            return payload
+        countries = {
+            str(country).strip().upper()
+            for country in geo_locations.get("countries", [])
+            if str(country).strip()
+        }
+        if "TH" not in countries:
+            return payload
+
+        normalized = dict(payload)
+        categories = normalized.get("regional_regulated_categories")
+        if not isinstance(categories, list):
+            categories = []
+        if self._THAILAND_REGULATED_CATEGORY not in categories:
+            categories = [*categories, self._THAILAND_REGULATED_CATEGORY]
+        normalized["regional_regulated_categories"] = categories
+
+        beneficiary_id = str(getattr(self.settings, "meta_thailand_beneficiary_id", "")).strip()
+        payer_id = str(getattr(self.settings, "meta_thailand_payer_id", "")).strip()
+        if bool(beneficiary_id) != bool(payer_id):
+            raise ValidationError(
+                "Cần cấu hình đồng thời META_THAILAND_UNIVERSAL_BENEFICIARY_ID và "
+                "META_THAILAND_UNIVERSAL_PAYER_ID, hoặc để trống cả hai để dùng identity mặc định của ad account."
+            )
+        if beneficiary_id and payer_id:
+            identities = normalized.get("regional_regulation_identities")
+            if not isinstance(identities, dict):
+                identities = {}
+            normalized["regional_regulation_identities"] = {
+                **identities,
+                "universal_beneficiary": beneficiary_id,
+                "universal_payer": payer_id,
+            }
+        return normalized
 
     def create_ad_creative(
         self,

@@ -16,6 +16,16 @@ Khách đặt trên th.jenniechoo.com
 Jennie không dùng SKU map của VAYXA. Mỗi lần chạy bridge đọc catalog Pancake ở chế độ
 GET để nếu anh đổi biến thể/giá trên Pancake thì luồng vẫn bám dữ liệu nguồn.
 
+### Cấu trúc bundle của sheet JC
+
+Một đơn nhiều sản phẩm trên sheet JC có một dòng chính chứa thông tin khách,
+mã sản phẩm đầu tiên và tóm tắt lựa chọn; các sản phẩm tiếp theo được ghi ở
+các dòng liền sau với marker `jcpost=1..N`. Bridge gom các dòng này thành một
+đơn trước khi map sang Pancake. Thứ tự mã trong `Tóm tắt đơn` là nguồn đối chiếu
+chính; màu, size và số lượng được lấy theo từng lựa chọn trong tóm tắt, rồi
+kiểm tra lại với các dòng chi tiết. Vì vậy sản phẩm màu Đen ở dòng sau không
+thể bị dùng nhầm màu của sản phẩm đầu tiên.
+
 Profile chạy Jennie là `main`; profile `ADS2` bên dưới vẫn dành cho VAYXA.
 
 Tự động biến lead từ landing `vayxath.com` thành đơn trong Pancake shop VAYXA (`714269213`).

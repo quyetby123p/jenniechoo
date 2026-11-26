@@ -1,0 +1,78 @@
+name: Repair Jennie Pancake order variation
+
+on:
+  workflow_dispatch:
+    inputs:
+      custom_id:
+        description: "Mã đơn JC hiển thị cho khách"
+        required: true
+        default: "JC261107-153408"
+        type: string
+      code:
+        description: "Mã sản phẩm cần sửa"
+        required: true
+        default: "JC-A-250"
+        type: string
+      color:
+        description: "Màu đúng"
+        required: true
+        default: "Đen"
+        type: string
+      size:
+        description: "Size đúng"
+        required: true
+        default: "S"
+        type: string
+      live:
+        description: "Ghi thật vào Pancake (bỏ chọn để chỉ kiểm tra)"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PANCAKE_API_BASE_URL: ${{ secrets.PANCAKE_API_BASE_URL || 'https://pos.pancake.vn/api/v1' }}
+      PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      PANCAKE_SHOP_ID: ${{ secrets.PANCAKE_SHOP_ID }}
+      DROPO_PANCAKE_SKU_MAP_PATH: "pancake:"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check required secrets
+        shell: bash
+        run: |
+          test -n "$PANCAKE_ACCESS_TOKEN" || { echo "Thiếu PANCAKE_ACCESS_TOKEN"; exit 1; }
+          test -n "$PANCAKE_SHOP_ID" || { echo "Thiếu PANCAKE_SHOP_ID"; exit 1; }
+
+      - name: Repair order variation
+        shell: bash
+        run: |
+          args=(
+            "--custom-id" "${{ inputs.custom_id }}"
+            "--code" "${{ inputs.code }}"
+            "--color" "${{ inputs.color }}"
+            "--size" "${{ inputs.size }}"
+          )
+          if [ "${{ inputs.live }}" = "true" ]; then
+            args+=("--live")
+          fi
+          python scripts/repair_jennie_order_variation.py "${args[@]}"

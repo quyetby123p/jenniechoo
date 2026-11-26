@@ -281,7 +281,7 @@ def test_fallback_dung_cot_sku_khi_selected_rong():
     assert bridge.resolve_items("", "VXV002-DEN-L")[0]["variation_id"] == "var-den-l"
 
 
-def test_jennie_bundle_applies_shared_color_and_size_to_every_product():
+def test_jennie_bundle_rejects_ambiguous_shared_color_and_size():
     bridge, _, _ = build_bridge([HEADER])
     bridge._pancake_catalog = {
         "JC-A-250": [
@@ -320,9 +320,8 @@ def test_jennie_bundle_applies_shared_color_and_size_to_every_product():
     header = ["Mã sản phẩm", "Màu", "Size", "Số lượng"]
     row = ["JC-A-250, JC-A-248", "Kem", "L", "2"]
 
-    items = bridge.resolve_jennie_items(row, header)
-
-    assert [item["variation_id"] for item in items] == ["jca250-kem-l", "jca248-kem-l"]
+    with pytest.raises(ValidationError, match="thiếu màu/size riêng"):
+        bridge.resolve_jennie_items(row, header)
 
 
 def test_jennie_bundle_uses_jcpost_rows_for_per_item_color_and_size():
@@ -339,6 +338,63 @@ def test_jennie_bundle_uses_jcpost_rows_for_per_item_color_and_size():
     items = bridge.resolve_jennie_items(row, header, bundle_rows=details)
 
     assert [item["variation_id"] for item in items] == ["jcv123-den-s", "jca158-nau-s", "jcq158-nau-s"]
+
+
+def test_jc_sheet_groups_main_row_and_jcpost_rows_from_summary_order():
+    """Một lead JC có mã đầu ở dòng chính, các mã còn lại ở dòng jcpost."""
+    header = [
+        "Nguồn",
+        "เบอร์โทรศัพท์ / Phone",
+        "SKU Code",
+        "Mã SP",
+        "Màu",
+        "Size",
+        "Số lượng",
+        "Tóm tắt đơn",
+    ]
+    main = [
+        "https://th.jcdejc.com/",
+        "0812345678",
+        "JC-A-260",
+        "JC-A-260",
+        "Kem",
+        "S",
+        "1",
+        "JC-A-260 (Kem/S) x1 | JC-CV-232 (Đen/S) x1 | JC-A-250 (Đen/S) x1",
+    ]
+    detail_1 = [
+        "https://th.jcdejc.com/?jcpost=1",
+        "",
+        "",
+        "JC-CV-232",
+        "Đen",
+        "S",
+        "1",
+        "",
+    ]
+    detail_2 = [
+        "https://th.jcdejc.com/?jcpost=2",
+        "",
+        "",
+        "JC-A-250",
+        "Đen",
+        "S",
+        "1",
+        "",
+    ]
+    bridge, _, _ = build_bridge([header, main, detail_1, detail_2])
+    bridge._pancake_catalog = {
+        "JC-A-260": [{"variation_id": "a260-kem-s", "variation_sku": "JC-A-260-KEM-S", "size": "S", "field_values": ["Kem", "S"], "retail_price": 1900}],
+        "JC-CV-232": [{"variation_id": "cv232-den-s", "variation_sku": "JC-CV-232-DEN-S", "size": "S", "field_values": ["Đen", "S"], "retail_price": 2100}],
+        "JC-A-250": [{"variation_id": "a250-den-s", "variation_sku": "JC-A-250-DEN-S", "size": "S", "field_values": ["Đen", "S"], "retail_price": 2500}],
+    }
+
+    details = bridge._bundle_detail_rows([main, detail_1, detail_2], 0, header, main)
+    items = bridge.resolve_jennie_items(main, header, bundle_rows=details)
+
+    assert len(details) == 2
+    assert [item["variation_id"] for item in items] == ["a260-kem-s", "cv232-den-s", "a250-den-s"]
+    assert [item["quantity"] for item in items] == [1, 1, 1]
 
 
 def test_jennie_bundle_uses_summary_quantity_when_main_row_has_bundle_total():
@@ -420,6 +476,92 @@ def test_jennie_summary_color_wins_over_shared_color_for_each_item():
         "jca250-den-m",
         "jcv140-kem-m",
     ]
+
+
+def test_jennie_cart_summary_maps_code_tagged_items_by_order():
+    bridge, _, _ = build_bridge([HEADER])
+    bridge._pancake_catalog = {
+        "JC-A-260": [{
+            "variation_id": "jca260-kem-s",
+            "variation_sku": "JC-A-260-KEM-S",
+            "size": "S",
+            "field_values": ["Kem", "S"],
+            "retail_price": 190000,
+        }],
+        "JC-CV-232": [{
+            "variation_id": "jccv232-den-s",
+            "variation_sku": "JC-CV-232-DEN-S",
+            "size": "S",
+            "field_values": ["Đen", "S"],
+            "retail_price": 210000,
+        }],
+        "JC-A-250": [
+            {
+                "variation_id": "jca250-kem-s",
+                "variation_sku": "JC-A-250-KEM-S",
+                "size": "S",
+                "field_values": ["Kem", "S"],
+                "retail_price": 250000,
+            },
+            {
+                "variation_id": "jca250-den-s",
+                "variation_sku": "JC-A-250-DEN-S",
+                "size": "S",
+                "field_values": ["Đen", "S"],
+                "retail_price": 250000,
+            },
+        ],
+    }
+    header = ["SKU Code", "Mã sản phẩm", "Màu", "Size", "Số lượng", "Tóm tắt đơn"]
+    row = [
+        "JC-A-260, JC-CV-232, JC-A-250",
+        "JC-A-260",
+        "Kem",
+        "S",
+        "3",
+        "JC-A-260 เสื้อ Soya Tea-shirt JCA260 (Kem/S) x1 · ฿1,900 | "
+        "JC-CV-232 กระโปรง Ivory Poise Skirt (Đen/S) x1 · ฿2,100 | "
+        "JC-A-250 เสื้อ Morning Veil Top (Đen/S) x1 · ฿2,500",
+    ]
+
+    items = bridge.resolve_jennie_items(row, header)
+
+    assert [item["variation_id"] for item in items] == [
+        "jca260-kem-s",
+        "jccv232-den-s",
+        "jca250-den-s",
+    ]
+
+
+def test_jennie_bundle_rejects_summary_code_order_mismatch():
+    bridge, _, _ = build_bridge([HEADER])
+    bridge._pancake_catalog = {
+        "JC-A-250": [{
+            "variation_id": "jca250-den-s",
+            "variation_sku": "JC-A-250-DEN-S",
+            "size": "S",
+            "field_values": ["Đen", "S"],
+            "retail_price": 250000,
+        }],
+        "JC-V-140": [{
+            "variation_id": "jcv140-kem-s",
+            "variation_sku": "JC-V-140-KEM-S",
+            "size": "S",
+            "field_values": ["Kem", "S"],
+            "retail_price": 340000,
+        }],
+    }
+    header = ["SKU Code", "Màu", "Size", "Số lượng", "Tóm tắt đơn"]
+    row = [
+        "JC-A-250, JC-V-140",
+        "Kem",
+        "S",
+        "2",
+        "JC-V-140 (Kem/S) x1 | JC-A-250 (Đen/S) x1",
+    ]
+
+    with pytest.raises(ValidationError, match="lệch thứ tự/mã sản phẩm"):
+        bridge.resolve_jennie_items(row, header)
 
 
 def test_jennie_payload_uses_web_source_column_instead_of_dropo_fallback():

@@ -1769,7 +1769,7 @@ def test_media_flow_retries_partially_advanced_request_after_expired_callback() 
     asyncio.run(bot._on_media_flow_select(query, "req_media", "web"))
 
     assert query.message.answers == [
-        "Đã chọn luồng Web Sales. Anh gửi caption, rồi em sẽ gửi tiếp câu hỏi tiêu đề."
+        "Đã chọn luồng Web Sales. Anh gửi caption; tiêu đề đã khóa, sau đó em sẽ hỏi ngân sách."
     ]
 
 

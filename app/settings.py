@@ -50,6 +50,8 @@ class Settings:
     meta_app_secret: str = ""
     meta_pixel_id: str = ""
     meta_instagram_user_id: str = ""
+    meta_thailand_beneficiary_id: str = ""
+    meta_thailand_payer_id: str = ""
     new_web_ads_enabled: bool = False
     new_messenger_media_ads_enabled: bool = False
     daily_report_notify_chat_id: int = 0
@@ -515,6 +517,12 @@ def load_settings(
     meta_app_secret = _profile_env("META_APP_SECRET", prefix, "")
     meta_pixel_id = _profile_env("META_PIXEL_ID", prefix, "", allow_fallback=False)
     meta_instagram_user_id = _profile_env("META_INSTAGRAM_USER_ID", prefix, "", allow_fallback=False)
+    meta_thailand_beneficiary_id = _profile_env(
+        "META_THAILAND_UNIVERSAL_BENEFICIARY_ID", prefix, "", allow_fallback=False
+    )
+    meta_thailand_payer_id = _profile_env(
+        "META_THAILAND_UNIVERSAL_PAYER_ID", prefix, "", allow_fallback=False
+    )
     meta_api_version = _profile_env("META_API_VERSION", prefix, "v21.0")
 
     app_timezone = os.getenv("APP_TIMEZONE", "Asia/Ho_Chi_Minh").strip()
@@ -1099,6 +1107,8 @@ def load_settings(
         meta_app_secret=meta_app_secret,
         meta_pixel_id=meta_pixel_id,
         meta_instagram_user_id=meta_instagram_user_id,
+        meta_thailand_beneficiary_id=meta_thailand_beneficiary_id,
+        meta_thailand_payer_id=meta_thailand_payer_id,
         meta_api_version=meta_api_version,
         app_timezone=app_timezone,
         app_currency=app_currency,

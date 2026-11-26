@@ -26,6 +26,7 @@ import re
 import time
 from typing import Any
 import unicodedata
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 import requests
@@ -432,7 +433,7 @@ class DropoPancakeBridge:
         codes = self._split_order_values(raw_codes)
         if not codes:
             codes = self._split_order_values(
-                get("Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku")
+                get("Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku", "san_pham")
             )
         if not codes:
             raise ValidationError("thiếu SKU sản phẩm Jennie trong lead")
@@ -444,17 +445,63 @@ class DropoPancakeBridge:
         shared_color = str(get("Màu", "mau", "color") or "").strip()
         shared_size = str(get("Size", "size") or "").strip()
         summary_options = self._parse_jennie_summary(
-            get("Tóm tắt đơn", "Tóm tắt", "tom_tat", "summary", "san_pham")
+            get(
+                "Tóm tắt đơn",
+                "Tóm tắt",
+                "tom_tat",
+                "summary",
+                "san_pham",
+                "Selected SKUs",
+                "selected_skus",
+                "Item choices in combo",
+                "item_choices",
+            )
         )
-        summary_occurrences: dict[str, int] = {}
+        summary_sequence = summary_options.get("__sequence__", [])
         detail_rows = [row] + list(bundle_rows or [])
+
+        # The JC sheet stores only the first SKU in the main row.  The full
+        # order is represented by the checkout summary and by one ``jcpost``
+        # row per following item.  Treat the summary sequence as the
+        # authoritative order when it contains explicit product codes; using
+        # only the main-row SKU silently drops the remaining products.
+        summary_codes = [
+            self._normalize_jennie_code(option.get("code"))
+            for option in summary_sequence
+        ]
+        if summary_sequence and all(summary_codes):
+            if len(summary_codes) < len(codes):
+                raise ValidationError(
+                    "tóm tắt đơn không đủ mã để đối chiếu bundle sản phẩm"
+                )
+            # Equal-length lists still need order validation below; only use
+            # the summary to expand the main-row list when the sheet stored
+            # just the first SKU there.
+            if len(summary_codes) > len(codes):
+                codes = summary_codes
+        elif bundle_rows:
+            detail_codes = [
+                self._normalize_jennie_code(
+                    self._cell(detail, header, "Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku", "san_pham")
+                )
+                for detail in bundle_rows
+            ]
+            detail_codes = [code for code in detail_codes if code]
+            if detail_codes:
+                codes = codes[:1] + detail_codes
+
+        if summary_sequence and len(summary_sequence) != len(codes):
+            raise ValidationError(
+                "tóm tắt đơn không đủ dòng để đối chiếu mã sản phẩm trong bundle"
+            )
+        summary_occurrences: dict[str, int] = {}
         items: list[dict[str, Any]] = []
         for index, raw_code in enumerate(codes, start=1):
             code = self._normalize_jennie_code(raw_code)
             detail_row = detail_rows[index - 1] if index <= len(detail_rows) else []
             detail_get = lambda *names: self._cell(detail_row, header, *names)  # noqa: E731
             detail_code = self._normalize_jennie_code(
-                detail_get("Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku")
+                detail_get("Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku", "san_pham")
             )
             if detail_code != code:
                 detail_row = next(
@@ -462,7 +509,7 @@ class DropoPancakeBridge:
                         candidate
                         for candidate in detail_rows[index:]
                         if self._normalize_jennie_code(
-                            self._cell(candidate, header, "Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku")
+                            self._cell(candidate, header, "Mã SP", "Mã sản phẩm", "ma_sp", "SKU", "sku", "san_pham")
                         )
                         == code
                     ),
@@ -477,21 +524,47 @@ class DropoPancakeBridge:
                 else {}
             )
             summary_occurrences[code] = occurrence + 1
+            # A bundle must carry an explicit product code on every summary
+            # line. Without it, the shared color/size columns are ambiguous:
+            # they often contain the first product's choice and can silently
+            # map a later black item to the cream variation.
+            if summary_sequence:
+                sequential_option = summary_sequence[index - 1]
+                sequential_code = self._normalize_jennie_code(
+                    sequential_option.get("code")
+                )
+                if sequential_code and sequential_code != code:
+                    raise ValidationError(
+                        f"tóm tắt đơn lệch thứ tự/mã sản phẩm tại item {index}: "
+                        f"cần {code}, nhận {sequential_code or '?'}"
+                    )
+                if len(codes) > 1 and not sequential_code:
+                    raise ValidationError(
+                        f"tóm tắt đơn thiếu mã sản phẩm tại item {index} ({code})"
+                    )
+                summary_option = sequential_option
             # Tóm tắt đơn là snapshot lựa chọn theo từng sản phẩm tại lúc
             # checkout. Ưu tiên nó trước các cột Màu/Size dùng chung của dòng
             # chính; các cột dùng chung có thể còn giữ lựa chọn của sản phẩm
             # đầu tiên và làm sản phẩm màu Đen bị map nhầm sang Kem.
+            column_color = str(
+                get(f"mau{index}", f"color{index}", f"Màu {index}") or ""
+            ).strip()
+            detail_color = str(detail_get("Màu", "mau", "color") or "").strip()
+            column_size = str(get(f"size{index}", f"Size {index}") or "").strip()
+            detail_size = str(detail_get("Size", "size") or "").strip()
+            if len(codes) > 1 and not summary_option and not (
+                (column_color or detail_color) and (column_size or detail_size)
+            ):
+                raise ValidationError(
+                    f"thiếu màu/size riêng cho item {index} ({code}); "
+                    "không dùng màu/size dùng chung để tránh map nhầm"
+                )
             color = str(
-                summary_option.get("color")
-                or get(f"mau{index}", f"color{index}", f"Màu {index}")
-                or detail_get("Màu", "mau", "color")
-                or shared_color
+                summary_option.get("color") or column_color or detail_color or shared_color
             ).strip()
             size = str(
-                summary_option.get("size")
-                or get(f"size{index}", f"Size {index}")
-                or detail_get("Size", "size")
-                or shared_size
+                summary_option.get("size") or column_size or detail_size or shared_size
             ).strip()
             quantity_raw = get(f"sl{index}", f"qty{index}", f"Quantity {index}")
             if not quantity_raw:
@@ -541,23 +614,34 @@ class DropoPancakeBridge:
         if not text:
             return {}
         result: dict[str, list[dict[str, Any]]] = {}
-        pattern = re.compile(
-            r"(?P<code>JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+))\s*"
+        choice_pattern = re.compile(
             r"\((?P<color>[^()/|]+)\s*/\s*(?P<size>[^()|]+)\)"
             r"\s*x\s*(?P<quantity>\d+)",
             re.IGNORECASE,
         )
-        for match in pattern.finditer(text):
-            code = cls._normalize_jennie_code(match.group("code"))
-            if not code:
+        code_pattern = re.compile(r"JC(?:-[A-Z]+-\d+|[A-Z]+-?\d+)", re.IGNORECASE)
+        sequence: list[dict[str, Any]] = []
+        for segment in re.split(r"\s*\|\s*", text):
+            match = choice_pattern.search(segment)
+            if not match:
                 continue
-            result.setdefault(code, []).append(
-                {
-                    "color": match.group("color").strip(),
-                    "size": match.group("size").strip(),
-                    "quantity": int(match.group("quantity")),
-                }
+            code_matches = list(code_pattern.finditer(segment[: match.start()]))
+            code = (
+                cls._normalize_jennie_code(code_matches[-1].group(0))
+                if code_matches
+                else ""
             )
+            item = {
+                "code": code,
+                "color": match.group("color").strip(),
+                "size": match.group("size").strip(),
+                "quantity": int(match.group("quantity")),
+            }
+            sequence.append(item)
+            if code:
+                result.setdefault(code, []).append(item)
+        if sequence:
+            result["__sequence__"] = sequence
         return result
 
     def resolve_items(self, selected_skus: str, fallback_sku: str = "") -> list[dict[str, Any]]:
@@ -1215,8 +1299,32 @@ class DropoPancakeBridge:
         codes = self._split_order_values(
             self._cell(main_row, header, "SKU Code", "sku_code", "sku_codes")
         )
-        if len(codes) <= 1:
-            return []
+        summary = self._parse_jennie_summary(
+            self._cell(
+                main_row,
+                header,
+                "Tóm tắt đơn",
+                "Tóm tắt",
+                "tom_tat",
+                "summary",
+                "san_pham",
+                "Selected SKUs",
+                "selected_skus",
+                "Item choices in combo",
+                "item_choices",
+            )
+        )
+        summary_sequence = summary.get("__sequence__", [])
+        expected_items = max(len(codes), len(summary_sequence))
+        # A single SKU in the main row is normal for the JC sheet: the other
+        # items are in the summary/detail rows.  Do not return early here.
+        if expected_items <= 1 and not summary_sequence:
+            expected_items = 1
+
+        main_source = str(
+            self._cell(main_row, header, "Nguồn", "source", "landing_url", "Link", "URL") or ""
+        ).strip()
+        main_source_family = self._source_family(main_source)
 
         details: list[list[Any]] = []
         for candidate in data_rows[main_offset + 1 :]:
@@ -1235,7 +1343,9 @@ class DropoPancakeBridge:
             )
             if candidate_phone or self._cell(candidate_row, header, "Order ID", "ma_don", "order_id"):
                 break
-            source = str(self._cell(candidate_row, header, "Nguồn", "source") or "").strip()
+            source = str(
+                self._cell(candidate_row, header, "Nguồn", "source", "landing_url", "Link", "URL") or ""
+            ).strip()
             raw_code = self._cell(
                 candidate_row,
                 header,
@@ -1244,13 +1354,50 @@ class DropoPancakeBridge:
                 "ma_sp",
                 "SKU",
                 "sku",
+                "san_pham",
             )
-            if not raw_code or not re.search(r"[?&]jcpost=\d+", source, re.IGNORECASE):
+            if not raw_code:
+                break
+            has_jcpost_marker = bool(re.search(r"[?&]jcpost=\d+", source, re.IGNORECASE))
+            candidate_family = self._source_family(source)
+            # Do not require the literal jcpost query: the JC export may
+            # normalize it away while keeping the item rows contiguous.  The
+            # row is still safe to attach because it has no customer/order
+            # identity and has an explicit product code.
+            if source and main_source_family and candidate_family != main_source_family and not has_jcpost_marker:
                 break
             details.append(candidate_row)
-            if len(details) >= len(codes) - 1:
+            if expected_items > 1 and len(details) >= expected_items - 1:
+                break
+            if expected_items <= 1 and not has_jcpost_marker:
                 break
         return details
+
+    @staticmethod
+    def _source_family(value: Any) -> str:
+        """Normalize a lead URL for grouping main/detail sheet rows.
+
+        ``jcpost=1``/``jcpost=2`` are row markers, not different orders.  A
+        few Sheet exports also omit that marker, so grouping uses the URL
+        without it and leaves all other query parameters intact.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        try:
+            parts = urlsplit(text)
+            query = [(key, val) for key, val in parse_qsl(parts.query, keep_blank_values=True) if key.lower() != "jcpost"]
+            return urlunsplit(
+                (
+                    parts.scheme.lower(),
+                    parts.netloc.lower(),
+                    parts.path.rstrip("/"),
+                    urlencode(query),
+                    "",
+                )
+            ).rstrip("/")
+        except ValueError:
+            return re.sub(r"([?&])jcpost=\d+", "", text, flags=re.IGNORECASE).rstrip("/?&")
 
     def _fetch_sheet_values(self) -> list[list[Any]]:
         """Đọc TOÀN BỘ dòng có dữ liệu của tab.
@@ -1546,6 +1693,29 @@ class DropoPancakeBridge:
         return re.sub(r"[^A-Z0-9]", "", text.upper())
 
     @staticmethod
+    def _color_tokens(value: Any) -> set[str]:
+        """Return accent-safe color tokens without substring false positives."""
+        text = str(value or "").replace("Đ", "D").replace("đ", "d")
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        return {token for token in re.findall(r"[A-Z0-9]+", text.upper()) if token}
+
+    @classmethod
+    def _color_match_tokens(cls, value: Any) -> set[str]:
+        """Add catalog abbreviations used by the JC/Pancake color SKUs."""
+        tokens = cls._color_tokens(value)
+        aliases = {
+            "DEN": {"DEN", "BLACK"},
+            "KEM": {"KEM", "BE", "CREAM", "IVORY"},
+            "TRANG": {"TRANG", "WHITE"},
+            "XANH": {"XANH", "BLUE", "GREEN"},
+        }
+        expanded = set(tokens)
+        for token in tokens:
+            expanded.update(aliases.get(token, set()))
+        return expanded
+
+    @staticmethod
     def _norm_geo_match(value: Any) -> str:
         """Chuẩn hóa tên địa danh nhưng giữ chữ Thái để còn match được."""
         text = unicodedata.normalize("NFKC", str(value or "")).casefold()
@@ -1567,11 +1737,19 @@ class DropoPancakeBridge:
         if not color_key:
             return sized[0]
         scored: list[tuple[int, dict[str, Any]]] = []
+        target_color_tokens = cls._color_match_tokens(color)
         for candidate in sized:
-            haystack = cls._norm_match(" ".join(candidate.get("field_values", [])))
+            raw_values = " ".join(candidate.get("field_values", []))
+            haystack = cls._norm_match(raw_values)
             if not haystack:
                 continue
-            if color_key == haystack:
+            candidate_color_tokens = cls._color_tokens(raw_values)
+            exact_color_tokens = target_color_tokens & candidate_color_tokens
+            if exact_color_tokens:
+                # Explicit SKU/field tokens beat fuzzy text matches. This
+                # prevents Đen -> EN from matching REN in a cream SKU.
+                score = 100 + len(exact_color_tokens)
+            elif color_key == haystack:
                 score = 3
             elif color_key in haystack:
                 score = 2

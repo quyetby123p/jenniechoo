@@ -29,6 +29,10 @@ services:
         sync: false
       - key: META_PAGE_ID
         sync: false
+      - key: META_THAILAND_UNIVERSAL_BENEFICIARY_ID
+        sync: false
+      - key: META_THAILAND_UNIVERSAL_PAYER_ID
+        sync: false
       - key: PANCAKE_SHOP_ID
         sync: false
       - key: PANCAKE_ACCESS_TOKEN
@@ -48,6 +52,10 @@ services:
       - key: ADS2_META_PAGE_ID
         sync: false
       - key: ADS2_META_API_VERSION
+        sync: false
+      - key: ADS2_META_THAILAND_UNIVERSAL_BENEFICIARY_ID
+        sync: false
+      - key: ADS2_META_THAILAND_UNIVERSAL_PAYER_ID
         sync: false
       - key: ADS2_PANCAKE_API_BASE_URL
         sync: false
