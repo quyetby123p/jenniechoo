@@ -284,7 +284,7 @@
     <h2 class="h5 mb-0">P&L JC</h2>
     <span class="text-muted small">Kỳ {{ pnl.period.label }} · realtime đến {{ pnl.as_of_date }}</span>
   </div>
-  <div class="text-muted small mb-3">Tiền thực nhận theo phiên đối soát trừ chi phí Meta Ads realtime.</div>
+  <div class="text-muted small mb-3">Lợi nhuận = tiền thực nhận - giá vốn 16% - lương - Ads - phí H/J - vận chuyển kho - phần mềm.</div>
   <div class="pnl-grid">
     <div class="metric-card p-3">
       <div class="label">Tiền thực nhận</div>
@@ -297,16 +297,17 @@
       <small class="text-muted">{{ pnl.ads_cost_percent_text }} trên tiền thực nhận</small>
     </div>
     <div class="metric-card p-3">
-      <div class="label">P&L sau Ads</div>
-      <div class="value {% if pnl.pnl_vnd >= 0 %}text-success{% else %}text-danger{% endif %}" style="font-size: 24px;">{{ pnl.pnl_vnd_text }} VNĐ</div>
-      <small class="text-muted">Biên sau Ads: {{ pnl.pnl_margin_percent_text }}</small>
+      <div class="label">% Ads</div>
+      <div class="value text-danger" style="font-size: 24px;">{{ pnl.ads_cost_percent_text }}</div>
+      <small class="text-muted">Chi phí Ads / tiền thực nhận</small>
     </div>
     <div class="metric-card p-3">
-      <div class="label">Chu kỳ tính</div>
-      <div class="value" style="font-size: 24px;">26 → 25</div>
-      <small class="text-muted">Cập nhật theo cache realtime 10 phút</small>
+      <div class="label">Lợi nhuận</div>
+      <div class="value {% if pnl.pnl_vnd >= 0 %}text-success{% else %}text-danger{% endif %}" style="font-size: 24px;">{{ pnl.pnl_vnd_text }} VNĐ</div>
+      <small class="text-muted">Biên lợi nhuận: {{ pnl.pnl_margin_percent_text }}</small>
     </div>
   </div>
+  <div class="text-muted small mt-2">Giá vốn: {{ pnl.cogs_vnd_text }} · Lương: {{ pnl.salary_vnd_text }} · Phí H: {{ pnl.reconcile_column_h_vnd_text }} · Phí J: {{ pnl.reconcile_column_j_vnd_text }} · Kho: {{ pnl.warehouse_shipping_vnd_text }} · Phần mềm: {{ pnl.software_vnd_text }}</div>
 </div>
 {% endif %}
 {% endblock %}

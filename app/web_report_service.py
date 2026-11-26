@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from app.meta_ads_client import MetaAdsClient
 from app.pancake_pos_client import PancakePosClient
+from app.reconcile_cod_sheet_service import ReconcileCodSheetService
 from app.settings import Settings
 from app.thai_duong_cod_client import ThaiDuongCodClient
 from app.utils import load_json, now_utc_iso
@@ -23,6 +24,10 @@ class WebReportService:
     # confirmed after creation, so revenue needs a short history window to
     # find confirmations that happened inside the selected report period.
     REVENUE_LOOKBACK_DAYS = 30
+    PNL_COGS_RATE = 0.16
+    PNL_SALARY_VND = 16_700_000
+    PNL_WAREHOUSE_SHIPPING_VND = 500_000
+    PNL_SOFTWARE_VND = 530_000
 
     def __init__(
         self,
@@ -115,10 +120,26 @@ class WebReportService:
                 start_date=period_start,
                 end_date=period_end,
             )
+            reconcile_costs = self._load_pnl_reconcile_costs(
+                start_date=period_start,
+                end_date=period_end,
+            )
             received_vnd = max(0, int(round(float(cash_received.get("vnd_total") or 0))))
             received_thb = max(0.0, float(cash_received.get("thb_total") or 0.0))
             ads_spend_vnd = max(0, int(ads_spend_vnd))
-            pnl_vnd = received_vnd - ads_spend_vnd
+            cogs_vnd = int(round(float(received_vnd) * self.PNL_COGS_RATE))
+            reconcile_column_h_vnd = max(0, int(reconcile_costs.get("column_h_vnd") or 0))
+            reconcile_column_j_vnd = max(0, int(reconcile_costs.get("column_j_vnd") or 0))
+            total_fixed_costs_vnd = (
+                cogs_vnd
+                + self.PNL_SALARY_VND
+                + ads_spend_vnd
+                + reconcile_column_h_vnd
+                + reconcile_column_j_vnd
+                + self.PNL_WAREHOUSE_SHIPPING_VND
+                + self.PNL_SOFTWARE_VND
+            )
+            pnl_vnd = received_vnd - total_fixed_costs_vnd
             ads_cost_percent = self._calculate_cost_percent(received_vnd, ads_spend_vnd)
             pnl_margin_percent = (
                 round(float(pnl_vnd) / float(received_vnd) * 100.0, 2)
@@ -141,6 +162,21 @@ class WebReportService:
                 "ads_spend_vnd_text": self._fmt_vnd_amount(ads_spend_vnd),
                 "ads_cost_percent": ads_cost_percent,
                 "ads_cost_percent_text": self._fmt_percent(ads_cost_percent),
+                "cogs_rate": self.PNL_COGS_RATE,
+                "cogs_vnd": cogs_vnd,
+                "cogs_vnd_text": self._fmt_vnd_amount(cogs_vnd),
+                "salary_vnd": self.PNL_SALARY_VND,
+                "salary_vnd_text": self._fmt_vnd_amount(self.PNL_SALARY_VND),
+                "reconcile_column_h_vnd": reconcile_column_h_vnd,
+                "reconcile_column_h_vnd_text": self._fmt_vnd_amount(reconcile_column_h_vnd),
+                "reconcile_column_j_vnd": reconcile_column_j_vnd,
+                "reconcile_column_j_vnd_text": self._fmt_vnd_amount(reconcile_column_j_vnd),
+                "warehouse_shipping_vnd": self.PNL_WAREHOUSE_SHIPPING_VND,
+                "warehouse_shipping_vnd_text": self._fmt_vnd_amount(self.PNL_WAREHOUSE_SHIPPING_VND),
+                "software_vnd": self.PNL_SOFTWARE_VND,
+                "software_vnd_text": self._fmt_vnd_amount(self.PNL_SOFTWARE_VND),
+                "total_costs_vnd": total_fixed_costs_vnd,
+                "total_costs_vnd_text": self._fmt_vnd_amount(total_fixed_costs_vnd),
                 "pnl_vnd": pnl_vnd,
                 "pnl_vnd_text": self._fmt_vnd_amount(pnl_vnd),
                 "pnl_margin_percent": pnl_margin_percent,
@@ -150,6 +186,11 @@ class WebReportService:
             with self._cache_lock:
                 self._cache[key] = (time.time(), payload)
             return payload
+
+    def _load_pnl_reconcile_costs(self, *, start_date: date, end_date: date) -> dict[str, Any]:
+        """Read Doi-soat columns H/J for the P&L settlement period."""
+        service = ReconcileCodSheetService(settings=self.settings, logger=self.logger)
+        return service.load_doi_soat_cost_totals(start_date, end_date)
 
     @staticmethod
     def _pnl_period(as_of_date: date) -> tuple[date, date]:

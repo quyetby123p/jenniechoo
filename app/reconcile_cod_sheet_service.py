@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 import json
 import logging
 from pathlib import Path
@@ -86,6 +86,114 @@ class ReconcileCodSheetService:
         if not self.settings.reconcile_cod_sheet_credentials_file.exists():
             return False, f"Không tìm thấy file credentials: {self.settings.reconcile_cod_sheet_credentials_file}"
         return True, ""
+
+    def load_doi_soat_cost_totals(self, start_date: date, end_date: date) -> dict[str, Any]:
+        """Read Doi-soat columns H/J, scoped by the settlement date in column Q."""
+        result: dict[str, Any] = {
+            "ok": False,
+            "source": "google_sheet",
+            "sheet_title": "Doi-soat",
+            "column_h_vnd": 0,
+            "column_j_vnd": 0,
+            "rows_count": 0,
+        }
+        spreadsheet_id = str(self.settings.reconcile_cod_sheet_spreadsheet_id).strip()
+        if not spreadsheet_id:
+            result["error"] = "missing_spreadsheet_id"
+            return result
+
+        try:
+            mode = self._resolve_mode()
+            if mode == "oauth_user":
+                access_token = self._refresh_oauth_user_access_token()
+                headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/json",
+                }
+            elif mode == "service_account":
+                headers = self._build_auth_headers(self.settings.reconcile_cod_sheet_credentials_file)
+            else:
+                result["error"] = "apps_script_mode_not_readable"
+                return result
+
+            metadata = self._request_spreadsheet_metadata(spreadsheet_id, headers=headers)
+            target_sheet: dict[str, Any] | None = None
+            target_gid = self._to_int(self.settings.reconcile_cod_sheet_gid)
+            for sheet in metadata.get("sheets", []):
+                properties = sheet.get("properties", {}) if isinstance(sheet, dict) else {}
+                if self._to_int(properties.get("sheetId")) == target_gid:
+                    target_sheet = properties
+                    break
+            if target_sheet is None:
+                for sheet in metadata.get("sheets", []):
+                    properties = sheet.get("properties", {}) if isinstance(sheet, dict) else {}
+                    if str(properties.get("title", "")).strip().lower() == "doi-soat":
+                        target_sheet = properties
+                        break
+            if target_sheet is None:
+                result["error"] = "doi_soat_sheet_not_found"
+                return result
+
+            sheet_title = str(target_sheet.get("title", "Doi-soat")).strip() or "Doi-soat"
+            result["sheet_title"] = sheet_title
+            encoded_range = quote(f"'{self._escape_sheet_title(sheet_title)}'!A4:Q", safe="")
+            url = f"{self._SHEETS_API_BASE}/{spreadsheet_id}/values/{encoded_range}"
+            payload = self._request_json(
+                "GET",
+                url,
+                headers=headers,
+                params={
+                    "valueRenderOption": "UNFORMATTED_VALUE",
+                    "dateTimeRenderOption": "FORMATTED_STRING",
+                    "majorDimension": "ROWS",
+                },
+            )
+            values = payload.get("values", [])
+            if not isinstance(values, list):
+                result["error"] = "doi_soat_values_missing"
+                return result
+
+            column_h_vnd = 0.0
+            column_j_vnd = 0.0
+            rows_count = 0
+            for row in values:
+                if not isinstance(row, list) or len(row) <= 16:
+                    continue
+                settlement_date = self._parse_sheet_date(row[16])
+                if settlement_date is None or not (start_date <= settlement_date <= end_date):
+                    continue
+                column_h_vnd += float(self._to_sheet_number(row[7], default=0))
+                column_j_vnd += float(self._to_sheet_number(row[9], default=0))
+                rows_count += 1
+
+            result.update(
+                {
+                    "ok": True,
+                    "column_h_vnd": int(round(column_h_vnd)),
+                    "column_j_vnd": int(round(column_j_vnd)),
+                    "rows_count": rows_count,
+                }
+            )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            result["error"] = str(exc)
+            self.logger.warning("Khong doc duoc tong phi cot H/J tab Doi-soat: %s", exc)
+            return result
+
+    @staticmethod
+    def _parse_sheet_date(value: Any) -> date | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(text[:10], fmt).date()
+            except ValueError:
+                continue
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+        except ValueError:
+            return None
 
     def _sync_report_impl(self, report: dict[str, Any], *, result: dict[str, Any]) -> dict[str, Any]:
         records = report.get("records", [])

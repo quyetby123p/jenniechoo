@@ -761,8 +761,8 @@ def load_settings(
         max_value=500,
     )
     report_thb_to_vnd_rate = _parse_optional_float(
-        os.getenv("REPORT_THB_TO_VND_RATE", "810"),
-        default=810.0,
+        os.getenv("REPORT_THB_TO_VND_RATE", "750"),
+        default=750.0,
     )
     report_thb_minor_unit_factor = _parse_int_with_range(
         os.getenv("REPORT_THB_MINOR_UNIT_FACTOR", "100"),

@@ -777,9 +777,38 @@ def test_pnl_uses_latest_reconcile_session_and_26_to_25_cycle(tmp_path: Path) ->
     assert pnl["actual_received_thb"] == 1700.0
     assert pnl["actual_received_vnd"] == 1_309_000
     assert pnl["ads_spend_vnd"] == 2_000_000
-    assert pnl["pnl_vnd"] == -691_000
+    assert pnl["cogs_vnd"] == 209_440
+    assert pnl["pnl_vnd"] == -18_630_440
     assert pnl["reconcile_session_count"] == 2
     assert WebReportService._pnl_period(date(2026, 11, 20)) == (date(2026, 10, 26), date(2026, 11, 20))
+
+
+def test_pnl_includes_doi_soat_fees_and_fixed_operating_costs(tmp_path: Path) -> None:
+    settings = _dummy_settings(tmp_path, report_thb_to_vnd_rate=750.0)
+    service = WebReportService(
+        settings=settings,
+        logger=logging.getLogger("test"),
+        pancake_client=_FakePancakeClient([]),
+        meta_client=_FakeMetaClient(spend_vnd=100_000),
+    )
+    service._load_pnl_cash_received = lambda **_kwargs: {  # type: ignore[method-assign]
+        "thb_total": 1000.0,
+        "vnd_total": 770_000,
+        "session_count": 1,
+    }
+    service._load_pnl_reconcile_costs = lambda **_kwargs: {  # type: ignore[method-assign]
+        "column_h_vnd": 200_000,
+        "column_j_vnd": 300_000,
+        "rows_count": 2,
+    }
+
+    pnl = service.get_pnl(date(2026, 11, 26))
+
+    assert pnl["ads_cost_percent"] == 12.99
+    assert pnl["cogs_vnd"] == 123_200
+    assert pnl["reconcile_column_h_vnd"] == 200_000
+    assert pnl["reconcile_column_j_vnd"] == 300_000
+    assert pnl["pnl_vnd"] == -17_683_200
 
 
 def test_pnl_prefers_live_reconcile_session_history(tmp_path: Path) -> None:
