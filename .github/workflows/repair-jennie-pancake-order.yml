@@ -39,7 +39,10 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
       PANCAKE_API_BASE_URL: ${{ secrets.PANCAKE_API_BASE_URL || 'https://pos.pancake.vn/api/v1' }}
-      PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      # Reuse the existing secret slot as API key; do not send it as an
+      # access_token because Pancake rejects that credential type with error 102.
+      PANCAKE_API_KEY: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      PANCAKE_ACCESS_TOKEN: ""
       PANCAKE_SHOP_ID: ${{ secrets.PANCAKE_SHOP_ID }}
       DROPO_PANCAKE_SKU_MAP_PATH: "pancake:"
 
@@ -60,7 +63,7 @@ jobs:
       - name: Check required secrets
         shell: bash
         run: |
-          test -n "$PANCAKE_ACCESS_TOKEN" || { echo "Thiếu PANCAKE_ACCESS_TOKEN"; exit 1; }
+          test -n "$PANCAKE_API_KEY" || { echo "Thiếu PANCAKE_API_KEY"; exit 1; }
           test -n "$PANCAKE_SHOP_ID" || { echo "Thiếu PANCAKE_SHOP_ID"; exit 1; }
 
       - name: Repair order variation

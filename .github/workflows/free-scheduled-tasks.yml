@@ -165,8 +165,11 @@ jobs:
       ADS2_THAI_DUONG_AUTO_AUTH_STATE_PATH: ${{ secrets.ADS2_THAI_DUONG_AUTO_AUTH_STATE_PATH }}
       ADS2_THAI_DUONG_ORDER_PAYLOAD_TEMPLATE_PATH: ${{ secrets.ADS2_THAI_DUONG_ORDER_PAYLOAD_TEMPLATE_PATH }}
       PANCAKE_API_BASE_URL: ${{ secrets.PANCAKE_API_BASE_URL }}
-      PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
-      PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      # Repository đã đủ 100 secrets nên PANCAKE_ACCESS_TOKEN đang giữ API key.
+      # Để PancakePosClient gửi đúng tham số api_key, không đưa secret này vào
+      # biến access_token nữa.
+      PANCAKE_API_KEY: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      PANCAKE_ACCESS_TOKEN: ""
       PANCAKE_SHOP_ID: ${{ secrets.PANCAKE_SHOP_ID }}
       PANCAKE_PAGE_SIZE: ${{ secrets.PANCAKE_PAGE_SIZE }}
       REPORT_THB_TO_VND_RATE: ${{ secrets.REPORT_THB_TO_VND_RATE }}

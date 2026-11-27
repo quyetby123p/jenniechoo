@@ -35,8 +35,10 @@ jobs:
 
       # Main profile is the Jennie Choo Pancake shop.
       PANCAKE_API_BASE_URL: ${{ secrets.PANCAKE_API_BASE_URL || 'https://pos.pancake.vn/api/v1' }}
-      PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
-      PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      # PANCAKE_ACCESS_TOKEN is the existing repository secret slot containing
+      # the API key; keep legacy access-token auth empty.
+      PANCAKE_API_KEY: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      PANCAKE_ACCESS_TOKEN: ""
       PANCAKE_SHOP_ID: ${{ secrets.PANCAKE_SHOP_ID }}
       PANCAKE_PAGE_SIZE: ${{ secrets.PANCAKE_PAGE_SIZE || '200' }}
 

@@ -227,7 +227,7 @@ class DropoPancakeBridge:
         if missing:
             return False, "Thiếu cấu hình: " + ", ".join(missing)
         if not self.pancake.is_configured():
-            return False, "Thiếu PANCAKE_SHOP_ID hoặc PANCAKE_ACCESS_TOKEN."
+            return False, "Thiếu PANCAKE_SHOP_ID hoặc PANCAKE_ACCESS_TOKEN/PANCAKE_API_KEY."
         if not self.sku_map:
             return False, f"Không đọc được SKU map tại {self.config.sku_map_path!r}."
         return True, ""
