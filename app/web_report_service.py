@@ -51,6 +51,7 @@ class WebReportService:
         self._snapshot_build_lock = Lock()
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._cashflow_refs_cache: tuple[float, set[str]] | None = None
+        self._thai_duong_orders_cache: tuple[float, list[dict[str, Any]] | None] | None = None
         self._last_ads_insight_rows: list[dict[str, Any]] | None = None
 
     def get_snapshot(self, start_date: date, end_date: date | None = None) -> dict[str, Any]:
@@ -1190,14 +1191,11 @@ class WebReportService:
         if not isinstance(endpoint_cfg, dict) or not endpoint_cfg:
             return None
 
-        try:
-            rows = self.thai_duong.fetch_orders_for_sync(  # type: ignore[attr-defined]
-                endpoint_cfg,
-                search_text="",
-                extra_filters=self._thai_duong_lookup_filters(td_cfg),
-            )
-        except Exception as exc:  # noqa: BLE001
-            self.logger.warning("Khong lay duoc danh sach don Thai Duong cho web report: %s", exc)
+        rows = self._fetch_thai_duong_orders_for_web_report(
+            endpoint_cfg,
+            extra_filters=self._thai_duong_lookup_filters(td_cfg),
+        )
+        if rows is None:
             return None
         if not isinstance(rows, list):
             return []
@@ -1312,20 +1310,12 @@ class WebReportService:
         if not isinstance(endpoint_cfg, dict) or not endpoint_cfg:
             return None
 
-        filters = dict(self._thai_duong_lookup_filters(td_cfg))
-        filters["paymentCodDateFrom"] = start_date.isoformat()
-        filters["paymentCodDateTo"] = end_date.isoformat()
-        try:
-            rows = self.thai_duong.fetch_orders_for_sync(  # type: ignore[attr-defined]
-                endpoint_cfg,
-                search_text="",
-                extra_filters=filters,
-            )
-        except Exception as exc:  # noqa: BLE001
-            self.logger.warning("Khong lay duoc Dong tien Thai Duong live cho web report: %s", exc)
+        rows = self._fetch_thai_duong_orders_for_web_report(
+            endpoint_cfg,
+            extra_filters=self._thai_duong_lookup_filters(td_cfg),
+        )
+        if rows is None:
             return None
-        if not isinstance(rows, list):
-            return []
 
         eligible_td_statuses = self._to_text_set(
             status_cfg.get(
@@ -1401,6 +1391,47 @@ class WebReportService:
                 reverse=True,
             )
         )
+
+    def _fetch_thai_duong_orders_for_web_report(
+        self,
+        endpoint_cfg: dict[str, Any],
+        *,
+        extra_filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]] | None:
+        """Fetch live Thai Duong rows once per refresh window.
+
+        The dashboard asks for both pending and received reconciliation views.
+        Reusing the same bounded request prevents two slow upstream calls from
+        exhausting the Render worker timeout.
+        """
+        now_ts = time.time()
+        with self._cache_lock:
+            cached = self._thai_duong_orders_cache
+            if cached is not None:
+                cached_ts, cached_rows = cached
+                if now_ts - cached_ts < float(self.settings.web_report_refresh_seconds):
+                    return list(cached_rows) if cached_rows is not None else None
+
+        bounded_endpoint_cfg = {
+            **endpoint_cfg,
+            "timeout_seconds": getattr(self.settings, "web_report_thai_duong_timeout_seconds", 8),
+        }
+        try:
+            rows = self.thai_duong.fetch_orders_for_sync(  # type: ignore[attr-defined]
+                bounded_endpoint_cfg,
+                search_text="",
+                extra_filters=extra_filters or {},
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Khong lay duoc danh sach don Thai Duong cho web report: %s", exc)
+            with self._cache_lock:
+                self._thai_duong_orders_cache = (time.time(), None)
+            return None
+
+        normalized_rows = [item for item in rows if isinstance(item, dict)] if isinstance(rows, list) else []
+        with self._cache_lock:
+            self._thai_duong_orders_cache = (time.time(), normalized_rows)
+        return list(normalized_rows)
 
     def _load_pancake_td_sync_config(self) -> dict[str, Any]:
         payload = self._safe_read_json(self.settings.pancake_td_sync_config_path)

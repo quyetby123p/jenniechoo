@@ -111,6 +111,7 @@ class Settings:
     pancake_td_sync_product_refresh_minutes: int = 30
     pancake_td_sync_state_path: str = "storage/pancake_td_sync/state.json"
     web_report_refresh_seconds: int = 600
+    web_report_thai_duong_timeout_seconds: int = 8
     web_report_status_map_path: str = "config/web_report_status_map.json"
     web_report_source_costs_path: str = "config/web_report_source_costs.json"
     web_report_api_token: str = ""
@@ -960,6 +961,12 @@ def load_settings(
         min_value=30,
         max_value=3600,
     )
+    web_report_thai_duong_timeout_seconds = _parse_int_with_range(
+        os.getenv("WEB_REPORT_THAI_DUONG_TIMEOUT_SECONDS", "8"),
+        default=8,
+        min_value=3,
+        max_value=30,
+    )
     web_report_status_map_path = os.getenv(
         "WEB_REPORT_STATUS_MAP_PATH",
         "config/web_report_status_map.json",
@@ -1192,6 +1199,7 @@ def load_settings(
         pancake_td_sync_product_refresh_minutes=pancake_td_sync_product_refresh_minutes,
         pancake_td_sync_state_path=pancake_td_sync_state_path,
         web_report_refresh_seconds=web_report_refresh_seconds,
+        web_report_thai_duong_timeout_seconds=web_report_thai_duong_timeout_seconds,
         web_report_status_map_path=web_report_status_map_path,
         web_report_source_costs_path=web_report_source_costs_path,
         web_report_api_token=web_report_api_token,

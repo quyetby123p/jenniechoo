@@ -13,6 +13,8 @@ services:
         value: Asia/Ho_Chi_Minh
       - key: WEB_REPORT_REFRESH_SECONDS
         value: "600"
+      - key: WEB_REPORT_THAI_DUONG_TIMEOUT_SECONDS
+        value: "8"
       - key: WEB_REPORT_HOST
         value: 0.0.0.0
       - key: WEB_REPORT_SOURCE_COSTS_PATH

@@ -1507,11 +1507,11 @@ def test_reconcile_received_uses_live_cashflow_rows_mapped_to_pancake(tmp_path: 
         "JC-RECEIVED-2",
         "JC-RECEIVED-3",
     }
-    assert fake_td.calls[-1]["extra_filters"] == {
-        "partnerCode": "THA356",
-        "paymentCodDateFrom": "2026-06-01",
-        "paymentCodDateTo": "2026-06-03",
-    }
+    # Pending and received views reuse one bounded live request per refresh
+    # window; the received rows are filtered by payment date locally.
+    assert fake_td.calls[-1]["extra_filters"] == {"partnerCode": "THA356"}
+    assert len(fake_td.calls) == 1
+    assert fake_td.calls[0]["endpoint_cfg"]["timeout_seconds"] == 8
 
 
 def test_live_reconcile_accepts_thai_duong_display_status_labels(tmp_path: Path) -> None:

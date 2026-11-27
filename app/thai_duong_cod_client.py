@@ -721,6 +721,10 @@ class ThaiDuongCodClient:
         page_param = str(endpoint_cfg.get("page_param", "page")).strip() or "page"
         page_size_param = str(endpoint_cfg.get("page_size_param", "limit")).strip() or "limit"
         page_size = self._to_int(endpoint_cfg.get("page_size"), fallback=200)
+        try:
+            timeout_seconds = max(1.0, min(30.0, float(endpoint_cfg.get("timeout_seconds", 30))))
+        except (TypeError, ValueError):
+            timeout_seconds = 30.0
 
         search_field = str(endpoint_cfg.get("search_field", "searchText")).strip() or "searchText"
         filters_field = str(endpoint_cfg.get("filters_field", "filters")).strip() or "filters"
@@ -765,13 +769,27 @@ class ThaiDuongCodClient:
                         else:
                             self._set_path(data, key_name, value)
 
-            payload = self._request_json(
-                method=method,
-                url=f"{base_url}{path}",
-                headers=headers,
-                params=params,
-                data=data,
-            )
+            try:
+                payload = self._request_json(
+                    method=method,
+                    url=f"{base_url}{path}",
+                    headers=headers,
+                    params=params,
+                    data=data,
+                    timeout_seconds=timeout_seconds,
+                )
+            except TypeError as exc:
+                # Keep compatibility with older test doubles/custom clients
+                # that still implement the five-argument request hook.
+                if "timeout_seconds" not in str(exc):
+                    raise
+                payload = self._request_json(
+                    method=method,
+                    url=f"{base_url}{path}",
+                    headers=headers,
+                    params=params,
+                    data=data,
+                )
             page_rows = self._extract_list(payload, result_path)
             rows.extend(item for item in page_rows if isinstance(item, dict))
             if has_next_page_path:
@@ -983,14 +1001,16 @@ class ThaiDuongCodClient:
         headers: dict[str, str],
         params: dict[str, Any] | None,
         data: dict[str, Any] | None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
+        timeout = 30.0 if timeout_seconds is None else max(1.0, float(timeout_seconds))
         response = requests.request(
             method=method,
             url=url,
             headers=headers,
             params=params,
             json=data if data else None,
-            timeout=30,
+            timeout=timeout,
         )
         if response.status_code >= 400:
             raise ValidationError(
