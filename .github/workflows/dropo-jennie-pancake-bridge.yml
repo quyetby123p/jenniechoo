@@ -27,7 +27,10 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
       PANCAKE_API_BASE_URL: ${{ secrets.PANCAKE_API_BASE_URL || 'https://pos.pancake.vn/api/v1' }}
-      PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+      # API key is the credential for this bridge. Keep the legacy token out of
+      # the process so an expired PANCAKE_ACCESS_TOKEN cannot override it.
+      PANCAKE_ACCESS_TOKEN: ""
+      PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
       PANCAKE_SHOP_ID: ${{ secrets.PANCAKE_SHOP_ID }}
       DROPO_PANCAKE_OAUTH_CLIENT_ID: ${{ secrets.DROPO_PANCAKE_OAUTH_CLIENT_ID || secrets.RECONCILE_COD_SHEET_OAUTH_CLIENT_ID || secrets.BOT3_GOOGLE_OAUTH_CLIENT_ID }}
       DROPO_PANCAKE_OAUTH_CLIENT_SECRET: ${{ secrets.DROPO_PANCAKE_OAUTH_CLIENT_SECRET || secrets.RECONCILE_COD_SHEET_OAUTH_CLIENT_SECRET || secrets.BOT3_GOOGLE_OAUTH_CLIENT_SECRET }}
@@ -58,7 +61,7 @@ jobs:
         shell: bash
         run: |
           missing=()
-          for key in PANCAKE_ACCESS_TOKEN PANCAKE_SHOP_ID DROPO_PANCAKE_OAUTH_CLIENT_ID DROPO_PANCAKE_OAUTH_CLIENT_SECRET DROPO_PANCAKE_OAUTH_REFRESH_TOKEN; do
+          for key in PANCAKE_API_KEY PANCAKE_SHOP_ID DROPO_PANCAKE_OAUTH_CLIENT_ID DROPO_PANCAKE_OAUTH_CLIENT_SECRET DROPO_PANCAKE_OAUTH_REFRESH_TOKEN; do
             if [ -z "${!key}" ]; then missing+=("$key"); fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
