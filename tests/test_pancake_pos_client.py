@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.exceptions import PancakeApiError, ValidationError
-from app.pancake_pos_client import PancakePosClient
+from app.pancake_pos_client import PancakePosClient, normalize_pancake_access_token
 from app.settings import Settings
 
 
@@ -108,6 +108,46 @@ def test_request_uses_access_token_when_available(tmp_path: Path, monkeypatch: p
     shops = client.list_shops()
     assert shops == []
     assert captured_params.get("access_token") == "token_dummy"
+
+
+def test_normalize_pancake_access_token_extracts_nested_jwt_access_token() -> None:
+    import base64
+    import json
+
+    payload = {"accessToken": "inner-pancake-token"}
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    wrapped = f"header.{encoded}.signature"
+
+    assert normalize_pancake_access_token(wrapped) == "inner-pancake-token"
+
+
+def test_request_uses_nested_pancake_access_token_from_wrapper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import base64
+    import json
+
+    payload = {"accessToken": "inner-pancake-token"}
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    wrapped = f"header.{encoded}.signature"
+    settings = _dummy_settings(tmp_path, pancake_api_key="", pancake_access_token=wrapped)
+    client = PancakePosClient(settings=settings, logger=logging.getLogger("test"))
+    captured_params: dict[str, object] = {}
+
+    class _FakeResponse:
+        status_code = 200
+        text = '{"success": true, "shops": []}'
+
+    def fake_http_request(method: str, url: str, *, params=None, json=None, timeout=None):  # noqa: ANN001
+        del method, url, json, timeout
+        captured_params.update(params or {})
+        return _FakeResponse()
+
+    monkeypatch.setattr("app.pancake_pos_client.requests.request", fake_http_request)
+    client.list_shops()
+
+    assert captured_params.get("access_token") == "inner-pancake-token"
 
 
 def test_fetch_all_orders_for_range_returns_all_pages(tmp_path: Path) -> None:

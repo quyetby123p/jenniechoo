@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import copy
 from datetime import date, datetime, timedelta, timezone
 import json
@@ -11,6 +13,48 @@ import requests
 
 from app.exceptions import PancakeApiError, ValidationError
 from app.settings import Settings
+
+
+def normalize_pancake_access_token(value: str) -> str:
+    """Return the Pancake token from a raw token or a wrapped credential.
+
+    The Pancake credential copied from the POS console can be an outer JSON/JWT
+    envelope whose payload contains the actual API token in ``accessToken``.
+    Sending that envelope to Pancake produces error 102 (``access_token is
+    invalid``). Raw tokens remain unchanged for backwards compatibility.
+    """
+
+    def _unwrap(raw_value: str, depth: int = 0) -> str:
+        raw = str(raw_value or "").strip()
+        if not raw or depth > 2:
+            return raw
+
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            for key in ("accessToken", "access_token", "token"):
+                nested = parsed.get(key)
+                if isinstance(nested, str) and nested.strip():
+                    return _unwrap(nested, depth + 1)
+
+        parts = raw.split(".")
+        if len(parts) == 3:
+            try:
+                payload_segment = parts[1] + "=" * (-len(parts[1]) % 4)
+                payload = json.loads(base64.urlsafe_b64decode(payload_segment).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError, binascii.Error, json.JSONDecodeError):
+                payload = None
+            if isinstance(payload, dict):
+                for key in ("accessToken", "access_token", "token"):
+                    nested = payload.get(key)
+                    if isinstance(nested, str) and nested.strip():
+                        return _unwrap(nested, depth + 1)
+
+        return raw
+
+    return _unwrap(value)
 
 
 class PancakePosClient:
@@ -40,7 +84,9 @@ class PancakePosClient:
         request_params = dict(params or {})
         request_data = dict(data or {})
         if self.settings.pancake_access_token:
-            request_params["access_token"] = self.settings.pancake_access_token
+            request_params["access_token"] = normalize_pancake_access_token(
+                self.settings.pancake_access_token
+            )
         else:
             request_params["api_key"] = self.settings.pancake_api_key
 
