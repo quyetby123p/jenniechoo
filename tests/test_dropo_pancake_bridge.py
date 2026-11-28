@@ -664,6 +664,24 @@ def test_geo_match_uu_tien_dia_chi_khi_zip_lech():
     assert chosen["id"] == "sangkha"
 
 
+def test_geo_match_ten_phuong_co_tien_to_thai_khi_dia_chi_tach_marker():
+    bridge, _, _ = build_bridge([HEADER])
+    rows = [
+        {"id": "คลองสอง", "name": "ตำบลคลองสอง", "postcode": [12120]},
+        {"id": "คลองสาม", "name": "ตำบลคลองสาม", "postcode": [12120]},
+    ]
+
+    chosen = bridge._choose_geo_row(
+        rows,
+        "",
+        bridge._norm_geo_match("72/20 ตำบล/แขวง คลองสอง อำเภอ/เขต คลองหลวง"),
+        postcode="12120",
+        administrative_markers=("แขวง", "ตำบล", "ต.", "tambon", "subdistrict"),
+    )
+
+    assert chosen["id"] == "คลองสอง"
+
+
 # ───────────────────────────── build_payload ─────────────────────────────
 
 

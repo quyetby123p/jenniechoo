@@ -1218,6 +1218,25 @@ class DropoPancakeBridge:
                 value_key = cls._norm_geo_match(value)
                 if value_key:
                     result.append(value_key)
+                    # Pancake sometimes returns Thai administrative prefixes
+                    # in the name itself (e.g. ``ตำบลคลองสอง``), while the
+                    # checkout address commonly uses the marker separately
+                    # (``ตำบล/แขวง คลองสอง``). Keep both forms so the same
+                    # location can be matched in either representation.
+                    for prefix in (
+                        "จังหวัด",
+                        "อำเภอ",
+                        "เขต",
+                        "ตำบล",
+                        "แขวง",
+                        "จ.",
+                        "อ.",
+                        "ต.",
+                    ):
+                        prefix_key = cls._norm_geo_match(prefix)
+                        if value_key.startswith(prefix_key) and len(value_key) > len(prefix_key):
+                            result.append(value_key[len(prefix_key) :])
+                            break
             return result
 
         preferred_key = cls._norm_geo_match(preferred_name)
