@@ -885,6 +885,8 @@ class DropoPancakeBridge:
             raw_address=raw_address,
             province=province,
             post_code=post_code,
+            district=str(get("Quận/Huyện", "district_name", "quan_huyen", "c_quan_huyen")).strip(),
+            commune=str(get("Phường/Xã", "commune_name", "phuong_xa", "c_phuong_xa")).strip(),
         )
         # The JC order-book has both the source `ma_don` and a separate
         # `Order ID` column populated later with the Pancake numeric ID. Pick
@@ -1077,6 +1079,8 @@ class DropoPancakeBridge:
         raw_address: str,
         province: str,
         post_code: str,
+        district: str = "",
+        commune: str = "",
     ) -> dict[str, Any]:
         """Bổ sung ID địa chỉ Pancake để đơn không bị báo thiếu địa chỉ.
 
@@ -1137,7 +1141,7 @@ class DropoPancakeBridge:
         district_rows = self._geo_rows("districts", province_id, "")
         district_row = self._choose_geo_row(
             district_rows,
-            "",
+            district,
             address_key,
             postcode=postcode,
             administrative_markers=("เขต", "อำเภอ", "อ.", "khet", "amphoe", "district"),
@@ -1160,7 +1164,7 @@ class DropoPancakeBridge:
         commune_rows = self._geo_rows("communes", province_id, district_id)
         commune_row = self._choose_geo_row(
             commune_rows,
-            "",
+            commune,
             address_key,
             postcode=postcode,
             administrative_markers=("แขวง", "ตำบล", "ต.", "khwaeng", "tambon", "subdistrict"),

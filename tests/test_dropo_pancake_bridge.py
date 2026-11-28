@@ -733,6 +733,24 @@ def test_payload_tu_lay_zip_5_so_o_cuoi_dia_chi_thai():
     assert payload["shipping_address"]["commune_id"] == "66_R0000014"
 
 
+def test_payload_uu_tien_phuong_xa_va_quan_huyen_da_co_tren_sheet():
+    header = HEADER + ["จังหวัด / Province", "Quận/Huyện", "Phường/Xã"]
+    row = make_row(**{
+        "ที่อยู่เต็ม / Address + ZIP": "889/7 อาคารพักอาศัย 10120",
+        "รหัสไปรษณีย์ / ZIP": "",
+    }) + ["กรุงเทพมหานคร", "ยานนาวา", "บางโพงพาง"]
+    bridge, _, _ = build_bridge(
+        [header],
+        pancake=GeoFakePancake(),
+        sku_map=SKU_MAP,
+    )
+
+    payload = bridge.build_order_payload(row, header)
+
+    assert payload["shipping_address"]["district_id"] == "66_R589"
+    assert payload["shipping_address"]["commune_id"] == "66_R0000014"
+
+
 def test_jc_online_paid_order_ghi_nhan_tien_da_thanh_toan_bang_the():
     bridge, _, _ = build_bridge([HEADER])
     row = make_row(**{"Phương thức thanh toán": "online_card", "Trạng thái thanh toán": "paid"})
