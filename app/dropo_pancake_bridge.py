@@ -1157,6 +1157,27 @@ class DropoPancakeBridge:
             administrative_markers=("แขวง", "ตำบล", "ต.", "khwaeng", "tambon", "subdistrict"),
         )
         if not commune_row:
+            self.logger.warning(
+                "Không map được phường/xã Pancake: province=%s district=%s postcode=%s "
+                "rows=%s sample=%s",
+                province_id,
+                district_id,
+                postcode,
+                len(commune_rows),
+                json.dumps(
+                    [
+                        {
+                            "id": row.get("id"),
+                            "name": row.get("name"),
+                            "name_en": row.get("name_en"),
+                            "keys": sorted(str(key) for key in row.keys()),
+                        }
+                        for row in commune_rows[:20]
+                    ],
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            )
             raise ValidationError(
                 "không chuẩn hóa được phường/xã địa chỉ Thái từ địa chỉ tự do; "
                 "bổ sung tên phường/xã trong ô địa chỉ"
