@@ -1095,6 +1095,15 @@ class DropoPancakeBridge:
             return shipping_address
 
         postcode = re.sub(r"\D", "", str(post_code or ""))
+        # Some JC sheet rows contain the ZIP only at the end of the free-text
+        # address (or arrive with a header variant that is not mapped). Keep
+        # the geo lookup deterministic by recovering a Thai 5-digit postcode
+        # from that address instead of discarding an otherwise valid order.
+        if not postcode:
+            postcode_candidates = re.findall(r"(?<!\d)\d{5}(?!\d)", str(raw_address or ""))
+            if postcode_candidates:
+                postcode = postcode_candidates[-1]
+                shipping_address["post_code"] = postcode
         address_key = self._norm_geo_match(raw_address)
         province_rows = self._geo_rows("provinces", "", "")
         province_from_address = self._choose_geo_row(
