@@ -1211,8 +1211,30 @@ class DropoPancakeBridge:
 
         def names(row: dict[str, Any]) -> list[str]:
             raw: list[Any] = []
-            for value in (row.get("name"), row.get("name_en")):
-                raw.extend(str(value).split("/") if value is not None else [])
+            # Pancake documents ``name``/``name_en``. Some Thailand geo rows
+            # also expose a level-specific alias, so accept those aliases
+            # instead of silently missing a valid commune.
+            for key in (
+                "name",
+                "name_en",
+                "name_th",
+                "province_name",
+                "district_name",
+                "commune_name",
+                "commnue_name",
+                "ward_name",
+                "subdistrict_name",
+                "label",
+                "title",
+            ):
+                value = row.get(key)
+                if isinstance(value, dict):
+                    raw.extend(value.values())
+                elif isinstance(value, (list, tuple, set)):
+                    raw.extend(value)
+                elif value is not None:
+                    raw.append(value)
+            raw = [part for value in raw for part in str(value).split("/")]
             result: list[str] = []
             for value in raw:
                 value_key = cls._norm_geo_match(value)
@@ -1251,7 +1273,13 @@ class DropoPancakeBridge:
         postcode_rows = [
             row
             for row in rows
-            if postcode and postcode in {str(code).strip() for code in (row.get("postcode") or [])}
+            if postcode
+            and postcode
+            in {
+                str(code).strip()
+                for code in cls._geo_postcode_values(row)
+                if str(code).strip()
+            }
         ]
         address_hits = [
             row
@@ -1298,6 +1326,17 @@ class DropoPancakeBridge:
         if len(postcode_rows) == 1:
             return postcode_rows[0]
         return None
+
+    @staticmethod
+    def _geo_postcode_values(row: dict[str, Any]) -> list[Any]:
+        """Return postcode values from current and legacy geo response shapes."""
+        for key in ("postcode", "post_code", "postal_code", "zip_code"):
+            value = row.get(key)
+            if isinstance(value, (list, tuple, set)):
+                return list(value)
+            if value not in (None, ""):
+                return [value]
+        return []
 
     # ──────────────────────────── sheet ─────────────────────────────
 

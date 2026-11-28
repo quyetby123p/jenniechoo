@@ -682,6 +682,24 @@ def test_geo_match_ten_phuong_co_tien_to_thai_khi_dia_chi_tach_marker():
     assert chosen["id"] == "คลองสอง"
 
 
+def test_geo_match_nhan_alias_phuong_xa_va_zip_dang_chuoi():
+    bridge, _, _ = build_bridge([HEADER])
+    rows = [
+        {"id": "คลองสอง", "ward_name": "ตำบลคลองสอง", "postal_code": "12120"},
+        {"id": "คลองสาม", "ward_name": "ตำบลคลองสาม", "postal_code": "12120"},
+    ]
+
+    chosen = bridge._choose_geo_row(
+        rows,
+        "",
+        bridge._norm_geo_match("ตำบล/แขวง คลองสอง อำเภอ/เขต คลองหลวง"),
+        postcode="12120",
+        administrative_markers=("แขวง", "ตำบล", "ต."),
+    )
+
+    assert chosen["id"] == "คลองสอง"
+
+
 # ───────────────────────────── build_payload ─────────────────────────────
 
 
